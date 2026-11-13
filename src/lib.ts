@@ -163,6 +163,14 @@ export function localSearch(question: string, docs: Policy[]): Array<Policy & { 
     if (/신청/.test(question) && /연차/.test(d.body)) score += 4;
     if (/며칠 전|언제까지|기한/.test(question) && /일 전|주 전/.test(d.body)) score += 6;
     if (/며칠 전|언제까지/.test(question) && /3일 전/.test(d.body)) score += 4;
+    // 한영 교차 보정 (회수 튜닝): 전사본이 영문인데 질문이 한글인 경우
+    // (Nokia 사례 — "They reduced networking troubleshooting time by
+    // over 80%"인데 질문 토큰은 "Nokia" 1점뿐이라 D1이 못 찾는다).
+    // 식별력 있는 용어만 연결한다 — "시간"·"문서"처럼 흔한 말은 빼서,
+    // 관련 없는 영문 chunk가 게이트를 통과하지 않게 한다.
+    if (/네트워크/.test(question) && /network/i.test(d.body)) score += 5;
+    if (/문제|해결/.test(question) && /troubleshoot/i.test(d.body)) score += 5;
+    if (/줄|감소|단축/.test(question) && /reduc/i.test(d.body)) score += 5;
     const snippet = d.body.slice(0, 220);
     return { ...d, score, snippet };
   });

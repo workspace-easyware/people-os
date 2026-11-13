@@ -1141,15 +1141,19 @@ app.post("/api/ask", async (c) => {
   }
   mark("session", sessionStart);
 
-  // 근거 검색: 질문을 임베딩해 Vectorize에서 검색 → 실패 시 D1 조문 텍스트 검색 폴백
-  // C5 (Baryon AX): Vectorize 점수 하한 SCORE_FLOOR를 적용한다. 조회는
-  // 성공했는데 하한을 넘는 근거가 없으면 근거가 없는 것이므로 D1 폴백·LLM
-  // 호출 없이 grounded:false로 답한다 (근거를 지어내지 않는다).
-  // C5 Phase 2: 검색 전에 lazy 시딩을 보장하고, 하한을 통과한 매치에
-  // 키워드 게이트를 한 번 더 건다 (코사인 점수만으로는 한국어를 못 가린다).
+  // 근거 검색 — 하이브리드 (회수 튜닝): Vectorize + D1 키워드 검색을 합친다.
+  // Vectorize만 쓰면 topK 밖 순위의 chunk를 못 가져온다. 문장형 질문은
+  // 임베딩 점수가 흩어져 맞는 chunk가 4위 이하로 밀리는데, 그때도 정책
+  // chunk 3개가 하한·게이트를 통과하면 D1을 볼 기회가 없었다 (Nokia·DOCX
+  // 빗나감). 그래서 Vectorize 후보를 topK 5로 넓히고, D1 키워드 검색을
+  // 항상 돌려 Vectorize에 없는 chunk를 보충한다. D1은 키워드 게이트와
+  // 같은 하한(≥2)을 적용하므로 안전망 수준은 같고, 이미 있는 chunk는
+  // 빼고 최대 MAX_SOURCES개까지만 쓴다. 근거가 아예 없으면
+  // grounded:false로 LLM 미호출 — 지어내기 금지는 그대로 (C5).
+  const MAX_SOURCES = 5;
   let sources: Source[] = [];
   let searchEngine = "d1-text";
-  let noEvidence = false; // Vectorize가 성공했는데 하한을 넘는 근거가 없음
+  let d1FallbackRan = false; // Vectorize/AI 실패 시 D1 폴백이 이미 돎
   try {
     await ensureVectorSeeded(c.env);
     const embedStart = Date.now();
@@ -1158,40 +1162,41 @@ app.post("/api/ask", async (c) => {
     const raw = emb.data;
     const values = new Float32Array(Array.isArray(raw[0]) ? (raw[0] as number[]) : (raw as number[]));
     const vecStart = Date.now();
-    const vec = await c.env.VECTOR.query(values, { topK: 3, returnMetadata: "all" });
+    const vec = await c.env.VECTOR.query(values, { topK: 5, returnMetadata: "all" });
     mark("vectorize", vecStart);
     const all = vec.matches || [];
     const matches = all.filter((m) => (m.score || 0) >= SCORE_FLOOR);
     if (matches.length > 0) {
       const gateStart = Date.now();
       const gated = await keywordGate(c.env, searchQuestion, matches.map((m) => ({ id: String(m.id), score: m.score || 0, metadata: (m.metadata || {}) as Record<string, unknown> })));
-      if (gated.length === 0) {
-        noEvidence = true; // Vectorize는 찾았으나 키워드 관련성 없음 — 아래 noEvidence 분기에서 D1으로 한 번 더 본다
-      } else {
+      if (gated.length > 0) {
         searchEngine = "vectorize";
         sources = await resolveSources(c.env, searchQuestion, gated);
         if (sources.length === 0) throw new Error("no resolvable matches");
       }
       mark("gate", gateStart);
-    } else if (all.length > 0) {
-      noEvidence = true; // 하한 이하 — 근거 없음 확정, 아래 noEvidence 분기에서 D1으로 한 번 더 본다
-    } else {
-      throw new Error("no vectorize matches");
     }
+    // 하한·게이트를 통과한 매치가 없어도 아래 D1 병합이 본다.
   } catch {
-    if (!noEvidence) {
+    // Vectorize/AI 실패 — D1 텍스트 검색으로 답한다 (로컬 dev 경로).
+    // minScore 0: 기존 동작 유지 (약한 겹침도 로컬에서는 근거로 쓴다).
+    if (sources.length === 0) {
       sources = await d1TextSources(c.env, searchQuestion);
       if (sources.length > 0) searchEngine = "d1-text";
+      d1FallbackRan = true;
     }
   }
-  // C5-b: Vectorize에서 쓸 만한 근거를 못 찾았어도(noEvidence) D1 텍스트
-  // 검색으로 한 번 더 본다. 암묵지 문서는 Vectorize upsert가 늦거나 실패해도
-  // D1 chunk에는 있으므로 여기서 잡힌다. 키워드 게이트와 같은 하한(≥2)을
-  // 적용해, 관련 없는 질문이 정책 chunk에서 근거를 얻지는 않게 한다.
-  // (실측: "출산 전후 재택"은 정책 chunk 전원 0점, 암묵지 chunk 27점.)
-  if (sources.length === 0 && noEvidence) {
-    const d1 = await d1TextSources(c.env, searchQuestion, KEYWORD_GATE_MIN);
-    if (d1.length > 0) { sources = d1; searchEngine = "d1-text"; }
+  // D1 병합: Vectorize에서 못 가져온 chunk를 키워드 검색으로 보충한다.
+  // 암묵지 문서는 Vectorize upsert가 늦거나 실패해도 D1 chunk에는
+  // 있으므로 여기서 잡힌다 (C5-b). (실측: "출산 전후 재택"은 정책 chunk
+  // 전원 0점, 암묵지 chunk 27점.)
+  if (!d1FallbackRan) {
+    const d1Extra = await d1TextSources(c.env, searchQuestion, KEYWORD_GATE_MIN);
+    const haveIds = new Set(sources.map((s) => s.id));
+    for (const s of d1Extra) {
+      if (sources.length >= MAX_SOURCES) break;
+      if (!haveIds.has(s.id)) { sources.push(s); haveIds.add(s.id); }
+    }
   }
   // 근거 없음: LLM을 호출하지 않고 경고로 답한다 (C5, Baryon AX).
   // 연차휴가 규정을 강제 근거로 넣던 폴백은 삭제했다 — 근거가 없는데
