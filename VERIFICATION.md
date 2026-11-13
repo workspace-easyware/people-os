@@ -80,3 +80,9 @@ bash /tmp/people-os-test.sh               # curl 10개 케이스, 3회 반복 �
 2. llama-3.1-8b-instruct도 Workers AI 바인딩에서는 폐기 (5028, infire-llama-3.1-8b-instruct) — REST API에서는 되지만 바인딩에서는 안 됨.
 3. Vectorize 인덱스가 비어 있었고 검색 쿼리가 0벡터였음 → /api/seed-vectors로 규정 7건 임베딩·upsert, 질문 임베딩 후 검색으로 변경.
 4. AI 응답 파싱: 바인딩은 {response: "..."}를 반환하고 JSON 답이 ``` 펜스로 감싸져 옴 → responseText/extractJson 헬퍼로 처리.
+
+## 프론트 리스타일 + FlowDesk 연결 (2026-11-13)
+- people-insight의 CSS 디자인 토큰(남색 #123863, 배경 #f5f8fc, 포인트 #2d7dde, 카드 radius 16px, Pretendard/Inter)을 public/index.html에 적용. Mantine 라이브러리가 아니라 Mantine처럼 보이게 짠 커스텀 CSS다.
+- 상단 sticky topbar(남색 로고 + 탭 메뉴), 둥근 카드 + 그림자 확인됨 (사용자 Chrome 경유).
+- FlowDesk 연결: 요약 결과 아래 "요약 복사" + "FlowDesk에서 열기" 버튼, 라이브러리 탭에도 FlowDesk 버튼. 링크 https://flowdesk-personal-c7a4.hr-jhkang.chatgpt.site/ 확인됨. FlowDesk는 별도 비공개 Site라 직접 임베드는 불가하고 링크+복사 흐름으로 연결.
+- 리스타일 후 요약 엔진 workers-ai 유지, 에러 없음.

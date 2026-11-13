@@ -5,75 +5,126 @@
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>일잇 People OS — Workers 프로토타입</title>
 <style>
-body{font-family:system-ui,-apple-system,'Segoe UI',sans-serif;max-width:900px;margin:0 auto;padding:24px;color:#111}
-h1{font-size:24px} .sub{color:#555;margin-top:-8px}
-.tabs{display:flex;gap:8px;margin:16px 0;flex-wrap:wrap}
-.tabs button{padding:8px 14px;border:1px solid #ccc;background:#fff;border-radius:8px;cursor:pointer}
-.tabs button.active{background:#111;color:#fff}
-section{display:none} section.active{display:block}
-textarea{width:100%;min-height:140px;padding:10px;border:1px solid #ccc;border-radius:8px}
-input[type=text]{width:100%;padding:10px;border:1px solid #ccc;border-radius:8px}
-button.primary{background:#f6821f;color:#fff;border:0;padding:10px 16px;border-radius:8px;cursor:pointer;margin-top:8px}
-.card{border:1px solid #e0e0e0;border-radius:10px;padding:14px;margin:10px 0;background:#fafafa}
-.small{color:#666;font-size:13px} pre{white-space:pre-wrap;background:#fff;border:1px solid #eee;padding:10px;border-radius:8px}
-.badge{display:inline-block;background:#eef;border:1px solid #ccd;padding:2px 8px;border-radius:999px;font-size:12px}
+/* people-insight 색감·레이아웃을 그대로 가져온 스타일 (Mantine처럼 보이는 커스텀 CSS) */
+:root{--color-primary:#123863;--color-bg:#f5f8fc;--color-surface:#fff;--color-text:#14233a;--color-muted:#718096;--color-accent:#2d7dde;--space-1:4px;--space-2:8px;--space-3:12px;--space-4:16px;--space-5:24px;--space-6:32px;--text-sm:13px;--text-base:15px;--text-lg:18px;--text-xl:24px;--line:#e2eaf3;--radius:16px;--shadow:0 12px 32px rgba(22,51,90,.08)}
+*{box-sizing:border-box}
+body{margin:0;background:var(--color-bg);color:var(--color-text);font-family:Inter,Pretendard,"Noto Sans KR",Arial,sans-serif;font-size:var(--text-base)}
+button,input,textarea,select{font:inherit}
+button{cursor:pointer}
+button:focus-visible,input:focus,textarea:focus,select:focus{outline:3px solid rgba(45,125,222,.25);outline-offset:2px}
+.topbar{height:76px;padding:0 max(20px,calc((100vw - 1180px)/2));display:flex;align-items:center;gap:34px;background:#fff;border-bottom:1px solid var(--line);position:sticky;top:0;z-index:5}
+.logo{padding:0;border:0;background:transparent;display:flex;align-items:center;gap:8px;color:var(--color-primary);text-align:left;line-height:.78;font-size:16px;font-weight:800}
+.logo>b{background:var(--color-primary);color:#fff;border-radius:8px;width:31px;height:31px;display:grid;place-items:center;font-size:23px}
+.logo i{font-style:normal;color:var(--color-accent)}
+nav{display:flex;height:100%;gap:26px}
+nav button{border:0;background:transparent;color:var(--color-muted);font-weight:600;padding:0;position:relative}
+nav button.nav-active{color:var(--color-primary)}
+nav button.nav-active:after{content:"";position:absolute;left:0;right:0;bottom:0;height:3px;background:var(--color-accent);border-radius:3px 3px 0 0}
+main{max-width:1180px;margin:0 auto;padding:var(--space-5) 20px var(--space-6)}
+.hero{margin:var(--space-4) 0 var(--space-5)}
+.hero h1{font-size:var(--text-xl);margin:0 0 var(--space-1)}
+.sub{color:var(--color-muted);margin:0}
+.small{color:var(--color-muted);font-size:var(--text-sm)}
+section{display:none}
+section.active{display:block}
+.card{background:var(--color-surface);border:1px solid var(--line);border-radius:var(--radius);padding:var(--space-5);margin:var(--space-4) 0;box-shadow:var(--shadow)}
+.card h2{font-size:var(--text-lg);margin:0 0 var(--space-3)}
+textarea{width:100%;min-height:140px;padding:10px;border:1px solid var(--line);border-radius:10px;background:#fff;color:var(--color-text)}
+input[type=text]{width:100%;padding:10px;border:1px solid var(--line);border-radius:10px;background:#fff;color:var(--color-text)}
+button.primary{background:var(--color-primary);color:#fff;border:0;padding:10px 16px;border-radius:10px;cursor:pointer;margin-top:8px;font-weight:600}
+button.primary:hover{background:#0d2c4f}
+button.secondary{background:#fff;color:var(--color-primary);border:1px solid var(--line);padding:10px 16px;border-radius:10px;cursor:pointer;margin-top:8px;font-weight:600}
+button.secondary:hover{border-color:var(--color-accent);color:var(--color-accent)}
+button:disabled{opacity:.45;cursor:not-allowed}
+a.btn{display:inline-block;background:var(--color-accent);color:#fff;text-decoration:none;padding:10px 16px;border-radius:10px;margin-top:8px;font-weight:600}
+a.btn:hover{background:#1f6bc4}
+pre{white-space:pre-wrap;background:#f5f8fc;border:1px solid var(--line);padding:10px;border-radius:10px}
+.badge{display:inline-block;background:#eaf2fd;border:1px solid #cfe3fa;color:var(--color-primary);padding:2px 8px;border-radius:999px;font-size:12px;font-weight:600}
+.btnrow{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
 </style>
 </head>
 <body>
-<h1>일잇 People OS</h1>
-<p class="sub">HR·코칭 인텔리전스 플랫폼 — Cloudflare Workers판 프로토타입</p>
-<p class="small">데모 흐름: 샘플 전사본 붙여넣기 → 요약 → “연차 3일 쓸 수 있어?” 질문 → 근거付き 답변 → 코칭 리플렉션. <span id="health" class="badge">health 확인 중…</span></p>
+<header class="topbar">
+  <button class="logo" type="button"><b>일</b><span>일잇 <i>People OS</i></span></button>
+  <nav class="tabs">
+    <button class="nav-active" data-tab="upload">업로드·요약</button>
+    <button data-tab="ask">질문 (HR 에이전트)</button>
+    <button data-tab="coaching">코칭 리플렉션</button>
+    <button data-tab="library">라이브러리</button>
+  </nav>
+</header>
+<main>
+  <div class="hero">
+    <h1>일잇 People OS</h1>
+    <p class="sub">HR·코칭 인텔리전스 플랫폼 — Cloudflare Workers판 프로토타입</p>
+    <p class="small">데모 흐름: 샘플 전사본 붙여넣기 → 요약 → “연차 3일 쓸 수 있어?” 질문 → 근거付き 답변 → 코칭 리플렉션 → FlowDesk 노트로 보내기. <span id="health" class="badge">health 확인 중…</span></p>
+  </div>
 
-<div class="tabs">
-  <button class="active" data-tab="upload">업로드·요약</button>
-  <button data-tab="ask">질문 (HR 에이전트)</button>
-  <button data-tab="coaching">코칭 리플렉션</button>
-  <button data-tab="library">라이브러리</button>
-</div>
+  <section id="tab-upload" class="active">
+    <div class="card">
+      <h2>1. 문서 업로드</h2>
+      <p><button class="secondary" id="loadSample">샘플 전사본 불러오기</button></p>
+      <input type="text" id="docTitle" placeholder="제목 (예: 11월 팀 회의 전사본)" />
+      <p></p>
+      <textarea id="docContent" placeholder="회의 전사본 / 문서 텍스트를 붙여넣으세요"></textarea>
+      <div class="btnrow">
+        <button class="primary" id="uploadBtn">업로드</button>
+        <button class="primary" id="summarizeBtn" disabled>요약하기</button>
+      </div>
+      <div id="docResult"></div>
+    </div>
+  </section>
 
-<section id="tab-upload" class="active">
-  <h2>1. 문서 업로드</h2>
-  <p><button id="loadSample">샘플 전사본 불러오기</button></p>
-  <input type="text" id="docTitle" placeholder="제목 (예: 11월 팀 회의 전사본)" />
-  <textarea id="docContent" placeholder="회의 전사본 / 문서 텍스트를 붙여넣으세요"></textarea>
-  <button class="primary" id="uploadBtn">업로드</button>
-  <button class="primary" id="summarizeBtn" disabled>요약하기</button>
-  <div id="docResult"></div>
-</section>
+  <section id="tab-ask">
+    <div class="card">
+      <h2>2. HR 에이전트에게 질문</h2>
+      <input type="text" id="question" value="연차 3일 쓸 수 있어?" />
+      <div class="btnrow"><button class="primary" id="askBtn">질문하기</button></div>
+      <div id="askResult"></div>
+      <p class="small">근거: 연차·근무시간·출장·정보보안·평가·교육·근태 규정 7건 시드됨. 두 번째 질문을 하면 세션 기억이 유지됩니다.</p>
+    </div>
+  </section>
 
-<section id="tab-ask">
-  <h2>2. HR 에이전트에게 질문</h2>
-  <input type="text" id="question" value="연차 3일 쓸 수 있어?" />
-  <button class="primary" id="askBtn">질문하기</button>
-  <div id="askResult"></div>
-  <p class="small">근거: 연차·근무시간·출장·정보보안·평가·교육·근태 규정 7건 시드됨. 두 번째 질문을 하면 세션 기억이 유지됩니다.</p>
-</section>
+  <section id="tab-coaching">
+    <div class="card">
+      <h2>3. 코칭 리플렉션</h2>
+      <p><button class="secondary" id="loadCoaching">샘플 코칭 전사본 불러오기</button></p>
+      <textarea id="coachingText" placeholder="코칭 세션 전사본을 붙여넣으세요"></textarea>
+      <div class="btnrow"><button class="primary" id="reflectBtn">리플렉션 생성</button></div>
+      <div id="coachingResult"></div>
+    </div>
+  </section>
 
-<section id="tab-coaching">
-  <h2>3. 코칭 리플렉션</h2>
-  <p><button id="loadCoaching">샘플 코칭 전사본 불러오기</button></p>
-  <textarea id="coachingText" placeholder="코칭 세션 전사본을 붙여넣으세요"></textarea>
-  <button class="primary" id="reflectBtn">리플렉션 생성</button>
-  <div id="coachingResult"></div>
-</section>
-
-<section id="tab-library">
-  <h2>4. 라이브러리</h2>
-  <button class="primary" id="refreshLib">새로고침</button>
-  <div id="libResult"></div>
-</section>
+  <section id="tab-library">
+    <div class="card">
+      <h2>4. 라이브러리</h2>
+      <div class="btnrow">
+        <button class="primary" id="refreshLib">새로고침</button>
+        <a class="btn" href="https://flowdesk-personal-c7a4.hr-jhkang.chatgpt.site/" target="_blank" rel="noopener">FlowDesk에서 열기 ↗</a>
+      </div>
+      <p class="small">요약·액션·리플렉션 결과는 FlowDesk 개인 작업 공간의 노트로 이어서 정리할 수 있습니다.</p>
+      <div id="libResult"></div>
+    </div>
+  </section>
+</main>
 
 <script>
-let docId = null, sessionId = null;
+let docId = null, sessionId = null, lastSummaryText = '';
 const $ = (id) => document.getElementById(id);
+const FLOWDESK_URL = 'https://flowdesk-personal-c7a4.hr-jhkang.chatgpt.site/';
 document.querySelectorAll('.tabs button').forEach(b => b.onclick = () => {
-  document.querySelectorAll('.tabs button').forEach(x => x.classList.remove('active'));
+  document.querySelectorAll('.tabs button').forEach(x => x.classList.remove('nav-active'));
   document.querySelectorAll('section').forEach(x => x.classList.remove('active'));
-  b.classList.add('active'); $('tab-' + b.dataset.tab).classList.add('active');
+  b.classList.add('nav-active'); $('tab-' + b.dataset.tab).classList.add('active');
 });
 async function api(path, opts) {
   const r = await fetch(path, { headers: { 'content-type': 'application/json' }, ...opts });
   return r.json();
+}
+function copySummary() {
+  const text = lastSummaryText || '요약 결과가 없습니다.';
+  if (navigator.clipboard) navigator.clipboard.writeText(text).then(() => alert('요약을 복사했습니다. FlowDesk 노트에 붙여넣으세요.'));
+  else alert(text);
 }
 fetch('/api/health', { method: 'POST' }).then(r => r.json()).then(j => {
   $('health').textContent = j.ok ? 'health OK · ' + Object.entries(j.bindings).filter(([,v])=>v).map(([k])=>k).join(', ') : 'health 실패';
@@ -90,7 +141,8 @@ $('uploadBtn').onclick = async () => {
 };
 $('summarizeBtn').onclick = async () => {
   const j = await api('/api/documents/' + docId + '/summarize', { method: 'POST' });
-  $('docResult').innerHTML = `<div class="card"><b>요약</b> <span class="badge">엔진: ${j.engine}</span><ul>${j.summary.map(s => `<li>${s}</li>`).join('')}</ul><b>액션</b><ul>${j.actions.map(s => `<li>${s}</li>`).join('')}</ul></div>`;
+  lastSummaryText = '요약\n' + j.summary.map(s => '- ' + s).join('\n') + '\n\n액션\n' + j.actions.map(s => '- ' + s).join('\n');
+  $('docResult').innerHTML = `<div class="card"><b>요약</b> <span class="badge">엔진: ${j.engine}</span><ul>${j.summary.map(s => `<li>${s}</li>`).join('')}</ul><b>액션</b><ul>${j.actions.map(s => `<li>${s}</li>`).join('')}</ul><div class="btnrow"><button class="secondary" onclick="copySummary()">요약 복사</button><a class="btn" href="${FLOWDESK_URL}" target="_blank" rel="noopener">FlowDesk에서 열기 ↗</a></div><p class="small">FlowDesk는 별도 개인 작업 공간(로그인 필요)이라, 요약은 복사해서 노트로 붙여넣는 흐름입니다.</p></div>`;
 };
 $('askBtn').onclick = async () => {
   const j = await api('/api/ask', { method: 'POST', body: JSON.stringify({ question: $('question').value, sessionId }) });
