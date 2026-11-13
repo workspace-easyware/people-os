@@ -12,15 +12,28 @@ body{margin:0;background:var(--color-bg);color:var(--color-text);font-family:Int
 button,input,textarea,select{font:inherit}
 button{cursor:pointer}
 button:focus-visible,input:focus,textarea:focus,select:focus{outline:3px solid rgba(45,125,222,.25);outline-offset:2px}
-.topbar{height:76px;padding:0 max(20px,calc((100vw - 1180px)/2));display:flex;align-items:center;gap:34px;background:#fff;border-bottom:1px solid var(--line);position:sticky;top:0;z-index:5}
-.logo{padding:0;border:0;background:transparent;display:flex;align-items:center;gap:8px;color:var(--color-primary);text-align:left;line-height:.78;font-size:16px;font-weight:800}
-.logo>b{background:var(--color-primary);color:#fff;border-radius:8px;width:31px;height:31px;display:grid;place-items:center;font-size:23px}
+.shell{display:flex;min-height:100vh}
+.sidebar{width:232px;flex:none;background:#fff;border-right:1px solid var(--line);position:sticky;top:0;height:100vh;display:flex;flex-direction:column;z-index:5}
+.sidebar .side-head{height:76px;display:flex;align-items:center;padding:0 16px;border-bottom:1px solid var(--line);flex:none}
+.logo{padding:0;border:0;background:transparent;display:flex;align-items:center;gap:8px;color:var(--color-primary);text-align:left;line-height:.78;font-size:16px;font-weight:800;white-space:nowrap}
+.logo>b{background:var(--color-primary);color:#fff;border-radius:8px;width:31px;height:31px;display:grid;place-items:center;font-size:23px;flex:none}
 .logo i{font-style:normal;color:var(--color-accent)}
-nav{display:flex;height:100%;gap:26px}
-nav button{border:0;background:transparent;color:var(--color-muted);font-weight:600;padding:0;position:relative}
-nav button.nav-active{color:var(--color-primary)}
-nav button.nav-active:after{content:"";position:absolute;left:0;right:0;bottom:0;height:3px;background:var(--color-accent);border-radius:3px 3px 0 0}
-main{max-width:1180px;margin:0 auto;padding:var(--space-5) 20px var(--space-6)}
+.sidebar nav{flex:1;display:flex;flex-direction:column;gap:4px;padding:14px 10px;overflow-y:auto}
+.sidebar nav button{border:0;background:transparent;color:var(--color-muted);font-weight:600;padding:10px 12px;border-radius:10px;display:flex;align-items:center;gap:11px;text-align:left;width:100%}
+.sidebar nav button:hover{background:#f5f8fc;color:var(--color-primary)}
+.sidebar nav button.nav-active{background:#eaf2fd;color:var(--color-primary)}
+.nav-ico{width:20px;flex:none;text-align:center;font-size:16px}
+.nav-label{white-space:nowrap;overflow:hidden}
+.collapse-btn{flex:none;margin:10px;border:1px solid var(--line);background:#fff;color:var(--color-muted);border-radius:10px;padding:9px 12px;font-weight:600;text-align:left}
+.collapse-btn:hover{color:var(--color-primary);border-color:var(--color-accent)}
+.sidebar.collapsed{width:64px}
+.sidebar.collapsed .nav-label,.sidebar.collapsed .logo span{display:none}
+.sidebar.collapsed .side-head{padding:0;justify-content:center}
+.sidebar.collapsed nav button{justify-content:center;padding:10px 0}
+.sidebar.collapsed .collapse-btn{text-align:center;padding:9px 0}
+.content{flex:1;min-width:0}
+main{max-width:1080px;margin:0 auto;padding:var(--space-5) 20px var(--space-6)}
+@media (max-width:760px){.sidebar{width:64px}.sidebar .nav-label,.sidebar .logo span{display:none}.sidebar .side-head{padding:0;justify-content:center}.sidebar nav button{justify-content:center;padding:10px 0}.collapse-btn{display:none}}
 .hero{margin:var(--space-4) 0 var(--space-5)}
 .hero h1{font-size:var(--text-xl);margin:0 0 var(--space-1)}
 .sub{color:var(--color-muted);margin:0}
@@ -62,17 +75,20 @@ button.iconbtn:hover{color:#c0392b}
 </style>
 </head>
 <body>
-<header class="topbar">
-  <button class="logo" type="button"><b>일</b><span>일잇 <i>People OS</i></span></button>
+<div class="shell">
+<aside class="sidebar" id="sidebar">
+  <div class="side-head"><button class="logo" type="button" onclick="switchTab('home')"><b>일</b><span>일잇 <i>People OS</i></span></button></div>
   <nav class="tabs">
-    <button class="nav-active" data-tab="home">홈</button>
-    <button data-tab="upload">업로드·요약</button>
-    <button data-tab="ask">질문 (HR 에이전트)</button>
-    <button data-tab="coaching">코칭 리플렉션</button>
-    <button data-tab="tasks">할 일</button>
-    <button data-tab="library">라이브러리</button>
+    <button class="nav-active" data-tab="home"><span class="nav-ico">⌂</span><span class="nav-label">홈</span></button>
+    <button data-tab="upload"><span class="nav-ico">⬆</span><span class="nav-label">업로드·요약</span></button>
+    <button data-tab="ask"><span class="nav-ico">?</span><span class="nav-label">질문 (HR 에이전트)</span></button>
+    <button data-tab="coaching"><span class="nav-ico">◍</span><span class="nav-label">코칭 리플렉션</span></button>
+    <button data-tab="tasks"><span class="nav-ico">☑</span><span class="nav-label">할 일</span></button>
+    <button data-tab="library"><span class="nav-ico">▦</span><span class="nav-label">라이브러리</span></button>
   </nav>
-</header>
+  <button class="collapse-btn" id="collapseBtn" type="button" onclick="toggleSidebar()">« 접기</button>
+</aside>
+<div class="content">
 <main>
   <div class="hero">
     <h1>일잇 People OS</h1>
@@ -157,6 +173,8 @@ button.iconbtn:hover{color:#c0392b}
     </div>
   </section>
 </main>
+</div>
+</div>
 
 <script>
 let docId = null, sessionId = null, lastSummaryText = '', lastSummary = [], lastActions = [], lastDocTitle = '';
@@ -268,6 +286,13 @@ async function refreshLib() {
     `<h3>규정 ${j.policies.length}건</h3><div class="libgrid">${pols}</div>` +
     `<h3>리플렉션 ${j.reflections.length}건</h3><div class="libgrid">${refls || '<p class="small">리플렉션이 없습니다.</p>'}</div>`;
 }
+function toggleSidebar() {
+  const sb = $('sidebar');
+  const collapsed = sb.classList.toggle('collapsed');
+  $('collapseBtn').textContent = collapsed ? '»' : '« 접기';
+  try { localStorage.setItem('people-os-sidebar-collapsed', collapsed ? '1' : '0'); } catch {}
+}
+try { if (localStorage.getItem('people-os-sidebar-collapsed') === '1') { $('sidebar').classList.add('collapsed'); $('collapseBtn').textContent = '»'; } } catch {}
 fetch('/api/health', { method: 'POST' }).then(r => r.json()).then(j => {
   $('health').textContent = j.ok ? 'health OK · ' + Object.entries(j.bindings).filter(([,v])=>v).map(([k])=>k).join(', ') : 'health 실패';
 }).catch(() => $('health').textContent = 'health 실패');
