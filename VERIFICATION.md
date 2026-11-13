@@ -238,3 +238,22 @@ Plaud Transcribe Studio의 전사 형태를 Cloudflare 네이티브(Workers AI W
 - 비밀 스캔: 추적 파일 + git 이력 전체에서 토큰·키 패턴(`sk-`·`ghp_`·`AKIA`·개인키·Bearer 등) 0건. `.dev.vars` 없음(있으면 gitignore). `wrangler.toml` 리소스 ID는 비밀이 아니므로 유지.
 - 라이브 Chrome 확인 (401 여부)은 사용자 복귀 후 진행 예정.
 - 배포: `cf-wrangler.py deploy` → Version ID `08a99d43-593e-4e4c-b65f-37fea934e9a8` (2026-11-13, 로컬 커밋 `d9719c5`). GitHub 스냅샷 푸시는 Chrome 확인 후 진행.
+
+## S2 AI Gateway (2026-11-13, 로컬 구현 — 라이브 확인 전)
+
+- 공식 방식 확인: Cloudflare 문서 "Set up Workers AI with AI Gateway" — `env.AI.run()`의 세 번째 인자로 `{ gateway: { id, skipCache } }`를 넘긴다. `wrangler.toml`의 `[ai]` 바인딩 변경은 필요 없다. `@cloudflare/workers-types` (설치본 4.20241112.0)의 `AiOptions`·`GatewayOptions` 타입이 이 옵션을 이미 지원한다.
+- 게이트웨이 생성: wrangler 4.161.0에 `ai-gateway` 명령이 없다 (`wrangler ai`는 models/finetune만). CLI 생성이 안 돼 대시보드에서 `people-os` 게이트웨이를 만들어야 한다 (배포 전 필수). 이름 있는 게이트웨이는 자동 생성되지 않는다 (`"default"`만 첫 인증 요청 때 자동 생성). 우회 API 호출은 하지 않았다.
+- 구현: 신규 `src/ai-gateway.ts` (`AI_GATEWAY_ID = "people-os"`, `aiGatewayOptions()` 헬퍼). 11개 AI 호출처 전부 경유 — 채팅 5곳 (요약·질문·코칭·다이제스트·debug-ai), 임베딩 5곳 (시딩·문서 색인·암묵지 검증·질문 검색·debug-ai), 전사 1곳. 태그 `ask/summary/embed/whisper/coaching/digest/debug`로 대시보드에서 기능별 구분.
+- 캐시 정책: 채팅은 게이트웨이 캐시 사용 (프롬프트에 근거 문맥 포함 → 근거가 바뀌면 키도 바뀜, C5-b 게시 후 재질문은 새 답). 다시 생성(`force`)·debug-ai는 `skipCache: true`. 임베딩·전사는 항상 `skipCache: true`.
+- 로컬 검증: `npx tsc --noEmit` 통과. `wrangler dev --local` 부팅 확인 — `/api/health` 200 (ok:true, 바인딩 전부 true), `/api/seed-status` 200. 로컬 AI 바인딩은 실패하는 기존 한계라 (`lastError: "Not logged in"`) 게이트웨이 경유 자체는 로컬에서 검증 불가 — 라이브 확인 필요.
+- 게이트웨이 미생성 시 동작: AI 호출이 실패하고 호출처의 try/catch가 기존 로컬 폴백(추출식 요약·템플릿 답·전사 pending)으로 떨어진다. 앱이 죽지 않는다.
+- 되돌리기: 호출처에서 `aiGatewayOptions()` 인자만 빼면 된다 (`wrangler.toml` 변경 없음).
+- 부모가 이어서 할 일: ① 대시보드에서 `people-os` 게이트웨이 생성 + 레이트 리밋 설정 (권장 분당 100회, 캐시 기본값) ② 배포 ③ Chrome 확인 — 질문·요약·전사 정상 동작 + AI Gateway 대시보드(Logs)에서 `people-os` 게이트웨이에 태그별 로그·캐시 표시 확인.
+
+## C5 Phase 3 — 업로드 문서 파서 라우팅 (2026-11-13, 로컬 구현 — 라이브 확인 전)
+
+- 구현: 신규 `src/parse.ts` (매직 바이트 판별 + HWPX 추출 + XML 엔티티 디코딩), `POST /api/documents`에 multipart 파일 경로 추가 (기존 JSON 경로 그대로), 마이그레이션 0012 (`extract_status`/`extract_error`/`source_r2_key`), 프론트 업로드 탭에 파일 입력 + "파일로 업로드" 버튼, 라이브러리 카드에 변환 실패 사유 표시. 의존성 fflate 추가 (HWPX zip 해제용, Workers 호환 순수 JS).
+- 판별 (확장자 무시, 앞부분 바이트만): `%PDF` → PDF, `PK`+`mimetype=application/hwp+zip` → HWPX, `PK`+`[Content_Types].xml` → OOXML, `D0CF11E0` → HWP 5.0/구형 Office, 이미지 매직 바이트 → 이미지, UTF-8 → 텍스트, `<?xml`/`<svg`/`<html` → toMarkdown. 공식 문서 확인: toMarkdown 지원 형식은 PDF·이미지·HTML·XML·Office·ODF·CSV·Apple Numbers — HWPX는 없어 Worker 내 직접 추출이 맞다. toMarkdown 파일 크기 상한은 공식 문서에 명시 없음 → 우리 쪽 10MB 상한.
+- 로컬 검증 (단위 테스트 25개 전부 통과): 판별 15개 (PDF·OLE·PNG·JPEG·GIF·WEBP·BMP·HWPX 2종·mimetype 없음 포함·OOXML·손상 zip·텍스트·XML·SVG·이진 쓰레기·빈 파일), HWPX 추출 9개 (제1/2/3조 마커 보존, 본문, 표 셀, `&amp;` 디코딩, 문단 분리, 태그 잔재 없음), BOM 제거 1개.
+- 로컬 검증 (`wrangler dev --local`, 마이그레이션 0012 로컬 적용): HWPX 업로드 → `format: hwpx, extractStatus: ready`, D1 chunk 2개 (제1조 목적·제2조 적용 범위), R2 저장 예. 텍스트 업로드 → `format: text, ready`, chunk 1개. 가짜 HWP5(OLE) → `format: ole, failed` + "HWPX 또는 PDF로 저장해 올려 주세요" 안내. 쓰레기 바이너리 → `format: unknown, failed` + 지원 형식 안내. DOCX → `format: ooxml, failed` (로컬 AI "Not logged in" — toMarkdown 자체가 로컬에서 안 도는 기존 한계, 실패가 우아하게 처리됨). 11MB 파일 → 400 "파일은 10MB 이하만 올릴 수 있습니다". JSON 경로 회귀 → 정상. 질문 "이 규정은 누구에게 적용되나요?" → HWPX 문서 chunk 2개가 근거로 나옴 (D1 폴백 경로). "연차휴가는 입사 몇 년이 지나면 생기나요?" → 여전히 연차휴가 규정(제12조)이 1위. `/api/library`에 `extract_status`/`extract_error` 포함 확인. 로컬 임베딩 upsert 실패(`indexError: Not logged in`)는 기존 한계 — D1 chunk는 남는다.
+- 부모가 이어서 할 일: ① 마이그레이션 0012 원격 적용 ② 배포 (S2 게이트웨이 생성 전제 — toMarkdown도 `people-os` 게이트웨이 경유) ③ Chrome 확인 — HWPX 업로드 → 질문 시 근거로 나오는지, 연차 질문 1위 유지되는지, DOCX/PDF 실제 변환되는지, HWP5 안내 문구·라이브러리 실패 표시 확인.

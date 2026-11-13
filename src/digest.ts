@@ -12,6 +12,8 @@
 // 이 파일은 index.ts를 import하지 않는다 (index.ts가 이 파일을 import하는
 // 순환 참조를 피하기 위해 responseText 등 필요한 헬퍼를 자체 포함한다).
 
+import { aiGatewayOptions } from "./ai-gateway";
+
 // index.ts의 LLM_MODEL과 같은 값. 바꾸지 말 것.
 const DIGEST_LLM_MODEL = "@cf/meta/llama-4-scout-17b-16e-instruct";
 
@@ -244,7 +246,7 @@ async function buildAiBody(env: DigestEnv, runDate: string, s: DigestSnapshot): 
       },
       { role: "user", content: `아래 사실을 바탕으로 오늘 아침 브리핑을 써줘.\n${factsBlock(runDate, s)}` },
     ],
-  });
+  }, aiGatewayOptions({ tag: "digest" }));
   const text = responseText(out).trim();
   if (text.length < 10) throw new Error("empty ai digest");
   return text.slice(0, 1500);

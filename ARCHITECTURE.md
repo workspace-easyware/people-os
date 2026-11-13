@@ -64,12 +64,12 @@ flowchart TB
 | KV | 구현됨 | 질문 캐시, 세션별 키 | D1 cache 테이블 |
 | Durable Objects | 구현됨 | AgentSession 대화 기억 | D1 sessions 테이블 |
 | Workers AI | 코드 있음, 로컬 폴백 | 요약·답변·리플렉션 생성 | local-extractive / local-template / local-rule |
-| Workers AI (Whisper) | 구현됨 | 음성 전사 (`@cf/openai/whisper`, 바인딩) | 전사 실패 시 pending 저장 (전사본 없음) |
+| Workers AI (Whisper) | 구현됨 | 음성 전사 (`@cf/openai/whisper-large-v3-turbo` Base64 입력, 바인딩) | 전사 실패 시 pending 저장 (전사본 없음) |
 | Vectorize | 코드 있음, 로컬 폴백 | 규정·논문 임베딩 검색 | D1 텍스트 검색 |
-| Queues + Workflows | 설계·스텁 | 전사→요약→추출→임베딩 비동기 파이프라인 | 직접 호출 |
-| AI Gateway | 설계만 | 모델 라우팅·폴백·로그 | — |
+| Queues + Workflows | 구현됨 (S1) | 전사→요약→색인 Queues 비동기 파이프라인 | DLQ 포함, 전사 완료 시 enqueue |
+| AI Gateway | 구현됨 (S2) | 모든 Workers AI 호출 경유 — 게이트웨이 `people-os`, 채팅 캐시·임베딩/전사 캐시 제외·태그별 로그 | 게이트웨이가 없으면 AI 호출 실패 → 로컬 폴백 |
 | Hyperdrive | 설계만 | 기존 HR Postgres 연결 | 모의 데이터 |
-| Cron Triggers | 설계만 | 아침 HR 다이제스트 | 스케줄러 함수 자리만 |
+| Cron Triggers | 구현됨 (C9) | 아침 HR 다이제스트 | 07:00 KST 크론, 첫 실행 2026-11-14 |
 | Turnstile | 설계만 | 가입·업로드 스팸 방지 | 폼 자리만 |
 | Workers Static Assets | 구현됨 | `public/index.html` 서빙 | — |
 

@@ -44,7 +44,7 @@ npx wrangler dev --local
 | GET | `/api/recordings/:id` | 녹음 1건 + 전사본 |
 | POST | `/api/recordings/:id/advance` | 다음 1구간을 직접 전사하고 행 반환 (프론트 폴링이 부름) |
 | POST | `/api/recordings/:id/retry` | pending 녹음을 R2 오디오로 다시 전사 (백그라운드, 멈춘 processing 행은 이어가기) |
-| POST | `/api/documents` | `{title, content, kind}` 업로드 → R2 + D1 |
+| POST | `/api/documents` | `{title, content, kind}` 업로드 → R2 + D1. multipart `file`(최대 10MB)도 받는다 — 매직 바이트로 형식을 판별해 PDF·DOCX·XLSX·이미지는 Workers AI `toMarkdown()`으로, HWPX는 Worker 안에서 직접 텍스트를 뽑아 색인한다 (C5 Phase 3). HWP 5.0은 안내만 하고 변환하지 않는다 |
 | POST | `/api/documents/:id/summarize` | Workers AI 요약, 실패 시 로컬 추출식 요약 |
 | POST | `/api/ask` | `{question, sessionId?}` RAG 답변 + 근거 + 세션 기억 |
 | POST | `/api/coaching/reflect` | `{transcript, sessionId?}` 코칭 리플렉션 |
@@ -64,7 +64,7 @@ npx wrangler dev --local
     → Vectorize (RAG — 로컬에서 쿼리 실패 시 D1 텍스트 검색 폴백)
     → Workers AI (요약·답변·리플렉션 + Whisper 전사 — 로컬에서 실패 시 로컬 템플릿/규칙 폴백, 전사는 pending 저장)
     → Durable Objects AgentSession (대화 기억 — 실패 시 D1 sessions 폴백)
-    → Queues/Workflows, Hyperdrive, AI Gateway, Cron, Turnstile: 설계·스텁 (Phase 4/5, README 하단 참조)
+    → Queues/Workflows, Hyperdrive, Cron, Turnstile: 설계·스텁 (Phase 4/5, README 하단 참조)
 ```
 
 ## Cloudflare 기능 매핑
@@ -80,10 +80,31 @@ npx wrangler dev --local
 | Durable Objects | 에이전트 세션 기억 | 시도 후 D1 폴백 |
 | R2 | 업로드 원본 저장 + 덱 `decks/*.pptx` | 라이브 확인됨 |
 | Hyperdrive | 기존 HR Postgres 연결 | 스텁/설계만 (모의 데이터) |
-| Queues + Workflows | 전사→요약→추출→임베딩 파이프라인 | 직접 호출 + 큐 스텁 (정식 파이프라인은 공모전 이후) |
-| AI Gateway | 모델 라우팅·폴백 | 설계만 |
-| Cron Triggers | 아침 HR 다이제스트 | 공모전 중 구현 예정 |
-| Turnstile | 업로드 스팸 방지 | 공모전 중 구현 예정 |
+| Queues + Workflows | 전사→요약→추출→임베딩 파이프라인 | 구현됨 (S1): 전사→요약→색인 Queues 파이프라인 + DLQ, 라이브 확인됨 |
+| AI Gateway | 모든 Workers AI 호출 경유 (게이트웨이 `people-os`, 채팅 캐시·태그별 로그) | 구현됨 (로컬 검증; 라이브 확인 전 — 대시보드에서 게이트웨이 생성 필요, 아래 S2 참조) |
+| Cron Triggers | 아침 HR 다이제스트 | 구현됨 (C9): 매일 07:00 KST, 첫 실행 2026-11-14 |
+| Turnstile | 업로드 스팸 방지 | 구현됨 (C7): fail-open, 키 설정 시 검증 |
+
+## S2 — AI Gateway (2026-11-13, 로컬 구현)
+
+- 방식: Workers AI 바인딩 + AI Gateway 공식 방식 — `env.AI.run()`의 세 번째 인자로 `{ gateway: { id: "people-os", skipCache, tags } }`를 넘긴다. `wrangler.toml`의 `[ai]` 바인딩은 그대로 (변경 없음).
+- 헬퍼: `src/ai-gateway.ts`의 `aiGatewayOptions()` — 11개 AI 호출처 전부 경유 (채팅 llama-4-scout 5곳: 요약·질문·코칭·다이제스트·debug-ai / 임베딩 bge-m3 5곳: 시딩·문서 색인·암묵지 검증·질문 검색·debug-ai / 전사 whisper-large-v3-turbo 1곳).
+- 캐시 정책: 채팅은 게이트웨이 캐시 사용 (프롬프트에 근거 문맥이 포함돼 근거가 바뀌면 캐시 키도 바뀐다). 다시 생성(`force`)과 운영 진단(`/api/debug-ai`)은 `skipCache: true`. 임베딩·전사는 항상 `skipCache: true` (재색인 검증이 흐려지고, 전사는 오디오마다 달라 캐시할 이유가 없음).
+- 태그: 호출마다 `ask` / `summary` / `embed` / `whisper` / `coaching` / `digest` / `debug` 태그를 붙여 게이트웨이 대시보드에서 기능별로 구분한다.
+- **게이트웨이 생성 (배포 전 필수)**: wrangler CLI에는 `ai-gateway` 명령이 없어 CLI 생성이 안 된다. 대시보드 → AI Gateway → Create Gateway, 이름 `people-os`로 만든다. 이름 있는 게이트웨이는 자동 생성되지 않는다 (`"default"`만 첫 요청 때 자동 생성). 게이트웨이가 없으면 AI 호출이 실패하고 기존 로컬 폴백으로 떨어진다 (앱은 안 죽는다).
+- 레이트 리밋 (대시보드에서 설정, 권장): 분당 100회. 질문 1건이 AI 호출 2회(임베딩+채팅)라 기존 세션당 분당 20회 제한과 전사·요약을 합쳐도 여유가 있다. 캐시는 게이트웨이 기본값 사용.
+- 되돌리기: 호출처에서 `aiGatewayOptions()` 인자만 빼면 된다 (`wrangler.toml` 변경이 없어 되돌림이 한 줄씩이다).
+
+## C5 Phase 3 — 업로드 문서 파서 라우팅 (2026-11-13, 로컬 구현)
+
+- 형식 판별은 확장자가 아니라 앞부분 바이트로 한다 (`src/parse.ts`): `%PDF` → PDF, `PK` + `mimetype=application/hwp+zip` → HWPX, `PK` + `[Content_Types].xml` → Office Open XML, `D0CF11E0` → HWP 5.0/구형 Office, 이미지 매직 바이트 → 이미지, UTF-8 디코딩되면 텍스트, `<?xml`/`<svg`/`<html` → toMarkdown.
+- HWPX는 Worker 안에서 직접 추출한다 (fflate로 zip을 풀어 `Contents/section*.xml`의 `<hp:t>` 텍스트를 모은다 — toMarkdown은 HWPX를 지원하지 않는다). 표 셀 텍스트도 순서대로 뽑히고, `제N조` 마커는 평문이라 조문 단위 청킹이 그대로 된다.
+- PDF·DOCX·XLSX·이미지·XML/HTML은 Workers AI `toMarkdown()`으로 변환한다 (`env.AI.toMarkdown({name, blob}, {gateway: {id: "people-os", skipCache: true}})` — 파일명에서 변환기를 고르므로 원본 파일명을 그대로 넘긴다).
+- 저장: 원본 `docs/<id>/source.<ext>` + 추출본 `docs/<id>/extracted.md` (R2), D1 `content`에는 추출본, `extract_status`/`extract_error`/`source_r2_key`는 마이그레이션 0012. 추출본은 기존 `indexDocument` 경로로 색인한다 (Vectorize 메타데이터 kind는 문서 실제 종류).
+- 실패 처리 (내용을 지어내지 않는다): HWP 5.0은 "HWPX 또는 PDF로 저장해 올려 주세요" 안내, 판별 불가 형식은 지원 형식 안내, 추출 실패(toMarkdown 에러·빈 결과·텍스트 없음)는 문서 행을 `extract_status='failed'`로 만들고 사유를 보여준다. 원본은 실패해도 R2에 남는다. 실패한 문서는 색인하지 않는다.
+- 상한: 문서 파일 10MB (우리 쪽 상한 — toMarkdown 공식 문서에 파일 크기 상한이 명시돼 있지 않다).
+- 로컬 검증: 단위 테스트 25개 통과 (판별 15개·HWPX 추출 9개·BOM 1개), `wrangler dev --local` e2e — HWPX 업로드 → `format: hwpx, extractStatus: ready`, D1 chunk 2개(제1조 목적·제2조 적용 범위), 질문 시 HWPX 문서가 근거로 나옴. 연차 질문은 여전히 연차휴가 규정이 1위. 로컬 AI가 안 돼 임베딩 upsert와 toMarkdown은 실패로 떨어지는 기존 한계가 있다 (D1 chunk는 남고, 에러가 그대로 보고됨). 라이브 확인 필요: DOCX/PDF 실제 변환, HWPX 근거 1위 여부.
+- 되돌리기: 파일 업로드 분기를 빼면 JSON 경로만 남는다 (마이그레이션 0012 컬럼은 남겨둬도 무해하다).
 
 ## 로컬 폴백 (중요)
 

@@ -1,8 +1,11 @@
 import { Hono } from "hono";
+import type { Context } from "hono";
 import PptxGenJS from "pptxgenjs";
 import { AgentSession } from "./agent-session";
 import { splitOggOpus } from "./ogg";
 import { coachingTranscript, localReflect, localSearchChunks, localSummarize, policies, questionTokens, sampleTranscript, splitMarkdownIntoChunks, splitPolicyIntoChunks, uid } from "./lib";
+import { AI_GATEWAY_ID, aiGatewayOptions } from "./ai-gateway";
+import { decodePlainText, detectDocumentFormat, extractHwpxText } from "./parse";
 import { generateDigest, getLatestDigest } from "./digest";
 
 export { AgentSession };
@@ -48,6 +51,10 @@ const EMBED_MODEL = "@cf/baai/bge-m3";
 // 쓰는 `@cf/openai/whisper-large-v3-turbo` + Base64 문자열 입력으로 바꾼다.
 const WHISPER_MODEL = "@cf/openai/whisper-large-v3-turbo";
 const MAX_AUDIO_BYTES = 25 * 1024 * 1024; // Plaud와 동일 상한
+// 문서 파일 업로드 상한 (C5 Phase 3, 우리 쪽 상한 — toMarkdown 공식 문서에
+// 파일 크기 상한이 명시돼 있지 않다). 10MB면 HR 규정·보고서·HWPX 대부분을
+// 커버하고, 128MB isolate 메모리에도 여유가 있다.
+const MAX_DOC_BYTES = 10 * 1024 * 1024;
 // 긴 오디오는 구간 단위로 나눠 전사한다 (사용자 합의: 한 번에 시도 → 안 되면
 // 30분 → 그래도 안 되면 15분). 구간 크기는 Cloudflare 공식 청킹 튜토리얼이
 // 쓰는 1MB를 따른다: 15분 구간(3.8MB)은 첫 구간 Whisper 호출이 27분 동안
@@ -191,7 +198,7 @@ async function transcribeAudio(env: Env, bytes: Uint8Array): Promise<{ ok: true;
     // 있어, 타임아웃이 그보다 길면 핸들러가 먼저 죽어 실패 처리가 안 된다.
     // 실패 구간은 건너뛰고 나머지는 이어서 전사한다.
     const out = await Promise.race([
-      env.AI.run(WHISPER_MODEL, { audio: base64Encode(bytes) }),
+      env.AI.run(WHISPER_MODEL, { audio: base64Encode(bytes) }, aiGatewayOptions({ skipCache: true, tag: "whisper" })),
       new Promise<never>((_, reject) => setTimeout(() => reject(new Error("whisper timed out after 90s")), 90_000)),
     ]);
     const text = (out as { text?: string }).text ?? "";
@@ -483,6 +490,9 @@ app.get("/api/seed-status", async (c) => {
 // ---- documents ----
 app.post("/api/documents", async (c) => {
   await ensureSeeded(c.env.DB);
+  // 파일 업로드: multipart/form-data (C5 Phase 3 파서 라우팅).
+  const ct = c.req.header("content-type") || "";
+  if (ct.includes("multipart/form-data")) return handleDocumentFileUpload(c);
   const body = await c.req.json().catch(() => ({})) as { title?: string; content?: string; kind?: string };
   if (!body.content || body.content.trim().length < 3) return c.json({ ok: false, error: "content is required" }, 400);
   const id = uid("doc");
@@ -499,6 +509,96 @@ app.post("/api/documents", async (c) => {
     .bind(id, title, body.kind || "transcript", body.content, r2Stored ? r2Key : null).run();
   return c.json({ ok: true, id, title, r2Stored, fallback: !r2Stored ? "d1-only" : null }, 201);
 });
+
+// 문서 파일 업로드 (C5 Phase 3 파서 라우팅).
+// multipart/form-data의 `file` 필드를 받아 매직 바이트로 형식을 판별하고,
+// HWPX는 Worker 안에서 직접, PDF·DOCX·XLSX·이미지는 Workers AI
+// toMarkdown()으로 텍스트를 뽑아 indexDocument 경로로 색인한다.
+// - 원본은 추출 성공 여부와 관계없이 R2 docs/<id>/source.<ext>에 남긴다.
+// - 추출본은 R2 docs/<id>/extracted.md에, D1 content에도 넣어 기존
+//   요약·질문·라이브러리 흐름이 그대로 동작하게 한다.
+// - 추출 실패 시에도 문서 행은 만든다 (extract_status='failed', 사유를
+//   extract_error에). 내용을 지어내지 않고, 실패한 문서는 색인하지 않는다.
+// - HWP 5.0 바이너리는 공모전 범위 밖이라 변환하지 않고 안내만 한다.
+async function handleDocumentFileUpload(c: Context<{ Bindings: Env }>) {
+  const form = await c.req.raw.formData().catch(() => null);
+  if (!form) return c.json({ ok: false, error: "multipart form-data is required" }, 400);
+  const file = form.get("file");
+  const isUpload = file !== null && typeof file === "object" && "arrayBuffer" in file && typeof (file as File).size === "number";
+  if (!isUpload) return c.json({ ok: false, error: "문서 파일이 필요합니다 (field: file)" }, 400);
+  const f = file as File;
+  if (f.size <= 0) return c.json({ ok: false, error: "빈 파일입니다" }, 400);
+  if (f.size > MAX_DOC_BYTES) return c.json({ ok: false, error: "파일은 10MB 이하만 올릴 수 있습니다" }, 400);
+
+  const id = uid("doc");
+  const title = ((form.get("title") as string) || "").trim() || f.name.replace(/\.[^.]+$/, "") || f.name;
+  const bytes = new Uint8Array(await f.arrayBuffer());
+  const detected = detectDocumentFormat(bytes);
+  const ext = (f.name.split(".").pop() || "bin").toLowerCase().replace(/[^a-z0-9]/g, "") || "bin";
+  const sourceKey = `docs/${id}/source.${ext}`;
+  let sourceStored = false;
+  try {
+    await c.env.FILES.put(sourceKey, bytes, { httpMetadata: { contentType: f.type || "application/octet-stream" } });
+    sourceStored = true;
+  } catch { sourceStored = false; }
+
+  let extracted = "";
+  let extractError: string | null = null;
+  if (detected.format === "ole") {
+    extractError = "HWP 5.0 / 구형 Office 파일은 변환할 수 없습니다. HWPX 또는 PDF로 저장해 올려 주세요.";
+  } else if (detected.format === "unknown") {
+    extractError = `지원하지 않는 파일 형식입니다 (${detected.detail}). PDF, DOCX, XLSX, HWPX, 이미지, 텍스트 파일을 올려 주세요.`;
+  } else if (detected.format === "text") {
+    extracted = decodePlainText(bytes);
+    if (extracted.trim().length < 3) extractError = "텍스트를 추출하지 못했습니다. 내용이 없는 파일입니다.";
+  } else if (detected.format === "hwpx") {
+    try {
+      extracted = extractHwpxText(detected.zipEntries ?? {});
+      if (extracted.trim().length < 3) extractError = "HWPX에서 텍스트를 추출하지 못했습니다. 텍스트가 없는 문서이거나 파일이 손상됐을 수 있습니다.";
+    } catch (e) {
+      extractError = `HWPX 압축을 풀지 못했습니다: ${(e instanceof Error ? e.message : String(e)).slice(0, 200)}`;
+    }
+  } else {
+    // pdf / ooxml / image / markup → Workers AI toMarkdown.
+    // toMarkdown은 파일명(name)으로 변환기를 고르므로 원본 파일명을 그대로 넘긴다.
+    // 게이트웨이 옵션은 S2와 같은 people-os 게이트웨이 (배포 전에 대시보드 생성 필요).
+    try {
+      const blob = new Blob([bytes.buffer], { type: f.type || "application/octet-stream" });
+      const conv = await c.env.AI.toMarkdown({ name: f.name, blob }, { gateway: { id: AI_GATEWAY_ID, skipCache: true } });
+      if (conv.format === "markdown" && conv.data.trim().length >= 3) {
+        extracted = conv.data;
+      } else if (conv.format === "error") {
+        extractError = `문서 변환에 실패했습니다: ${conv.error.slice(0, 200)}`;
+      } else {
+        extractError = "문서 변환 결과가 비어 있습니다. 텍스트가 없는 문서일 수 있습니다.";
+      }
+    } catch (e) {
+      extractError = `문서 변환에 실패했습니다: ${(e instanceof Error ? e.message : String(e)).slice(0, 200)}`;
+    }
+  }
+
+  const extractStatus = extractError ? "failed" : "ready";
+  const extractedKey = `docs/${id}/extracted.md`;
+  let extractedStored = false;
+  if (!extractError) {
+    try {
+      await c.env.FILES.put(extractedKey, extracted, { httpMetadata: { contentType: "text/markdown; charset=utf-8" } });
+      extractedStored = true;
+    } catch { extractedStored = false; }
+  }
+  await c.env.DB.prepare("INSERT INTO documents (id, title, kind, content, r2_key, source_r2_key, extract_status, extract_error) VALUES (?, ?, 'file', ?, ?, ?, ?, ?)")
+    .bind(id, title, extracted, !extractError && extractedStored ? extractedKey : null, sourceStored ? sourceKey : null, extractStatus, extractError).run();
+  let chunks = 0;
+  let upserted = 0;
+  let indexError: string | undefined;
+  if (!extractError && extracted.trim().length >= 3) {
+    const indexed = await indexDocument(c.env, { id, title, markdown: extracted, kind: "file" });
+    chunks = indexed.chunks;
+    upserted = indexed.upserted;
+    indexError = indexed.indexError;
+  }
+  return c.json({ ok: true, id, title, format: detected.format, extractStatus, extractError, chunks, upserted, indexError: indexError ?? null, r2Stored: extractedStored }, 201);
+}
 
 // 문서 요약 공용 함수 — POST /api/documents/:id/summarize와 S1 큐 소비자가 함께 쓴다.
 // Workers AI 시도 → 실패 시 추출식 폴백(localSummarize). D1에 저장까지 한다.
@@ -517,7 +617,7 @@ async function summarizeDocument(env: Env, docId: string): Promise<{ summary: st
         { role: "system", content: "다음 회의 전사본을 한국어로 3줄 요약하고 액션 아이템을 뽑아라. JSON으로만 답하라: {\"summary\":[\"...\"],\"actions\":[\"...\"]}" },
         { role: "user", content: doc.content.slice(0, 4000) },
       ],
-    });
+    }, aiGatewayOptions({ tag: "summary" }));
     const text = responseText(out);
     const parsed = extractJson(text);
     if (Array.isArray(parsed.summary) && parsed.summary.length) {
@@ -756,7 +856,7 @@ async function ensureVectorSeeded(env: Env, opts?: { force?: boolean }): Promise
     const list = rows.results || [];
     if (!list.length) return { seeded: false, error: "no chunks in D1" };
     const texts = list.map((ch) => `${ch.title} ${ch.article} ${ch.text}`);
-    const emb = await env.AI.run(EMBED_MODEL, { text: texts }) as { data: number[][] | number[] };
+    const emb = await env.AI.run(EMBED_MODEL, { text: texts }, aiGatewayOptions({ skipCache: true, tag: "embed" })) as { data: number[][] | number[] };
     const data = emb.data;
     if (!Array.isArray(data) || data.length !== texts.length || !Array.isArray(data[0])) {
       return { seeded: false, error: "unexpected embedding response shape" };
@@ -874,7 +974,7 @@ async function bumpKnowledgeEpoch(env: Env): Promise<number> {
 // 정책 시딩(ensureVectorSeeded)과 동일 형식의 메타데이터를 쓴다.
 // AI/Vectorize가 안 되면(로컬 dev) D1 chunk는 남기고 indexError를 돌려준다 —
 // 게시 자체는 망가뜨리지 않고, D1 텍스트 폴백 경로는 그 chunk로 답할 수 있다.
-async function indexDocument(env: Env, doc: { id: string; title: string; markdown: string }): Promise<{ chunks: number; upserted: number; indexError?: string }> {
+async function indexDocument(env: Env, doc: { id: string; title: string; markdown: string; kind?: string }): Promise<{ chunks: number; upserted: number; indexError?: string }> {
   const chunks = splitMarkdownIntoChunks({ id: doc.id, title: doc.title, body: doc.markdown });
   await env.DB.prepare("DELETE FROM chunks WHERE doc_id = ?").bind(doc.id).run();
   for (const ch of chunks) {
@@ -882,7 +982,7 @@ async function indexDocument(env: Env, doc: { id: string; title: string; markdow
   }
   try {
     const texts = chunks.map((ch) => `${doc.title} ${ch.article} ${ch.text}`);
-    const emb = await env.AI.run(EMBED_MODEL, { text: texts }) as { data: number[][] | number[] };
+    const emb = await env.AI.run(EMBED_MODEL, { text: texts }, aiGatewayOptions({ skipCache: true, tag: "embed" })) as { data: number[][] | number[] };
     const data = emb.data;
     // Workers AI는 텍스트 1개면 data를 평탄한 number[]로, 여러 개면
     // number[][]로 돌려준다 (ask 핸들러도 같은 정규화를 한다). 1개짜리
@@ -890,7 +990,10 @@ async function indexDocument(env: Env, doc: { id: string; title: string; markdow
     const rows = Array.isArray(data) && data.length > 0 && Array.isArray(data[0]) ? (data as number[][]) : [data as number[]];
     if (!Array.isArray(data) || rows.length !== texts.length) throw new Error("unexpected embedding response shape");
     if (rows[0].length !== EMBED_DIMS) throw new Error(`embedding dims ${rows[0].length} != index dims ${EMBED_DIMS}`);
-    const vectors = chunks.map((ch, i) => ({ id: ch.id, values: rows[i], metadata: { title: doc.title, section: ch.article, snippet: ch.text.slice(0, 220), kind: "tacit" } }));
+    // Vectorize 메타데이터 kind는 문서의 실제 종류를 쓴다 (C5 Phase 3:
+    // 파일 업로드 문서가 'tacit'으로 오표시되지 않게. D1 documents.kind가
+    // 출처 배지의 기준이고, 여기는 알 수 없는 id 폴백 경로에서만 쓰인다).
+    const vectors = chunks.map((ch, i) => ({ id: ch.id, values: rows[i], metadata: { title: doc.title, section: ch.article, snippet: ch.text.slice(0, 220), kind: doc.kind ?? "tacit" } }));
     await env.VECTOR.upsert(vectors);
     return { chunks: chunks.length, upserted: vectors.length };
   } catch (e) {
@@ -919,7 +1022,7 @@ async function verifyTacitEvidence(
   for (let attempt = 0; attempt < 3; attempt++) {
     try {
       await ensureVectorSeeded(env);
-      const emb = await env.AI.run(EMBED_MODEL, { text: [question] }) as { data: number[][] | number[] };
+      const emb = await env.AI.run(EMBED_MODEL, { text: [question] }, aiGatewayOptions({ skipCache: true, tag: "embed" })) as { data: number[][] | number[] };
       const raw = emb.data;
       const values = new Float32Array(Array.isArray(raw[0]) ? (raw[0] as number[]) : (raw as number[]));
       const vec = await env.VECTOR.query(values, { topK: 3, returnMetadata: "all" });
@@ -1050,7 +1153,7 @@ app.post("/api/ask", async (c) => {
   try {
     await ensureVectorSeeded(c.env);
     const embedStart = Date.now();
-    const emb = await c.env.AI.run(EMBED_MODEL, { text: [searchQuestion] }) as { data: number[][] | number[] };
+    const emb = await c.env.AI.run(EMBED_MODEL, { text: [searchQuestion] }, aiGatewayOptions({ skipCache: true, tag: "embed" })) as { data: number[][] | number[] };
     mark("embed", embedStart);
     const raw = emb.data;
     const values = new Float32Array(Array.isArray(raw[0]) ? (raw[0] as number[]) : (raw as number[]));
@@ -1114,7 +1217,7 @@ app.post("/api/ask", async (c) => {
           { role: "system", content: "너는 HR 규정 안내 에이전트다. 주어진 근거 문서만을 근거로 한국어로 답하고, 근거에 없는 내용은 지어내지 마라. 근거 문서명을 답에 포함하라." },
           { role: "user", content: `질문: ${question}\n근거:\n${context}` },
         ],
-      });
+      }, aiGatewayOptions({ skipCache: body.force === true, tag: "ask" }));
       const text = responseText(out);
       if (text && text.trim().length > 10) { answer = text.trim(); engine = "workers-ai"; } else throw new Error("empty ai answer");
     } catch {
@@ -1237,7 +1340,7 @@ app.post("/api/gaps/:id/publish", async (c) => {
       .bind(docId, title, content, r2Stored ? r2Key : null, author).run();
   }
   // 색인 (D1 chunks 저장 + Vectorize upsert). AI가 안 되면 D1 chunk만 남긴다.
-  const indexed = await indexDocument(c.env, { id: docId, title, markdown: content });
+  const indexed = await indexDocument(c.env, { id: docId, title, markdown: content, kind: "tacit" });
   // 캐시 무효화: epoch를 올려 게시 전 캐시 답이 나오지 않게 한다.
   const epoch = await bumpKnowledgeEpoch(c.env);
   await c.env.DB.prepare("UPDATE knowledge_gaps SET status = 'answered', doc_id = ? WHERE id = ?").bind(docId, id).run();
@@ -1271,7 +1374,7 @@ app.post("/api/coaching/reflect", async (c) => {
         { role: "system", content: "너는 코칭 리플렉션 분석가다. 세션 전사본에서 핵심 질문, 반복 패턴, 다음 세션 질문 3개를 한국어로 뽑아 JSON으로만 답하라: {\"questions\":[],\"patterns\":[],\"next_questions\":[]}" },
         { role: "user", content: transcript.slice(0, 4000) },
       ],
-    });
+    }, aiGatewayOptions({ tag: "coaching" }));
     const text = responseText(ai);
     const parsed = extractJson(text) as { questions?: unknown; patterns?: unknown; next_questions?: unknown };
     if (Array.isArray(parsed.patterns) && parsed.patterns.length) {
@@ -1389,7 +1492,7 @@ app.get("/api/deck/:id", async (c) => {
 // ---- library ----
 app.get("/api/library", async (c) => {
   await ensureSeeded(c.env.DB);
-  const docs = await c.env.DB.prepare("SELECT id, title, kind, summary, actions, created_at FROM documents ORDER BY created_at DESC LIMIT 20").all();
+  const docs = await c.env.DB.prepare("SELECT id, title, kind, summary, actions, created_at, extract_status, extract_error FROM documents ORDER BY created_at DESC LIMIT 20").all();
   const pols = await c.env.DB.prepare("SELECT id, title, section FROM policies ORDER BY id").all();
   const refls = await c.env.DB.prepare("SELECT id, session_id, patterns, next_questions, created_at FROM reflections ORDER BY created_at DESC LIMIT 10").all();
   return c.json({ ok: true, documents: docs.results || [], policies: pols.results || [], reflections: refls.results || [] });
@@ -1404,7 +1507,7 @@ app.get("/api/debug-ai", async (c) => {
   const out: Record<string, unknown> = {};
   out.vectorSeed = await ensureVectorSeeded(c.env);
   try {
-    const emb = await c.env.AI.run(EMBED_MODEL, { text: ["출장비 청구"] }) as { data: number[][] | number[] };
+    const emb = await c.env.AI.run(EMBED_MODEL, { text: ["출장비 청구"] }, aiGatewayOptions({ skipCache: true, tag: "debug" })) as { data: number[][] | number[] };
     const raw = emb.data;
     const vals = Array.isArray(raw[0]) ? (raw[0] as number[]) : (raw as number[]);
     out.embed = { ok: true, dims: vals.length };
@@ -1422,7 +1525,7 @@ app.get("/api/debug-ai", async (c) => {
   const llmResults: Array<Record<string, unknown>> = [];
   for (const model of llmCandidates) {
     try {
-      const res = await c.env.AI.run(model, { messages: [{ role: "user", content: "한 줄로 답해: 2+2는?" }] });
+      const res = await c.env.AI.run(model, { messages: [{ role: "user", content: "한 줄로 답해: 2+2는?" }] }, aiGatewayOptions({ skipCache: true, tag: "debug" }));
       const text = responseText(res);
       llmResults.push({ model, ok: true, text: text.slice(0, 200) });
     } catch (e) {
@@ -1488,10 +1591,10 @@ async function processPipelineMessage(env: Env, msg: PipelineMessage): Promise<v
     await setPipelineStage(env, rec.id, "summarizing");
     await summarizeDocument(env, rec.doc_id);
     await setPipelineStage(env, rec.id, "indexing");
-    const doc = await env.DB.prepare("SELECT title, content FROM documents WHERE id = ?").bind(rec.doc_id)
-      .first<{ title: string; content: string }>();
+    const doc = await env.DB.prepare("SELECT title, content, kind FROM documents WHERE id = ?").bind(rec.doc_id)
+      .first<{ title: string; content: string; kind: string }>();
     if (!doc) throw new Error("document not found");
-    const indexed = await indexDocument(env, { id: rec.doc_id, title: doc.title, markdown: doc.content });
+    const indexed = await indexDocument(env, { id: rec.doc_id, title: doc.title, markdown: doc.content, kind: doc.kind });
     if (indexed.indexError) throw new Error(`index failed: ${indexed.indexError}`);
     await setPipelineStage(env, rec.id, "done");
   } catch (e) {
