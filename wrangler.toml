@@ -13,19 +13,22 @@ binding = "ASSETS"
 binding = "DB"
 database_name = "people-os-db"
 database_id = "5dff997a-fe7b-4f27-9624-1c88e40857c1"
+preview_database_id = "36113f26-d305-4bef-963e-92f60a7d0a02" # wrangler dev --remote용 미리보기 DB (배포에는 영향 없음)
 migrations_dir = "migrations"
 
 [[kv_namespaces]]
 binding = "CACHE"
 id = "de4c7ddf4c76495381ba82c56fb23dbb"
+preview_id = "b6247fcf1ee2467cbeea51190a0d0413" # wrangler dev --remote용 미리보기 네임스페이스 (배포에는 영향 없음)
 
 [[r2_buckets]]
 binding = "FILES"
 bucket_name = "people-os-files"
+preview_bucket_name = "people-os-dev-preview" # wrangler dev --remote용 미리보기 버킷 (배포에는 영향 없음)
 
 [[vectorize]]
 binding = "VECTOR"
-index_name = "people-os-index"
+index_name = "people-os-index-m3"
 
 [ai]
 binding = "AI"
@@ -37,3 +40,6 @@ class_name = "AgentSession"
 [[migrations]]
 tag = "v1"
 new_sqlite_classes = ["AgentSession"]
+
+[triggers]
+crons = ["0 22 * * *"]

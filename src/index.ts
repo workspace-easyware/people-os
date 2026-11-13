@@ -2,7 +2,8 @@ import { Hono } from "hono";
 import PptxGenJS from "pptxgenjs";
 import { AgentSession } from "./agent-session";
 import { splitOggOpus } from "./ogg";
-import { coachingTranscript, localReflect, localSearch, localSummarize, policies, sampleTranscript, uid } from "./lib";
+import { coachingTranscript, localReflect, localSearchChunks, localSummarize, policies, questionTokens, sampleTranscript, splitPolicyIntoChunks, uid } from "./lib";
+import { generateDigest, getLatestDigest } from "./digest";
 
 export { AgentSession };
 
@@ -24,9 +25,13 @@ const app = new Hono<{ Bindings: Env }>();
 
 // llama-3-8b-instruct와 llama-3.1-8b-instruct는 2026-05-30에 deprecated 되어
 // Workers AI 바인딩에서 5028을 반환한다. (REST API에서는 3.1-8b가 되지만 바인딩에서는 안 된다.)
-// 임베딩은 bge-base-en-v1.5 (768차원, Vectorize 인덱스와 동일).
 const LLM_MODEL = "@cf/meta/llama-4-scout-17b-16e-instruct";
-const EMBED_MODEL = "@cf/baai/bge-base-en-v1.5";
+// 임베딩은 bge-m3 (1024차원, 다국어, Vectorize 인덱스 people-os-index-m3).
+// bge-base-en-v1.5(768차원, 영어용)는 한국어 질문을 구분하지 못해 근거 있음
+// 질문과 근거 없음 질문의 코사인 유사도가 0.81~0.83으로 겹쳤다 (2026-11-13
+// Chrome 확인: "연차 3일" 0.83/0.82/0.81, "출산 전후 재택" 0.82/0.82/0.81).
+// 그래서 하한만으로는 근거를 가릴 수 없어 bge-m3으로 교체한다 (C5 Phase 2).
+const EMBED_MODEL = "@cf/baai/bge-m3";
 // Plaud 전사본 입력의 Cloudflare판: Workers AI Whisper.
 // 처음에는 `@cf/openai/whisper` + `{ audio: number[] }`를 썼으나, Ogg Opus
 // 입력에서 호출이 끝나지 않고 조용히 멈췄다 (2분짜리 489KB 클립도 5분 넘게
@@ -41,6 +46,23 @@ const MAX_AUDIO_BYTES = 25 * 1024 * 1024; // Plaud와 동일 상한
 // mp3와 489KB/2분 ogg 클립은 1분 안에 전사됐다. 시간 상한 15분도 함께 둔다.
 const CHUNK_SECONDS = 900;
 const CHUNK_BYTES = 1024 * 1024;
+// RAG 근거 하한 (C5, Baryon AX): Vectorize 코사인 유사도가 이 값 미만인
+// 매치는 근거가 없는 것으로 본다. bge-base-en 시절에는 근거 있음/없음
+// 질문이 둘 다 0.81~0.83으로 몰려 하한만으로 가릴 수 없었다 (2026-11-13
+// Chrome 확인). bge-m3 교체 + 아래 키워드 게이트가 1차 판별자이고,
+// 이 하한은 2차 안전망이다. Chrome에서 보고되는 실제 bge-m3 점수 분포로
+// 다시 보정한다.
+const SCORE_FLOOR = 0.55;
+// 키워드 게이트 하한 (C5 Phase 2): Vectorize 상위 매치가 D1 키워드 검색
+// (localSearchChunks)에서도 이 점수 이상 겹쳐야 근거로 인정한다.
+// "연차 3일"은 연차 15/근태 7/출장 1, "출장비"는 출장 8, "출산 전후 재택"은
+// 전원 0이라 2가 적정하다 (로컬 검증, 2026-11-13).
+const KEYWORD_GATE_MIN = 2;
+// Vectorize 시딩 상태 키 (C5 Phase 2 lazy 시딩, D1 meta 테이블).
+const VECTOR_INDEX_NAME = "people-os-index-m3";
+const VECTOR_SEED_KEY = "vector_seeded:bge-m3:people-os-index-m3";
+const VECTOR_SEED_ERROR_KEY = "vector_seed_error:bge-m3:people-os-index-m3";
+const EMBED_DIMS = 1024;
 
 // 운영용 경로 보호: /api/debug-ai, /api/seed-vectors는 X-Admin-Secret 헤더가
 // ADMIN_SECRET 환경값과 일치할 때만 허용한다. 시크릿이 설정돼 있지 않으면
@@ -245,6 +267,8 @@ async function ensureSchema(db: D1Database) {
     CREATE TABLE IF NOT EXISTS tasks (id TEXT PRIMARY KEY, title TEXT NOT NULL, source TEXT, done INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL DEFAULT (datetime('now')), done_at TEXT);
     CREATE TABLE IF NOT EXISTS decks (id TEXT PRIMARY KEY, title TEXT NOT NULL, r2_key TEXT NOT NULL, bytes INTEGER NOT NULL DEFAULT 0, slides INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL DEFAULT (datetime('now')));
     CREATE TABLE IF NOT EXISTS recordings (id TEXT PRIMARY KEY, title TEXT NOT NULL, provider TEXT NOT NULL DEFAULT 'workers-ai', model TEXT NOT NULL DEFAULT '@cf/openai/whisper', object_key TEXT NOT NULL, mime_type TEXT NOT NULL DEFAULT 'application/octet-stream', size INTEGER NOT NULL DEFAULT 0, transcript TEXT, transcript_status TEXT NOT NULL DEFAULT 'pending', doc_id TEXT, progress TEXT, partial TEXT DEFAULT '', done_chunks INTEGER DEFAULT 0, lock_until INTEGER, created_at TEXT NOT NULL DEFAULT (datetime('now')));
+    CREATE TABLE IF NOT EXISTS chunks (id TEXT PRIMARY KEY, doc_id TEXT NOT NULL, article TEXT NOT NULL, text TEXT NOT NULL, ord INTEGER NOT NULL);
+    CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL, updated_at TEXT NOT NULL DEFAULT (datetime('now')));
   `);
 }
 
@@ -254,6 +278,16 @@ async function ensureSeeded(db: D1Database) {
   if (!count || count.n === 0) {
     for (const p of policies()) {
       await db.prepare("INSERT OR IGNORE INTO policies (id, title, section, body) VALUES (?, ?, ?, ?)").bind(p.id, p.title, p.section, p.body).run();
+    }
+  }
+  // 조문 청킹 (C5): policies와 별개로 세어, 마이그레이션 0006 적용 뒤
+  // 이미 정책이 있는 DB에서도 chunk가 채워지게 한다. 멱등.
+  const chunkCount = await db.prepare("SELECT COUNT(*) AS n FROM chunks").first<{ n: number }>();
+  if (!chunkCount || chunkCount.n === 0) {
+    for (const p of policies()) {
+      for (const ch of splitPolicyIntoChunks(p)) {
+        await db.prepare("INSERT OR IGNORE INTO chunks (id, doc_id, article, text, ord) VALUES (?, ?, ?, ?, ?)").bind(ch.id, ch.doc_id, ch.article, ch.text, ch.ord).run();
+      }
     }
   }
 }
@@ -272,11 +306,30 @@ function bindingStatus(env: Env) {
 // ---- health ----
 app.post("/api/health", async (c) => {
   await ensureSeeded(c.env.DB);
+  // 프론트가 로드 때 POST /api/health를 부르므로, 여기서 Vectorize lazy
+  // 시딩도 함께 워밍업한다 (첫 질문 전에 인덱스를 채워둔다).
+  await ensureVectorSeeded(c.env);
   return c.json({ ok: true, service: "people-os", mode: "live", bindings: bindingStatus(c.env), note: "Workers AI / Vectorize는 로컬에서 폴백으로 동작할 수 있다. wrangler dev --local 기준." });
 });
 app.get("/api/health", async (c) => {
   await ensureSeeded(c.env.DB);
+  await ensureVectorSeeded(c.env);
   return c.json({ ok: true, service: "people-os", mode: "live", bindings: bindingStatus(c.env) });
+});
+
+// Vectorize 시딩 상태 (C5 Phase 2, 공개 읽기 전용): 시딩이 안 돼 있으면
+// 여기서 직접 시딩을 시도한 뒤 상태를 돌려준다. 비밀·문서 내용은 안 나온다.
+app.get("/api/seed-status", async (c) => {
+  await ensureSeeded(c.env.DB);
+  const seed = await ensureVectorSeeded(c.env);
+  const chunks = await c.env.DB.prepare("SELECT COUNT(*) AS n FROM chunks").first<{ n: number }>();
+  const errRow = await c.env.DB.prepare("SELECT value FROM meta WHERE key = ?").bind(VECTOR_SEED_ERROR_KEY).first<{ value: string }>();
+  let lastError: string | null = null;
+  if (errRow) {
+    try { lastError = (JSON.parse(errRow.value) as { error?: string }).error ?? errRow.value; }
+    catch { lastError = errRow.value; }
+  }
+  return c.json({ ok: true, model: EMBED_MODEL, index: VECTOR_INDEX_NAME, dims: EMBED_DIMS, seeded: seed.seeded, upserted: seed.upserted ?? null, chunks: chunks?.n ?? 0, lastError, error: seed.error ?? null });
 });
 
 // ---- documents ----
@@ -427,6 +480,149 @@ app.post("/api/recordings/:id/retry", async (c) => {
   return c.json({ ok: true, recordingId: row.id, transcriptStatus: "processing" });
 });
 
+type Source = { id: string; title: string; section: string; snippet: string; score: number };
+
+// Vectorize 매치를 조문 단위 근거로 바꾼다 (C5).
+// - chunk id(새 색인)면 D1 chunks에서 직접 읽는다.
+// - policy id(재시딩 전 구 색인)면 그 정책의 조문 중 질문과 키워드가 가장
+//   겹치는 조문 1개를 쓴다. chunks가 없으면 정책 본문 앞 220자로 폴백.
+// - 같은 doc_id가 두 번 나오면(구 정책 벡터 + 신 chunk 벡터가 둘 다 매치)
+//   score가 높은 쪽 하나만 남긴다.
+async function resolveSources(
+  env: Env,
+  question: string,
+  matches: Array<{ id: string; score: number; metadata?: Record<string, unknown> }>
+): Promise<Source[]> {
+  const byDoc = new Map<string, Source>();
+  for (const m of matches) {
+    const chunk = await env.DB.prepare("SELECT id, doc_id, article, text FROM chunks WHERE id = ?").bind(m.id)
+      .first<{ id: string; doc_id: string; article: string; text: string }>();
+    if (chunk) {
+      const policy = await env.DB.prepare("SELECT title FROM policies WHERE id = ?").bind(chunk.doc_id).first<{ title: string }>();
+      const src: Source = { id: chunk.id, title: policy?.title ?? chunk.doc_id, section: chunk.article, snippet: chunk.text, score: m.score };
+      const prev = byDoc.get(chunk.doc_id);
+      if (!prev || prev.score < m.score) byDoc.set(chunk.doc_id, src);
+      continue;
+    }
+    const policy = await env.DB.prepare("SELECT id, title, section, body FROM policies WHERE id = ?").bind(m.id)
+      .first<{ id: string; title: string; section: string; body: string }>();
+    if (policy) {
+      const rows = await env.DB.prepare("SELECT id, doc_id, article, text, ord FROM chunks WHERE doc_id = ? ORDER BY ord").bind(policy.id)
+        .all<{ id: string; doc_id: string; article: string; text: string; ord: number }>();
+      const list = rows.results || [];
+      if (list.length) {
+        const scored = localSearchChunks(question, list.map((ch) => ({ ...ch, title: policy.title })));
+        const best = scored.length ? scored[0] : { ...list[0], score: 0, snippet: list[0].text };
+        const src: Source = { id: best.id, title: policy.title, section: best.article, snippet: best.text, score: m.score };
+        const prev = byDoc.get(policy.id);
+        if (!prev || prev.score < m.score) byDoc.set(policy.id, src);
+      } else {
+        const src: Source = { id: policy.id, title: policy.title, section: policy.section, snippet: policy.body.slice(0, 220), score: m.score };
+        const prev = byDoc.get(policy.id);
+        if (!prev || prev.score < m.score) byDoc.set(policy.id, src);
+      }
+      continue;
+    }
+    // 알 수 없는 id — 메타데이터가 있으면 그대로 쓴다.
+    const meta = (m.metadata || {}) as { title?: string; section?: string; snippet?: string };
+    if (meta.snippet) {
+      const src: Source = { id: m.id, title: meta.title || m.id, section: meta.section || "", snippet: meta.snippet, score: m.score };
+      const prev = byDoc.get(m.id);
+      if (!prev || prev.score < m.score) byDoc.set(m.id, src);
+    }
+  }
+  return [...byDoc.values()].sort((a, b) => b.score - a.score);
+}
+
+// Vectorize 시딩 (C5 Phase 2): bge-m3 1024차원 새 인덱스 people-os-index-m3.
+// ADMIN_SECRET이 없어 /api/seed-vectors를 부를 수 없으므로, Worker가 첫
+// 사용 때 D1 chunks를 bge-m3으로 임베딩해 직접 upsert한다 (lazy 시딩).
+// D1 meta 테이블에 결과를 남겨 한 번만 시딩하고, 실패하면 다음번에 재시도한다.
+// 임베딩·upsert를 각각 1회 배치 호출로 묶어 첫 사용 지연을 줄인다.
+// upsert는 같은 id에 멱등이라 동시 실행이 겹쳐도 안전하다.
+// 이 함수는 절대 던지지 않는다 — 실패하면 {seeded:false, error}를 돌려준다.
+async function ensureVectorSeeded(env: Env, opts?: { force?: boolean }): Promise<{ seeded: boolean; dims?: number; upserted?: number; total?: number; error?: string }> {
+  try {
+    if (!opts?.force) {
+      const flag = await env.DB.prepare("SELECT value FROM meta WHERE key = ?").bind(VECTOR_SEED_KEY).first<{ value: string }>();
+      if (flag) {
+        try {
+          const parsed = JSON.parse(flag.value) as { dims?: number; upserted?: number };
+          return { seeded: true, dims: parsed.dims, upserted: parsed.upserted };
+        } catch { return { seeded: true }; }
+      }
+    }
+    const rows = await env.DB.prepare(
+      "SELECT c.id, c.doc_id, c.article, c.text, p.title FROM chunks c JOIN policies p ON p.id = c.doc_id ORDER BY c.doc_id, c.ord"
+    ).all<{ id: string; doc_id: string; article: string; text: string; title: string }>();
+    const list = rows.results || [];
+    if (!list.length) return { seeded: false, error: "no chunks in D1" };
+    const texts = list.map((ch) => `${ch.title} ${ch.article} ${ch.text}`);
+    const emb = await env.AI.run(EMBED_MODEL, { text: texts }) as { data: number[][] | number[] };
+    const data = emb.data;
+    if (!Array.isArray(data) || data.length !== texts.length || !Array.isArray(data[0])) {
+      return { seeded: false, error: "unexpected embedding response shape" };
+    }
+    const dims = (data[0] as number[]).length;
+    if (dims !== EMBED_DIMS) {
+      return { seeded: false, error: `embedding dims ${dims} != index dims ${EMBED_DIMS}` };
+    }
+    const vectors = list.map((ch, i) => ({ id: ch.id, values: data[i] as number[], metadata: { title: ch.title, section: ch.article, snippet: ch.text.slice(0, 220) } }));
+    await env.VECTOR.upsert(vectors);
+    const result = { seeded: true, dims, upserted: list.length, total: list.length, at: new Date().toISOString() };
+    await env.DB.prepare("INSERT OR REPLACE INTO meta (key, value, updated_at) VALUES (?, ?, datetime('now'))").bind(VECTOR_SEED_KEY, JSON.stringify(result)).run();
+    await env.DB.prepare("DELETE FROM meta WHERE key = ?").bind(VECTOR_SEED_ERROR_KEY).run();
+    return result;
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    try {
+      await env.DB.prepare("INSERT OR REPLACE INTO meta (key, value, updated_at) VALUES (?, ?, datetime('now'))")
+        .bind(VECTOR_SEED_ERROR_KEY, JSON.stringify({ error: msg, at: new Date().toISOString() })).run();
+    } catch { /* meta 기록 실패는 무시 */ }
+    return { seeded: false, error: msg };
+  }
+}
+
+// 키워드 게이트 (C5 Phase 2): Vectorize 코사인 점수만으로는 한국어 근거를
+// 가릴 수 없다 (bge-base-en: 근거 있음 0.81~0.83 / 근거 없음 0.81~0.82로 겹침).
+// 그래서 Vectorize 상위 매치가 D1 키워드 검색(localSearchChunks)에서도
+// 겹침이 있는지 확인한다. 겹침 점수가 KEYWORD_GATE_MIN 미만이면 근거에서 뺀다.
+// - chunk id면 해당 chunk, policy id(구 색인)면 그 정책의 조문 중 최고 점수로 본다.
+// - D1에서 chunk를 못 찾는 id(알 수 없는 id)는 그대로 둔다 (fail-open).
+// - 질문에서 겹침 신호가 되는 토큰이 하나도 없으면 게이트를 건너뛴다
+//   ("쉴 수 있나요?"처럼 조사·어미만 있는 질문은 Vectorize에 맡긴다).
+async function keywordGate(
+  env: Env,
+  question: string,
+  matches: Array<{ id: string; score: number; metadata?: Record<string, unknown> }>
+): Promise<Array<{ id: string; score: number; metadata?: Record<string, unknown> }>> {
+  if (questionTokens(question).length === 0) return matches;
+  const kept: Array<{ id: string; score: number; metadata?: Record<string, unknown> }> = [];
+  for (const m of matches) {
+    const chunk = await env.DB.prepare("SELECT id, doc_id, article, text, ord FROM chunks WHERE id = ?").bind(m.id)
+      .first<{ id: string; doc_id: string; article: string; text: string; ord: number }>();
+    let chunks: Array<{ id: string; doc_id: string; article: string; text: string; ord: number }> = [];
+    let title = m.id;
+    if (chunk) {
+      chunks = [chunk];
+      const p = await env.DB.prepare("SELECT title FROM policies WHERE id = ?").bind(chunk.doc_id).first<{ title: string }>();
+      title = p?.title ?? chunk.doc_id;
+    } else {
+      const policy = await env.DB.prepare("SELECT id, title FROM policies WHERE id = ?").bind(m.id).first<{ id: string; title: string }>();
+      if (!policy) { kept.push(m); continue; } // 알 수 없는 id — fail-open
+      title = policy.title;
+      const rows = await env.DB.prepare("SELECT id, doc_id, article, text, ord FROM chunks WHERE doc_id = ?").bind(policy.id)
+        .all<{ id: string; doc_id: string; article: string; text: string; ord: number }>();
+      chunks = rows.results || [];
+      if (!chunks.length) { kept.push(m); continue; }
+    }
+    const scored = localSearchChunks(question, chunks.map((ch) => ({ ...ch, title })));
+    const best = scored.length ? Math.max(...scored.map((s) => s.score)) : 0;
+    if (best >= KEYWORD_GATE_MIN) kept.push(m);
+  }
+  return kept;
+}
+
 // ---- ask (RAG) ----
 app.post("/api/ask", async (c) => {
   await ensureSeeded(c.env.DB);
@@ -446,75 +642,95 @@ app.post("/api/ask", async (c) => {
   const d1Cache = await c.env.DB.prepare("SELECT value FROM cache WHERE key = ?").bind(cacheKey).first<{ value: string }>();
   if (d1Cache) return c.json({ ...JSON.parse(d1Cache.value), cached: true, cacheVia: "d1", sessionId });
 
-  // 후속 질문 문맥: 같은 세션의 직전 질문을 검색 쿼리에 보태 연차/출장 등 주제를 잃지 않게 한다
+  // 후속 질문 문맥: 같은 세션의 직전 질문을 검색 쿼리에 보태 주제를 잃지 않게 한다.
+  // 단, 현재 질문에 내용 토큰이 하나라도 있으면 독립 질문으로 보고 보태지 않는다
+  // ("출산 전후 재택" 뒤에 "연차 3일"을 보태면 연차 근거가 딸려오는 오염이 생긴다).
+  // 내용 토큰이 전혀 없는 지시어성 후속 질문("그건 어떻게 돼?", "며칠 전에?")에만 보탠다.
   let searchQuestion = question;
   try {
     const stub = c.env.AGENT_SESSION.get(c.env.AGENT_SESSION.idFromName(sessionId));
     const res = await stub.fetch("https://do/history");
     const data = await res.json() as { history?: Array<{ role: string; content: string }> };
     const lastUser = [...(data.history || [])].reverse().find((h) => h.role === "user");
-    if (lastUser && !/연차|출장|근무|평가|보안|교육/.test(question)) searchQuestion = `${question} ${lastUser.content}`;
+    if (lastUser && questionTokens(question).length === 0) searchQuestion = `${question} ${lastUser.content}`;
   } catch {
     try {
       const prev = await c.env.DB.prepare("SELECT history FROM sessions WHERE id = ?").bind(sessionId).first<{ history: string }>();
       if (prev) {
         const hist = JSON.parse(prev.history) as Array<{ role: string; content: string }>;
         const lastUser = [...hist].reverse().find((h) => h.role === "user");
-        if (lastUser && !/연차|출장|근무|평가|보안|교육/.test(question)) searchQuestion = `${question} ${lastUser.content}`;
+        if (lastUser && questionTokens(question).length === 0) searchQuestion = `${question} ${lastUser.content}`;
       }
     } catch { /* 세션 조회 실패 시 현재 질문만으로 검색 */ }
   }
 
-  // 근거 검색: 질문을 임베딩해 Vectorize에서 검색 → 실패 시 D1 텍스트 검색 폴백
-  let sources: Array<{ id: string; title: string; section: string; snippet: string; score: number }> = [];
+  // 근거 검색: 질문을 임베딩해 Vectorize에서 검색 → 실패 시 D1 조문 텍스트 검색 폴백
+  // C5 (Baryon AX): Vectorize 점수 하한 SCORE_FLOOR를 적용한다. 조회는
+  // 성공했는데 하한을 넘는 근거가 없으면 근거가 없는 것이므로 D1 폴백·LLM
+  // 호출 없이 grounded:false로 답한다 (근거를 지어내지 않는다).
+  // C5 Phase 2: 검색 전에 lazy 시딩을 보장하고, 하한을 통과한 매치에
+  // 키워드 게이트를 한 번 더 건다 (코사인 점수만으로는 한국어를 못 가린다).
+  let sources: Source[] = [];
   let searchEngine = "d1-text";
+  let noEvidence = false; // Vectorize가 성공했는데 하한을 넘는 근거가 없음
   try {
+    await ensureVectorSeeded(c.env);
     const emb = await c.env.AI.run(EMBED_MODEL, { text: [searchQuestion] }) as { data: number[][] | number[] };
     const raw = emb.data;
     const values = new Float32Array(Array.isArray(raw[0]) ? (raw[0] as number[]) : (raw as number[]));
     const vec = await c.env.VECTOR.query(values, { topK: 3, returnMetadata: "all" });
-    if (vec.matches && vec.matches.length) {
-      searchEngine = "vectorize";
-      sources = vec.matches.map((m) => {
-        const meta = (m.metadata || {}) as { title?: string; section?: string; snippet?: string };
-        return { id: String(m.id), title: meta.title || String(m.id), section: meta.section || "", snippet: meta.snippet || "", score: m.score || 0 };
-      });
-      // 메타데이터가 비어 있으면 D1에서 규정 본문을 채운다
-      for (const s of sources) {
-        if (!s.snippet) {
-          const row = await c.env.DB.prepare("SELECT title, section, body FROM policies WHERE id = ?").bind(s.id).first<{ title: string; section: string; body: string }>();
-          if (row) { s.title = row.title; s.section = row.section; s.snippet = row.body.slice(0, 220); }
-        }
+    const all = vec.matches || [];
+    const matches = all.filter((m) => (m.score || 0) >= SCORE_FLOOR);
+    if (matches.length > 0) {
+      const gated = await keywordGate(c.env, searchQuestion, matches.map((m) => ({ id: String(m.id), score: m.score || 0, metadata: (m.metadata || {}) as Record<string, unknown> })));
+      if (gated.length === 0) {
+        noEvidence = true; // Vectorize는 찾았으나 키워드 관련성 없음 — D1 폴백도 안 탐
+      } else {
+        searchEngine = "vectorize";
+        sources = await resolveSources(c.env, searchQuestion, gated);
+        if (sources.length === 0) throw new Error("no resolvable matches");
       }
-      if (!sources.length || !sources[0].snippet) throw new Error("no vectorize matches");
-    } else throw new Error("no vectorize matches");
+    } else if (all.length > 0) {
+      noEvidence = true; // 하한 이하 — 근거 없음 확정, 폴백 안 탐
+    } else {
+      throw new Error("no vectorize matches");
+    }
   } catch {
-    const rows = await c.env.DB.prepare("SELECT id, title, section, body FROM policies").all<{ id: string; title: string; section: string; body: string }>();
-    sources = localSearch(searchQuestion, rows.results || []);
-    searchEngine = "d1-text";
+    if (!noEvidence) {
+      const rows = await c.env.DB.prepare(
+        "SELECT c.id, c.doc_id, c.article, c.text, c.ord, p.title FROM chunks c JOIN policies p ON p.id = c.doc_id"
+      ).all<{ id: string; doc_id: string; article: string; text: string; ord: number; title: string }>();
+      const found = localSearchChunks(searchQuestion, rows.results || []);
+      sources = found.map((f) => ({ id: f.id, title: f.title, section: f.article, snippet: f.snippet, score: f.score }));
+      searchEngine = "d1-text";
+    }
   }
-  // 문서 본문도 근거 후보에 추가 (키워드 겹침이 있으면)
-  if (sources.length === 0) {
-    sources = [{ id: "policy-leave", title: "연차휴가", section: "제3장 휴가 — 제12조 연차휴가", snippet: policies()[0].body.slice(0, 220), score: 1 }];
-  }
-
-  // 답변 생성: Workers AI 시도 → 실패 시 근거 기반 템플릿 답변
+  // 근거 없음: LLM을 호출하지 않고 경고로 답한다 (C5, Baryon AX).
+  // 연차휴가 규정을 강제 근거로 넣던 폴백은 삭제했다 — 근거가 없는데
+  // 있는 것처럼 답하는 것이 데모에서 드러나는 약점이었다.
+  const grounded = sources.length > 0;
   let answer = "";
   let engine = "local-template";
-  try {
-    const context = sources.map((s) => `[${s.title} ${s.section}] ${s.snippet}`).join("\n");
-    const out = await c.env.AI.run(LLM_MODEL, {
-      messages: [
-        { role: "system", content: "너는 HR 규정 안내 에이전트다. 주어진 근거 문서만을 근거로 한국어로 답하고, 근거에 없는 내용은 지어내지 마라. 근거 문서명을 답에 포함하라." },
-        { role: "user", content: `질문: ${question}\n근거:\n${context}` },
-      ],
-    });
-    const text = responseText(out);
-    if (text && text.trim().length > 10) { answer = text.trim(); engine = "workers-ai"; } else throw new Error("empty ai answer");
-  } catch {
-    const top = sources[0];
-    answer = `근거 문서 「${top.title}(${top.section})」에 따르면, ${top.snippet} 질문하신 "${question}"에 대해서는 위 규정을 기준으로 안내드립니다. 정확한 적용은 인사팀 확인이 필요합니다.`;
-    engine = "local-template";
+  if (!grounded) {
+    answer = "등록된 규정에서 근거를 찾지 못했습니다. 이 질문에 대한 답은 아직 등록된 규정에 없습니다. 인사팀에 확인해 주세요.";
+    engine = "none";
+  } else {
+    // 답변 생성: Workers AI 시도 → 실패 시 근거 기반 템플릿 답변
+    try {
+      const context = sources.map((s) => `[${s.title} › ${s.section}] ${s.snippet}`).join("\n");
+      const out = await c.env.AI.run(LLM_MODEL, {
+        messages: [
+          { role: "system", content: "너는 HR 규정 안내 에이전트다. 주어진 근거 문서만을 근거로 한국어로 답하고, 근거에 없는 내용은 지어내지 마라. 근거 문서명을 답에 포함하라." },
+          { role: "user", content: `질문: ${question}\n근거:\n${context}` },
+        ],
+      });
+      const text = responseText(out);
+      if (text && text.trim().length > 10) { answer = text.trim(); engine = "workers-ai"; } else throw new Error("empty ai answer");
+    } catch {
+      const top = sources[0];
+      answer = `근거 문서 「${top.title}(${top.section})」에 따르면, ${top.snippet} 질문하신 "${question}"에 대해서는 위 규정을 기준으로 안내드립니다. 정확한 적용은 인사팀 확인이 필요합니다.`;
+      engine = "local-template";
+    }
   }
 
   // Durable Objects 세션에 대화 저장 시도 → 실패 시 D1 sessions 폴백
@@ -531,7 +747,7 @@ app.post("/api/ask", async (c) => {
     await c.env.DB.prepare("INSERT OR REPLACE INTO sessions (id, history, updated_at) VALUES (?, ?, datetime('now'))").bind(sessionId, JSON.stringify(history.slice(-20))).run();
   }
 
-  const result = { ok: true, sessionId, question, answer, sources, engine, searchEngine, sessionVia, cached: false };
+  const result = { ok: true, sessionId, question, answer, sources, grounded, engine, searchEngine, sessionVia, cached: false };
   // 캐시 저장 (KV 시도, 실패 시 D1)
   try { await c.env.CACHE.put(cacheKey, JSON.stringify(result), { expirationTtl: 3600 }); }
   catch { await c.env.DB.prepare("INSERT OR REPLACE INTO cache (key, value) VALUES (?, ?)").bind(cacheKey, JSON.stringify(result)).run(); }
@@ -674,6 +890,7 @@ app.get("/api/debug-ai", async (c) => {
     return c.json({ ok: false, error: "unauthorized" }, 401);
   }
   const out: Record<string, unknown> = {};
+  out.vectorSeed = await ensureVectorSeeded(c.env);
   try {
     const emb = await c.env.AI.run(EMBED_MODEL, { text: ["출장비 청구"] }) as { data: number[][] | number[] };
     const raw = emb.data;
@@ -709,29 +926,25 @@ app.get("/api/seed", async (c) => {
   return c.json({ ok: true, sampleTranscript: sampleTranscript(), coachingTranscript: coachingTranscript(), policies: policies() });
 });
 
-// 규정 7건을 임베딩해 Vectorize 인덱스에 넣는다. 인덱스가 비어 있으면 ask는
-// Vectorize에 걸릴 게 없어 D1 텍스트 검색으로 떨어지므로, 배포 후 한 번 호출한다.
+// 규정 7건을 조문 단위로 임베딩해 Vectorize 인덱스에 넣는다 (관리자 강제 재시딩).
+// 평소에는 ask/health가 lazy 시딩으로 알아서 채우므로 이 경로는 정책이
+// 바뀌었을 때 다시 임베딩하는 용도다. 새 인덱스(people-os-index-m3)는
+// 처음부터 chunk id만 들어가서 구 정책 단위 벡터를 지울 일이 없다.
 // 운영용 경로 — X-Admin-Secret 헤더 + ADMIN_SECRET 없이는 401 (C6 잠금).
 app.get("/api/seed-vectors", async (c) => {
   if (!adminAllowed(c.env, c.req.header("x-admin-secret"))) {
     return c.json({ ok: false, error: "unauthorized" }, 401);
   }
   await ensureSeeded(c.env.DB);
-  const list = policies();
-  let upserted = 0;
-  const errors: string[] = [];
-  for (const p of list) {
-    try {
-      const emb = await c.env.AI.run(EMBED_MODEL, { text: [`${p.title} ${p.section} ${p.body}`] }) as { data: number[][] | number[] };
-      const raw = emb.data;
-      const values = Array.isArray(raw[0]) ? (raw[0] as number[]) : (raw as number[]);
-      await c.env.VECTOR.upsert([{ id: p.id, values, metadata: { title: p.title, section: p.section, snippet: p.body.slice(0, 220) } }]);
-      upserted++;
-    } catch (e) {
-      errors.push(`${p.id}: ${e instanceof Error ? e.message : String(e)}`);
-    }
-  }
-  return c.json({ ok: errors.length === 0, upserted, total: list.length, errors });
+  const r = await ensureVectorSeeded(c.env, { force: true });
+  return c.json({ ok: r.seeded, upserted: r.upserted ?? 0, total: r.upserted ?? 0, deletedOld: 0, model: EMBED_MODEL, index: VECTOR_INDEX_NAME, dims: r.dims ?? null, errors: r.error ? [r.error] : [] });
+});
+
+// ---- digest (아침 다이제스트, C9) ----
+app.get("/api/digest", async (c) => {
+  const digest = await getLatestDigest(c.env);
+  if (!digest) return c.json({ ok: true, digest: null, message: "아직 생성된 다이제스트가 없습니다. 매일 07:00에 생성됩니다." });
+  return c.json({ ok: true, digest });
 });
 
 // 프론트는 [assets] 바인딩이 서빙한다. / 가 없으면 index.html로.
@@ -744,4 +957,9 @@ app.all("*", async (c) => {
   return c.html("<h1>People OS</h1><p>Frontend asset not found. Run wrangler dev with public/ present.</p>", 404);
 });
 
-export default app;
+export default {
+  fetch: app.fetch,
+  async scheduled(event: ScheduledEvent, env: Env, ctx: ExecutionContext) {
+    ctx.waitUntil(generateDigest(env, new Date(event.scheduledTime)));
+  },
+};
