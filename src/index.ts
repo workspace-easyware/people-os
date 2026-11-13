@@ -1,6 +1,7 @@
 import { Hono } from "hono";
 import PptxGenJS from "pptxgenjs";
 import { AgentSession } from "./agent-session";
+import { splitOggOpus } from "./ogg";
 import { coachingTranscript, localReflect, localSearch, localSummarize, policies, sampleTranscript, uid } from "./lib";
 
 export { AgentSession };
@@ -26,11 +27,20 @@ const app = new Hono<{ Bindings: Env }>();
 // 임베딩은 bge-base-en-v1.5 (768차원, Vectorize 인덱스와 동일).
 const LLM_MODEL = "@cf/meta/llama-4-scout-17b-16e-instruct";
 const EMBED_MODEL = "@cf/baai/bge-base-en-v1.5";
-// Plaud 전사본 입력의 Cloudflare판: Workers AI Whisper. REST와 바인딩 모두
-// 2026-11-13에 실제 음성으로 확인됨 (REST: 1MB mp3 → 정상 전사).
-// 바인딩 입력은 { audio: number[] } (8비트 부호 없는 정수 배열), 언어 자동 감지.
-const WHISPER_MODEL = "@cf/openai/whisper";
+// Plaud 전사본 입력의 Cloudflare판: Workers AI Whisper.
+// 처음에는 `@cf/openai/whisper` + `{ audio: number[] }`를 썼으나, Ogg Opus
+// 입력에서 호출이 끝나지 않고 조용히 멈췄다 (2분짜리 489KB 클립도 5분 넘게
+// 무응답 — 2026-11-13 확인). Cloudflare 공식 튜토리얼(대용량 오디오 청킹)이
+// 쓰는 `@cf/openai/whisper-large-v3-turbo` + Base64 문자열 입력으로 바꾼다.
+const WHISPER_MODEL = "@cf/openai/whisper-large-v3-turbo";
 const MAX_AUDIO_BYTES = 25 * 1024 * 1024; // Plaud와 동일 상한
+// 긴 오디오는 구간 단위로 나눠 전사한다 (사용자 합의: 한 번에 시도 → 안 되면
+// 30분 → 그래도 안 되면 15분). 구간 크기는 Cloudflare 공식 청킹 튜토리얼이
+// 쓰는 1MB를 따른다: 15분 구간(3.8MB)은 첫 구간 Whisper 호출이 27분 동안
+// 안 끝나고 백그라운드 작업이 조용히 죽었다 (2026-11-13 확인). 1.9MB/6분
+// mp3와 489KB/2분 ogg 클립은 1분 안에 전사됐다. 시간 상한 15분도 함께 둔다.
+const CHUNK_SECONDS = 900;
+const CHUNK_BYTES = 1024 * 1024;
 
 // 운영용 경로 보호: /api/debug-ai, /api/seed-vectors는 X-Admin-Secret 헤더가
 // ADMIN_SECRET 환경값과 일치할 때만 허용한다. 시크릿이 설정돼 있지 않으면
@@ -56,15 +66,103 @@ function isDegenerateTranscript(text: string): boolean {
   return top / words.length > 0.5;
 }
 
+// Base64 인코딩 (node:buffer 없이 — Worker에서 의존성 없이 동작).
+function base64Encode(bytes: Uint8Array): string {
+  const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+  let out = "";
+  for (let i = 0; i < bytes.length; i += 3) {
+    const b0 = bytes[i], b1 = bytes[i + 1] ?? 0, b2 = bytes[i + 2] ?? 0;
+    out += chars[b0 >> 2];
+    out += chars[((b0 & 0x03) << 4) | (b1 >> 4)];
+    out += i + 1 < bytes.length ? chars[((b1 & 0x0f) << 2) | (b2 >> 6)] : "=";
+    out += i + 2 < bytes.length ? chars[b2 & 0x3f] : "=";
+  }
+  return out;
+}
+
 async function transcribeAudio(env: Env, bytes: Uint8Array): Promise<{ ok: true; text: string } | { ok: false; reason: string }> {
   try {
-    const out = await env.AI.run(WHISPER_MODEL, { audio: [...bytes] });
+    // 90초 넘게 안 끝나면 실패로 친다. Whisper 호출이 조용히 멈추는 경우가
+    // 있어 (97분 ogg 15분 구간: 27분 무응답) 타임아웃 없이는 구간이 영원히
+    // 멈춘다. 90초로 잡은 이유: fetch 핸들러 자체도 약 2분 뒤에 죽을 수
+    // 있어, 타임아웃이 그보다 길면 핸들러가 먼저 죽어 실패 처리가 안 된다.
+    // 실패 구간은 건너뛰고 나머지는 이어서 전사한다.
+    const out = await Promise.race([
+      env.AI.run(WHISPER_MODEL, { audio: base64Encode(bytes) }),
+      new Promise<never>((_, reject) => setTimeout(() => reject(new Error("whisper timed out after 90s")), 90_000)),
+    ]);
     const text = (out as { text?: string }).text ?? "";
     if (!text.trim()) return { ok: false, reason: "whisper returned empty text" };
     if (isDegenerateTranscript(text)) return { ok: false, reason: "whisper returned repeated filler text (likely silence/noise)" };
     return { ok: true, text: text.trim() };
   } catch (e) {
     return { ok: false, reason: e instanceof Error ? e.message : String(e) };
+  }
+}
+
+// R2 오디오를 구간 단위로 전사해 recordings 행을 ready/pending으로 만든다.
+// 진행 위치(done_chunks)와 완료분 텍스트(partial)를 행에 남겨, 여러 호출에
+// 나눠 이어갈 수 있다. 배경: waitUntil 백그라운드 작업이 약 2분 뒤에 조용히
+// 죽는다 (97분 ogg: 3/24 구간까지만 진행, 2026-11-13 확인). 그래서
+// - 업로드 직후 waitUntil은 처음 2구간(60초 예산)까지만 돌리고,
+// - 프론트 폴링이 POST /api/recordings/:id/advance로 한 번에 1구간씩 이어간다.
+// - 한 구간 Whisper 호출이 150초 넘게 안 끝나면 그 구간은 건너뛰고 다음으로 간다.
+// - 동시 실행은 lock_until 잠금으로 막는다 (180초 TTL, 죽은 작업은 다음 호출이 재개).
+// 전사본을 지어내지 않는다: 실패 구간은 "[구간 N 전사 실패]" 자리 표시자만 남긴다.
+async function advanceRecording(env: Env, recordingId: string, opts: { maxSegments: number; maxMs: number }): Promise<{ status: string; locked?: boolean }> {
+  const row = await env.DB.prepare("SELECT id, title, object_key, mime_type, transcript_status, partial, done_chunks FROM recordings WHERE id = ?").bind(recordingId)
+    .first<{ id: string; title: string; object_key: string; mime_type: string; transcript_status: string; partial: string | null; done_chunks: number | null }>();
+  if (!row) return { status: "missing" };
+  if (row.transcript_status === "ready") return { status: "ready" };
+  if (row.transcript_status === "pending") return { status: "pending" };
+  const now = Date.now();
+  const lockUntil = now + 180_000;
+  const lockRes = await env.DB.prepare("UPDATE recordings SET lock_until = ? WHERE id = ? AND (lock_until IS NULL OR lock_until < ?)").bind(lockUntil, recordingId, now).run();
+  if ((((lockRes as unknown as { meta?: { changes?: number } }).meta?.changes ?? 0) !== 1)) return { status: "processing", locked: true };
+  try {
+    const obj = await env.FILES.get(row.object_key);
+    if (!obj) {
+      await env.DB.prepare("UPDATE recordings SET transcript_status = 'pending', progress = '실패: R2에서 오디오를 찾을 수 없습니다' WHERE id = ?").bind(recordingId).run();
+      return { status: "pending" };
+    }
+    const bytes = new Uint8Array(await obj.arrayBuffer());
+    const isOgg = row.mime_type.includes("ogg") || row.object_key.toLowerCase().endsWith(".ogg");
+    let chunks: Uint8Array[] = [bytes];
+    if (isOgg) {
+      const split = splitOggOpus(bytes, CHUNK_SECONDS, CHUNK_BYTES);
+      if (split && split.segments.length > 1) chunks = split.segments;
+    }
+    let done = row.done_chunks ?? 0;
+    let partial = row.partial ?? "";
+    const started = Date.now();
+    let processed = 0;
+    while (done < chunks.length && processed < opts.maxSegments && Date.now() - started < opts.maxMs) {
+      await env.DB.prepare("UPDATE recordings SET progress = ? WHERE id = ?")
+        .bind(chunks.length > 1 ? `${done + 1}/${chunks.length} 구간 전사 중` : "전사 중", recordingId).run();
+      const r = await transcribeAudio(env, chunks[done]);
+      if (r.ok) partial += (partial ? "\n" : "") + r.text;
+      else partial += (partial ? "\n" : "") + `[구간 ${done + 1} 전사 실패 — 이 부분은 건너뛰었습니다]`;
+      done++;
+      processed++;
+      await env.DB.prepare("UPDATE recordings SET partial = ?, done_chunks = ?, progress = ? WHERE id = ?")
+        .bind(partial, done, chunks.length > 1 ? `${done}/${chunks.length} 구간 전사 중` : "전사 중", recordingId).run();
+    }
+    if (done >= chunks.length) {
+      const realText = partial.replace(/\[구간 \d+ 전사 실패[^\]]*\]/g, "").trim();
+      if (!realText) {
+        await env.DB.prepare("UPDATE recordings SET transcript_status = 'pending', progress = '실패: Whisper가 텍스트를 못 뽑았습니다' WHERE id = ?").bind(recordingId).run();
+        return { status: "pending" };
+      }
+      const docId = uid("doc");
+      await env.DB.prepare("INSERT INTO documents (id, title, kind, content, r2_key) VALUES (?, ?, 'transcript', ?, ?)")
+        .bind(docId, row.title.replace(/\.[^.]+$/, ""), partial, row.object_key).run();
+      await env.DB.prepare("UPDATE recordings SET transcript = ?, transcript_status = 'ready', doc_id = ?, progress = NULL WHERE id = ?")
+        .bind(partial, docId, recordingId).run();
+      return { status: "ready" };
+    }
+    return { status: "processing" };
+  } finally {
+    await env.DB.prepare("UPDATE recordings SET lock_until = NULL WHERE id = ?").bind(recordingId).run().catch(() => {});
   }
 }
 
@@ -146,7 +244,7 @@ async function ensureSchema(db: D1Database) {
     CREATE TABLE IF NOT EXISTS tickets (id TEXT PRIMARY KEY, title TEXT NOT NULL, body TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'draft', created_at TEXT NOT NULL DEFAULT (datetime('now')));
     CREATE TABLE IF NOT EXISTS tasks (id TEXT PRIMARY KEY, title TEXT NOT NULL, source TEXT, done INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL DEFAULT (datetime('now')), done_at TEXT);
     CREATE TABLE IF NOT EXISTS decks (id TEXT PRIMARY KEY, title TEXT NOT NULL, r2_key TEXT NOT NULL, bytes INTEGER NOT NULL DEFAULT 0, slides INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL DEFAULT (datetime('now')));
-    CREATE TABLE IF NOT EXISTS recordings (id TEXT PRIMARY KEY, title TEXT NOT NULL, provider TEXT NOT NULL DEFAULT 'workers-ai', model TEXT NOT NULL DEFAULT '@cf/openai/whisper', object_key TEXT NOT NULL, mime_type TEXT NOT NULL DEFAULT 'application/octet-stream', size INTEGER NOT NULL DEFAULT 0, transcript TEXT, transcript_status TEXT NOT NULL DEFAULT 'pending', doc_id TEXT, created_at TEXT NOT NULL DEFAULT (datetime('now')));
+    CREATE TABLE IF NOT EXISTS recordings (id TEXT PRIMARY KEY, title TEXT NOT NULL, provider TEXT NOT NULL DEFAULT 'workers-ai', model TEXT NOT NULL DEFAULT '@cf/openai/whisper', object_key TEXT NOT NULL, mime_type TEXT NOT NULL DEFAULT 'application/octet-stream', size INTEGER NOT NULL DEFAULT 0, transcript TEXT, transcript_status TEXT NOT NULL DEFAULT 'pending', doc_id TEXT, progress TEXT, partial TEXT DEFAULT '', done_chunks INTEGER DEFAULT 0, lock_until INTEGER, created_at TEXT NOT NULL DEFAULT (datetime('now')));
   `);
 }
 
@@ -264,56 +362,69 @@ app.post("/api/transcribe", async (c) => {
   const head = await c.env.FILES.head(objectKey).catch(() => null);
   if (!head || head.size !== f.size) return c.json({ ok: false, error: "r2 verify failed after upload", recordingId: id }, 502);
 
-  const result = await transcribeAudio(c.env, bytes);
+  // 행을 먼저 만들고 전사는 백그라운드로: 긴 파일은 동기 Whisper 호출이
+  // 응답 시간 안에 안 끝나서(97분 ogg, 27분 무응답) 행 자체가 안 남았다.
+  // 전사본을 지어내지 않는다 — 행은 'processing'으로 시작한다.
   const now = new Date().toISOString();
-  if (!result.ok) {
-    // 전사 실패/빈 결과: 오디오만 저장하고 pending 마커 (Plaud 'plaud-audio-pending-transcript' 패턴).
-    await c.env.DB.prepare("INSERT INTO recordings (id, title, provider, model, object_key, mime_type, size, transcript, transcript_status, doc_id, created_at) VALUES (?, ?, 'workers-ai', ?, ?, ?, ?, NULL, 'pending', NULL, ?)")
-      .bind(id, f.name, WHISPER_MODEL, objectKey, f.type || "application/octet-stream", f.size, now).run();
-    return c.json({ ok: true, recordingId: id, title: f.name, transcript: null, transcriptStatus: "pending", reason: result.reason, r2Verified: true, provider: "workers-ai", model: WHISPER_MODEL }, 201);
-  }
-  const docId = uid("doc");
-  await c.env.DB.prepare("INSERT INTO documents (id, title, kind, content, r2_key) VALUES (?, ?, 'transcript', ?, ?)")
-    .bind(docId, title, result.text, objectKey).run();
-  await c.env.DB.prepare("INSERT INTO recordings (id, title, provider, model, object_key, mime_type, size, transcript, transcript_status, doc_id, created_at) VALUES (?, ?, 'workers-ai', ?, ?, ?, ?, ?, 'ready', ?, ?)")
-    .bind(id, f.name, WHISPER_MODEL, objectKey, f.type || "application/octet-stream", f.size, result.text, docId, now).run();
-  return c.json({ ok: true, recordingId: id, docId, title: f.name, transcript: result.text, transcriptStatus: "ready", r2Verified: true, provider: "workers-ai", model: WHISPER_MODEL }, 201);
+  await c.env.DB.prepare("INSERT INTO recordings (id, title, provider, model, object_key, mime_type, size, transcript, transcript_status, doc_id, created_at) VALUES (?, ?, 'workers-ai', ?, ?, ?, ?, NULL, 'processing', NULL, ?)")
+    .bind(id, f.name, WHISPER_MODEL, objectKey, f.type || "application/octet-stream", f.size, now).run();
+  c.executionCtx.waitUntil(advanceRecording(c.env, id, { maxSegments: 2, maxMs: 60_000 }));
+  return c.json({ ok: true, recordingId: id, title: f.name, transcript: null, transcriptStatus: "processing", r2Verified: true, provider: "workers-ai", model: WHISPER_MODEL }, 201);
 });
 
 // 최근 음성 녹음 목록 (전사본 내용은 안 돌려준다 — 목록은 메타데이터만)
 app.get("/api/recordings", async (c) => {
   await ensureSeeded(c.env.DB);
-  const rows = await c.env.DB.prepare("SELECT id, title, provider, model, mime_type, size, transcript_status, doc_id, created_at FROM recordings ORDER BY created_at DESC LIMIT 20").all();
+  const rows = await c.env.DB.prepare("SELECT id, title, provider, model, mime_type, size, transcript_status, progress, doc_id, created_at FROM recordings ORDER BY created_at DESC LIMIT 20").all();
   return c.json({ ok: true, recordings: rows.results || [] });
 });
 
 app.get("/api/recordings/:id", async (c) => {
   await ensureSeeded(c.env.DB);
-  const row = await c.env.DB.prepare("SELECT id, title, provider, model, object_key, mime_type, size, transcript, transcript_status, doc_id, created_at FROM recordings WHERE id = ?").bind(c.req.param("id"))
-    .first<{ id: string; title: string; provider: string; model: string; object_key: string; mime_type: string; size: number; transcript: string | null; transcript_status: string; doc_id: string | null; created_at: string }>();
+  const row = await c.env.DB.prepare("SELECT id, title, provider, model, object_key, mime_type, size, transcript, transcript_status, progress, doc_id, created_at FROM recordings WHERE id = ?").bind(c.req.param("id"))
+    .first<{ id: string; title: string; provider: string; model: string; object_key: string; mime_type: string; size: number; transcript: string | null; transcript_status: string; progress: string | null; doc_id: string | null; created_at: string }>();
   if (!row) return c.json({ ok: false, error: "recording not found" }, 404);
   return c.json({ ok: true, recording: row });
 });
 
-// pending 녹음을 R2 오디오로 다시 전사한다. ready 행은 건드리지 않고,
-// pending 행만 업데이트하며 R2 키/크기는 유지한다 (Plaud pending enrichment 패턴).
+// 프론트 폴링이 부르는 전사 이어가기: 잠금이 없으면 다음 1구간을 여기서
+// 직접 전사한다 (fetch 안에서 1회 Whisper 호출, 약 40~60초). 페이지를
+// 열어두는 동안 구간마다 전사가 이어진다 — waitUntil 수명(약 2분)에
+// 기대지 않는 경로다. 잠금이 걸려 있으면 현재 행만 돌려준다.
+app.post("/api/recordings/:id/advance", async (c) => {
+  await ensureSeeded(c.env.DB);
+  // advanceRecording이 던져도 행을 돌려준다: 500 HTML이 가면 프론트
+  // r.json()이 터져 폴링 루프가 죽는다.
+  await advanceRecording(c.env, c.req.param("id"), { maxSegments: 1, maxMs: 120_000 }).catch(() => {});
+  const row = await c.env.DB.prepare("SELECT id, title, provider, model, object_key, mime_type, size, transcript, transcript_status, progress, doc_id, created_at FROM recordings WHERE id = ?").bind(c.req.param("id"))
+    .first<{ id: string; title: string; provider: string; model: string; object_key: string; mime_type: string; size: number; transcript: string | null; transcript_status: string; progress: string | null; doc_id: string | null; created_at: string }>();
+  if (!row) return c.json({ ok: false, error: "recording not found" }, 404);
+  return c.json({ ok: true, recording: row });
+});
+
+// pending 녹음을 R2 오디오로 다시 전사한다. 전사도 백그라운드로 돌린다.
+// ready 행은 건드리지 않고, processing 중인 행은 중복 실행하지 않는다.
+// 단, processing이 30분 넘게 멈춰 있으면(백그라운드 작업이 조용히 죽은 경우)
+// 다시 시작할 수 있게 한다 — 진행 상황은 chunk마다 progress에 남으므로,
+// 30분 동안 진전이 없으면 죽은 것으로 본다. 멈춘 processing 행은 완료분
+// (partial/done_chunks)을 유지한 채 이어가고, pending 행은 처음부터 다시 한다.
 app.post("/api/recordings/:id/retry", async (c) => {
   await ensureSeeded(c.env.DB);
-  const row = await c.env.DB.prepare("SELECT id, title, object_key, transcript, transcript_status, doc_id FROM recordings WHERE id = ?").bind(c.req.param("id"))
-    .first<{ id: string; title: string; object_key: string; transcript: string | null; transcript_status: string; doc_id: string | null }>();
+  const row = await c.env.DB.prepare("SELECT id, title, object_key, transcript, transcript_status, doc_id, created_at FROM recordings WHERE id = ?").bind(c.req.param("id"))
+    .first<{ id: string; title: string; object_key: string; transcript: string | null; transcript_status: string; doc_id: string | null; created_at: string }>();
   if (!row) return c.json({ ok: false, error: "recording not found" }, 404);
   if (row.transcript_status === "ready" && row.transcript) return c.json({ ok: true, recordingId: row.id, transcriptStatus: "ready", transcript: row.transcript, docId: row.doc_id, note: "already ready" });
-  const obj = await c.env.FILES.get(row.object_key);
-  if (!obj) return c.json({ ok: false, error: "audio file not found in R2" }, 404);
-  const bytes = new Uint8Array(await obj.arrayBuffer());
-  const result = await transcribeAudio(c.env, bytes);
-  if (!result.ok) return c.json({ ok: true, recordingId: row.id, transcriptStatus: "pending", reason: result.reason });
-  const docId = uid("doc");
-  await c.env.DB.prepare("INSERT INTO documents (id, title, kind, content, r2_key) VALUES (?, ?, 'transcript', ?, ?)")
-    .bind(docId, row.title.replace(/\.[^.]+$/, ""), result.text, row.object_key).run();
-  await c.env.DB.prepare("UPDATE recordings SET transcript = ?, transcript_status = 'ready', doc_id = ? WHERE id = ? AND transcript_status = 'pending'")
-    .bind(result.text, docId, row.id).run();
-  return c.json({ ok: true, recordingId: row.id, docId, transcriptStatus: "ready", transcript: result.text });
+  if (row.transcript_status === "processing") {
+    const ageMs = Date.now() - new Date(row.created_at).getTime();
+    if (ageMs < 30 * 60 * 1000) return c.json({ ok: true, recordingId: row.id, transcriptStatus: "processing", note: "already processing" });
+    // 30분 넘게 멈춰 있음 — 죽은 작업으로 보고 완료분은 유지한 채 이어간다.
+  } else {
+    // pending 행은 처음부터 다시 한다.
+    await c.env.DB.prepare("UPDATE recordings SET partial = '', done_chunks = 0 WHERE id = ?").bind(row.id).run();
+  }
+  await c.env.DB.prepare("UPDATE recordings SET transcript_status = 'processing', progress = NULL WHERE id = ?").bind(row.id).run();
+  c.executionCtx.waitUntil(advanceRecording(c.env, row.id, { maxSegments: 2, maxMs: 60_000 }));
+  return c.json({ ok: true, recordingId: row.id, transcriptStatus: "processing" });
 });
 
 // ---- ask (RAG) ----

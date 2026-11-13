@@ -39,10 +39,11 @@ npx wrangler dev --local
 | GET/POST/PATCH/DELETE | `/api/tasks`, `/api/tasks/:id` | 할 일 체크리스트 (생성·토글·삭제) |
 | POST | `/api/deck` | `{title, summary, actions}` → pptxgenjs 덱 생성, R2 저장, `{url}` 반환 |
 | GET | `/api/deck/:id` | 생성된 .pptx 다운로드 |
-| POST | `/api/transcribe` | multipart `file`(최대 25MB) → R2 저장 + Whisper 전사 → `{docId, recordingId, transcript, transcriptStatus}` (실패 시 pending, 전사본 없음) |
-| GET | `/api/recordings` | 최근 음성 녹음 목록 (메타데이터만) |
+| POST | `/api/transcribe` | multipart `file`(최대 25MB) → R2 저장 + 백그라운드 전사 → `{recordingId, transcriptStatus: 'processing'}` (폴링으로 완료 확인, 긴 ogg는 1MB 단위 구간별 전사, 재개 가능) |
+| GET | `/api/recordings` | 최근 음성 녹음 목록 (메타데이터 + 상태 ready/pending/processing + 진행 상황) |
 | GET | `/api/recordings/:id` | 녹음 1건 + 전사본 |
-| POST | `/api/recordings/:id/retry` | pending 녹음을 R2 오디오로 다시 전사 |
+| POST | `/api/recordings/:id/advance` | 다음 1구간을 직접 전사하고 행 반환 (프론트 폴링이 부름) |
+| POST | `/api/recordings/:id/retry` | pending 녹음을 R2 오디오로 다시 전사 (백그라운드, 멈춘 processing 행은 이어가기) |
 | POST | `/api/documents` | `{title, content, kind}` 업로드 → R2 + D1 |
 | POST | `/api/documents/:id/summarize` | Workers AI 요약, 실패 시 로컬 추출식 요약 |
 | POST | `/api/ask` | `{question, sessionId?}` RAG 답변 + 근거 + 세션 기억 |

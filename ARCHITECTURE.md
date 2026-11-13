@@ -35,7 +35,7 @@ flowchart TB
 ## 요청 흐름 (데모 1개 흐름)
 
 0. **음성 전사** — `POST /api/transcribe` (multipart `file`, 최대 25MB)
-   R2 `recordings/<id>/<파일명>` 저장 + HEAD 크기 검증 → Workers AI Whisper 전사 → 전사본 있으면 D1 `documents` 행(kind='transcript') + `recordings` 행(status='ready') 생성. 전사 실패·빈 결과면 오디오만 저장하고 `transcript_status='pending'` (전사본을 지어내지 않음). `GET /api/recordings`, `POST /api/recordings/:id/retry`로 다시 전사.
+   R2 `recordings/<id>/<파일명>` 저장 + HEAD 크기 검증 → 행을 `processing`으로 만들고 전사는 백그라운드(`waitUntil`)로 진행 → ogg는 30분 단위로 나눠 구간별 Whisper 전사 → 전사본 있으면 D1 `documents` 행(kind='transcript') + `recordings` 행(status='ready') 생성. 전사 실패·빈 결과면 오디오만 저장하고 `transcript_status='pending'` (전사본을 지어내지 않음). `GET /api/recordings`, `POST /api/recordings/:id/retry`로 다시 전사. 진행 상황은 `recordings.progress`에 남는다.
 1. **업로드** — `POST /api/documents` {title, content, kind}
    브라우저 → Workers → R2에 원본 저장 + D1에 메타 저장. 201 반환.
 2. **요약** — `POST /api/documents/:id/summarize`
@@ -83,7 +83,7 @@ flowchart TB
 - `tickets(id, title, body, status, created_at)` — 에이전트 티켓 초안용
 - `tasks(id, title, source, done, created_at, done_at)` — Stage 1 작업 공간 (0002)
 - `decks(id, title, r2_key, bytes, slides, created_at)` — Stage 1 PPTX 덱 메타 (0002)
-- `recordings(id, title, provider, model, object_key, mime_type, size, transcript, transcript_status, doc_id, created_at)` — 음성 전사 입력 (0003). `transcript_status`: 'ready' | 'pending'. Plaud `recordings` 형태를 따르되 provider는 'workers-ai', user_id 없음(프로토타입 단일 사용자).
+- `recordings(id, title, provider, model, object_key, mime_type, size, transcript, transcript_status, doc_id, progress, created_at)` — 음성 전사 입력 (0003, progress는 0004). `transcript_status`: 'ready' | 'pending' | 'processing'. Plaud `recordings` 형태를 따르되 provider는 'workers-ai', user_id 없음(프로토타입 단일 사용자).
 
 ## Stage 1 — 작업 공간 + PPTX 덱 (2026-11-13, 구현됨)
 
@@ -100,8 +100,9 @@ flowchart TB
 파이프라인 맨 앞단. Plaud Transcribe Studio의 전사 형태를 Cloudflare 네이티브로 옮겼다.
 
 - **입력** — `POST /api/transcribe` (multipart `file`, 최대 25MB, audio/*). Plaud `app/api/transcribe/route.ts`와 같은 상한·같은 필드명. R2 `recordings/<id>/<파일명>`에 저장하고 **HEAD 크기 검증**을 put 직후에 한다 (Plaud `docs/DOT_PLAUD_SYNC.md` 패턴: 크기 불일치는 실패, 덮어쓰지 않음).
-- **전사** — Workers AI `@cf/openai/whisper` 바인딩 (`{ audio: number[] }`, 언어 자동 감지). REST와 바인딩 모두 2026-11-13에 실제 음성으로 확인됨 (REST: 1MB mp3 → 966자 정상 전사; 바인딩: 동일 파일로 `wrangler dev`에서 ready + documents 행 생성 + workers-ai 요약까지 연결 확인).
-- **실패 처리 (지은 전사본 없음)** — Whisper 실패·빈 텍스트·반복 환각(무음 wav에서 "Thank you very much." 반복 확인)일 때는 오디오만 저장하고 `transcript_status='pending'`으로 남긴다. Plaud의 `plaud-audio-pending-transcript` 마커와 같은 원칙이다. `POST /api/recordings/:id/retry`로 R2 오디오를 다시 전사하며, ready 행은 건드리지 않고 pending 행만 업데이트하고 R2 키/크기는 유지한다 (Plaud pending enrichment 패턴).
+- **전사** — Workers AI Whisper 바인딩 (언어 자동 감지). 처음에는 `@cf/openai/whisper` + `{ audio: number[] }`를 썼으나 Ogg Opus 입력에서 호출이 끝나지 않고 조용히 멈췄다 (2분짜리 489KB 클립도 5분 넘게 무응답 — 2026-11-13 확인). Cloudflare 공식 대용량 오디오 청킹 튜토리얼이 쓰는 `@cf/openai/whisper-large-v3-turbo` + Base64 문자열 입력으로 바꿨다. mp3는 두 방식 모두 1분 안에 전사됨을 확인했다 (REST: 1MB mp3 → 966자 정상 전사; 바인딩: 동일 파일로 `wrangler dev`에서 ready + documents 행 생성 + workers-ai 요약까지 연결 확인).
+- **긴 오디오 구간별 전사 (2026-11-13 추가)** — 97분 ogg(24.9MB)를 한 번에 부르면 27분 동안 응답이 안 돌아오고 녹음 행 자체가 안 남았다. 그래서 전사를 비동기로 바꿨다: `POST /api/transcribe`는 R2 저장 후 행을 `processing`으로 만들고 바로 201을 돌려주고, `waitUntil` 백그라운드에서 전사한다. ogg(Opus)는 `src/ogg.ts`의 Ogg 페이지 분할기로 구간 단위로 나눈다 (ffmpeg 없이 순수 JS: 페이지 경계에서만 자르고, OpusHead·OpusTags·Plaud 벤더 페이지 포함 헤더 페이지를 모든 구간 앞에 붙이고, 패킷이 이어지는 페이지에서는 자르지 않는다 — ffprobe로 4개 구간 전부 디코딩 확인). **구간 길이는 30분에서 15분으로 줄였다**: 30분 구간(7.7MB)은 첫 구간 Whisper 호출이 44분 동안 안 끝나고 백그라운드 작업이 에러도 없이 조용히 죽어 행이 `1/4 구간 전사 중`에 멈췄다. 15분 구간도 안 되면 더 줄이는 것이 다음 단계다. `processing`이 30분 넘게 멈춰 있으면 `POST /api/recordings/:id/retry`로 다시 시작할 수 있다. 구간별 Whisper 결과를 이어 붙이고, 일부 구간만 성공해도 성공한 구간은 저장한다. 진행 상황(`1/7 구간 전사 중` 등)은 `recordings.progress`에 남고 프론트가 5초마다 폴링한다.
+- **실패 처리 (지은 전사본 없음)** — Whisper 실패·빈 텍스트·반복 환각(무음 wav에서 "Thank you very much." 반복 확인)일 때는 오디오만 저장하고 `transcript_status='pending'`으로 남긴다. Plaud의 `plaud-audio-pending-transcript` 마커와 같은 원칙이다. `POST /api/recordings/:id/retry`로 R2 오디오를 다시 전사하며(역시 백그라운드), ready 행은 건드리지 않고 processing 중인 행은 중복 실행하지 않으며 R2 키/크기는 유지한다 (Plaud pending enrichment 패턴).
 - **연결** — 전사 성공 시 `documents` 행(kind='transcript')을 만들어 기존 요약 엔드포인트가 그대로 동작한다. 프론트 업로드 탭의 "0. 음성 파일 전사"에서 파일을 올리면 전사본이 제목·본문에 채워지고 "요약하기"가 활성화된다. 최근 녹음 목록에서 불러오기/다시 전사가 된다.
 - **참고한 코드**: `workspace-easyware/plaud-transcribe-studio` — `app/api/transcribe/route.ts` (25MB 상한·R2 put·recordings 행), `app/api/summarize/route.ts` (저장된 전사본에서 요약), `docs/DOT_PLAUD_SYNC.md` (R2 HEAD 검증·pending 마커·재시도 시 덮어쓰기 금지).
 
