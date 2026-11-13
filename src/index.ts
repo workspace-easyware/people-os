@@ -13,6 +13,10 @@ type Env = {
   AI: Ai;
   AGENT_SESSION: DurableObjectNamespace;
   ASSETS: Fetcher;
+  // 운영용 경로(/api/debug-ai, /api/seed-vectors) 보호용 시크릿.
+  // 코드·wrangler.toml에 넣지 않고 `wrangler secret put ADMIN_SECRET` /
+  // Cloudflare 대시보드에서만 설정한다. 미설정 시 운영 경로는 항상 거부된다.
+  ADMIN_SECRET?: string;
 };
 
 const app = new Hono<{ Bindings: Env }>();
@@ -27,6 +31,18 @@ const EMBED_MODEL = "@cf/baai/bge-base-en-v1.5";
 // 바인딩 입력은 { audio: number[] } (8비트 부호 없는 정수 배열), 언어 자동 감지.
 const WHISPER_MODEL = "@cf/openai/whisper";
 const MAX_AUDIO_BYTES = 25 * 1024 * 1024; // Plaud와 동일 상한
+
+// 운영용 경로 보호: /api/debug-ai, /api/seed-vectors는 X-Admin-Secret 헤더가
+// ADMIN_SECRET 환경값과 일치할 때만 허용한다. 시크릿이 설정돼 있지 않으면
+// 항상 거부한다 (fail-closed). 시크릿은 코드에 넣지 않고 wrangler secret /
+// Cloudflare 대시보드에서만 설정한다.
+function adminAllowed(env: Env, given: string | undefined): boolean {
+  const secret = env.ADMIN_SECRET;
+  if (!secret || !given || secret.length !== given.length) return false;
+  let diff = 0;
+  for (let i = 0; i < secret.length; i++) diff |= secret.charCodeAt(i) ^ given.charCodeAt(i);
+  return diff === 0;
+}
 
 // Whisper는 무음·잡음에 "Thank you very much." 같은 문장을 반복하는 환각을
 // 내는 경우가 있다 (무음 wav 테스트에서 확인). 짧은 구절이 절반 이상을 차지하면
@@ -541,7 +557,11 @@ app.get("/api/library", async (c) => {
 });
 
 // 디버그용: 임베딩·Vectorize 조회·LLM 호출을 직접 돌려 원인을 확인한다.
+// 운영용 경로 — X-Admin-Secret 헤더 + ADMIN_SECRET 없이는 401 (C6 잠금).
 app.get("/api/debug-ai", async (c) => {
+  if (!adminAllowed(c.env, c.req.header("x-admin-secret"))) {
+    return c.json({ ok: false, error: "unauthorized" }, 401);
+  }
   const out: Record<string, unknown> = {};
   try {
     const emb = await c.env.AI.run(EMBED_MODEL, { text: ["출장비 청구"] }) as { data: number[][] | number[] };
@@ -580,7 +600,11 @@ app.get("/api/seed", async (c) => {
 
 // 규정 7건을 임베딩해 Vectorize 인덱스에 넣는다. 인덱스가 비어 있으면 ask는
 // Vectorize에 걸릴 게 없어 D1 텍스트 검색으로 떨어지므로, 배포 후 한 번 호출한다.
+// 운영용 경로 — X-Admin-Secret 헤더 + ADMIN_SECRET 없이는 401 (C6 잠금).
 app.get("/api/seed-vectors", async (c) => {
+  if (!adminAllowed(c.env, c.req.header("x-admin-secret"))) {
+    return c.json({ ok: false, error: "unauthorized" }, 401);
+  }
   await ensureSeeded(c.env.DB);
   const list = policies();
   let upserted = 0;

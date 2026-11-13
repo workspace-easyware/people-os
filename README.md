@@ -1,7 +1,9 @@
-# 일잇 People OS — Workers판 프로토타입 (로컬 MVP)
+# 일잇 People OS — Workers판 프로토타입
 
 > **이것은 Workers 위에 새로 만드는 프로토타입입니다. 이미 정식 출시한 ChatGPT Sites(일잇, easy-slides 등)가 아닙니다.**
 > Cloudflare Developer Day Seoul 2026 Use Case 공모전(마감 2026-11-27, 행사 2026-12-02 파르나스) 제출용입니다.
+>
+> **라이브 데모: https://people-os.workspace-easyware.workers.dev** — 배포됨, `/api/health` ok:true, 바인딩 6개(d1·kv·r2·vectorize·ai·durable_objects) 전부 true. 저장소: [workspace-easyware/people-os](https://github.com/workspace-easyware/people-os) (제출 전 공개 전환 예정).
 
 HR 실무자·코치를 위한 AI 인텔리전스 플랫폼: 회의 전사본·규정·뉴스를 올리면 요약·RAG 답변·코칭 리플렉션을 한 흐름으로 내보냅니다.
 
@@ -13,9 +15,9 @@ HR 실무자·코치를 위한 AI 인텔리전스 플랫폼: 회의 전사본·�
 4. 액션 “할 일로 저장” + “PPTX 초안 다운로드” (표지+요약+액션, R2 저장)
 5. “연차 3일 쓸 수 있어?” → 근거 문서(연차휴가 규정)와 함께 답변
 6. 코칭 전사본 → 핵심 질문·패턴·다음 세션 질문 3개
-7. 요약 복사 → FlowDesk 개인 작업 공간 노트로 보내기 ("FlowDesk에서 열기" 버튼, https://flowdesk-personal-c7a4.hr-jhkang.chatgpt.site/)
+7. 요약 복사 → "라이브러리에서 보기"로 라이브러리 탭에서 확인
 
-## 로컬 실행
+## 로컬 개발
 
 ```bash
 cd people-os
@@ -25,7 +27,7 @@ npx wrangler dev --local
 ```
 
 - `wrangler dev`는 로컬(Miniflare)에서 D1/KV/R2/Durable Objects를 에뮬레이션합니다.
-- **배포하지 않습니다.** `wrangler deploy` / `wrangler login` / GitHub 푸시는 별도 승인 후에만 합니다.
+- 라이브 배포는 `~/workspace/custom-connectors/custom.cloudflare/bin/cf-wrangler.py deploy`로 합니다 (저장된 API 토큰 주입). D1 마이그레이션은 deploy가 자동 적용하지 않으므로 새 마이그레이션이 있으면 `d1 migrations apply people-os-db --remote`를 따로 실행합니다.
 - Node v24.22.1에서 확인했습니다.
 
 ## API
@@ -69,18 +71,18 @@ npx wrangler dev --local
 | 기능 | MVP에서 하는 일 | 상태 |
 |---|---|---|
 | Workers | API + 프론트 서빙 | 구현됨 |
-| Workers AI | 요약·답변·리플렉션 생성 | 시도 후 로컬 폴백 (아래 참조) |
-| Workers AI (Whisper) | 음성 전사 (`@cf/openai/whisper`) | 전사 실패 시 pending 저장 (전사본 없음) |
-| Vectorize | RAG 임베딩 검색 | 시도 후 D1 텍스트 검색 폴백 |
+| Workers AI | 요약·답변·리플렉션 생성 | 라이브 확인됨 (로컬에서는 실패 시 폴백) |
+| Workers AI (Whisper) | 음성 전사 (`@cf/openai/whisper`) | 라이브 확인됨 — 실제 Plaud 녹음 전사, 전사 실패 시 pending 저장 (전사본 없음) |
+| Vectorize | RAG 임베딩 검색 | 라이브 확인됨 (로컬에서는 D1 텍스트 검색 폴백) |
 | D1 | 문서·규정·세션·리플렉션·캐시·할 일·덱 메타·녹음 | 구현됨 (마이그레이션 `migrations/0001_init.sql`, `0002_workspace.sql`, `0003_recordings.sql`) |
 | KV | `/api/ask` 캐시 | 시도 후 D1 폴백 |
 | Durable Objects | 에이전트 세션 기억 | 시도 후 D1 폴백 |
-| R2 | 업로드 원본 저장 + 덱 `decks/*.pptx` | 구현됨 (Miniflare 로컬) |
+| R2 | 업로드 원본 저장 + 덱 `decks/*.pptx` | 라이브 확인됨 |
 | Hyperdrive | 기존 HR Postgres 연결 | 스텁/설계만 (모의 데이터) |
-| Queues + Workflows | 전사→요약→추출→임베딩 파이프라인 | 직접 호출 + 큐 스텁 |
+| Queues + Workflows | 전사→요약→추출→임베딩 파이프라인 | 직접 호출 + 큐 스텁 (정식 파이프라인은 공모전 이후) |
 | AI Gateway | 모델 라우팅·폴백 | 설계만 |
-| Cron Triggers | 아침 HR 다이제스트 | Phase 4 예정 |
-| Turnstile | 업로드 스팸 방지 | Phase 4 예정 |
+| Cron Triggers | 아침 HR 다이제스트 | 공모전 중 구현 예정 |
+| Turnstile | 업로드 스팸 방지 | 공모전 중 구현 예정 |
 
 ## 로컬 폴백 (중요)
 
@@ -95,7 +97,7 @@ npx wrangler dev --local
 - KV/DO: 실패 시 D1 테이블(`cache` / `sessions`)로 폴백
 
 응답 JSON의 `engine` / `searchEngine` / `sessionVia` 필드로 어떤 경로로 답했는지 확인할 수 있습니다.
-클라우드에 배포하면 같은 코드가 Workers AI / Vectorize를 실제로 사용합니다. 코드 변경이 필요 없습니다.
+라이브에서는 Workers AI / Vectorize를 실제로 사용함이 Chrome으로 확인됐습니다. 로컬 개발 시에만 폴백이 돕니다.
 
 ## 구조
 
@@ -113,13 +115,12 @@ people-os/
 ## 제출물
 
 - 아키텍처 다이어그램: [ARCHITECTURE.md](ARCHITECTURE.md) · [architecture.svg](architecture.svg)
-- 3분 데모 대본: [DEMO-SCRIPT.md](DEMO-SCRIPT.md) (2분 50초, 로컬 녹화용)
+- 3분 데모 대본: [DEMO-SCRIPT.md](DEMO-SCRIPT.md) (2분 50초, 라이브 데모 URL 화면 녹화용)
 - 검증 기록: [VERIFICATION.md](VERIFICATION.md)
-- 데모 URL: 배포 후 기입 (배포는 사용자 승인 후에만)
+- 데모 URL: https://people-os.workspace-easyware.workers.dev (라이브)
 
-## 아직 없는 것 (Phase 4/5)
+## 아직 없는 것 (공모전 이후)
 
 - Plaud Dot 기기 자동 동기화 (페어링·스코프 토큰 필요 — ARCHITECTURE.md 참조), Hyperdrive 실연결, Cron 다이제스트, Turnstile 실연동
 - 덱 편집기 (Stage 2): 생성된 PPTX를 브라우저에서 고쳐 저장하는 FlowDesk식 제자리 편집 + R2 버전 관리 — ARCHITECTURE.md 참조
-- 3분 데모 영상 녹화본, 공모전 Google Form 제출
-- 배포 (사용자 승인 후 `wrangler deploy`로 데모 URL 확보)
+- 3분 데모 영상 녹화본, 공모전 Google Form 제출, 행사 참가 등록

@@ -1,7 +1,7 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="1200" height="720" viewBox="0 0 1200 720" font-family="system-ui, -apple-system, sans-serif">
   <rect width="1200" height="720" fill="#ffffff"/>
   <text x="40" y="48" font-size="28" font-weight="700" fill="#111827">일잇 People OS — Cloudflare 아키텍처 (Workers 프로토타입)</text>
-  <text x="40" y="76" font-size="14" fill="#6b7280">실선 = MVP 구현됨 (로컬 검증 완료) · 점선 = 설계·스텁 / 보강 예정 · 로컬에서는 Workers AI·Vectorize가 폴백으로 동작</text>
+  <text x="40" y="76" font-size="14" fill="#6b7280">실선 = MVP 구현됨 (라이브 검증 완료) · 점선 = 설계·스텁 / 보강 예정 · 로컬에서는 Workers AI·Vectorize가 폴백으로 동작</text>
 
   <!-- User -->
   <rect x="40" y="110" width="220" height="80" rx="10" fill="#eff6ff" stroke="#2563eb" stroke-width="2"/>

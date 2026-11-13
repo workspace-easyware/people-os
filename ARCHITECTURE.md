@@ -121,7 +121,7 @@ Stage 1은 "새 덱 생성"까지만 한다. 다음 단계는 FlowDesk 방식의
 
 - 로컬(`wrangler dev --local`)에서는 Workers AI·Vectorize가 안 돈다. `VERIFICATION.md`에 경고 문구 원문과 폴백 엔진을 기록했다. Whisper도 로컬에서는 인증 문제로 실패해 전사가 pending으로 남는다 (지은 전사본 없음). 단, 토큰을 주입한 `wrangler dev`(로컬 서버 + 클라우드 AI)에서는 바인딩 Whisper가 실제 음성을 전사함을 2026-11-13에 확인했다.
 - `compatibility_date`는 wrangler 3.114.17이 지원하는 최신 `2025-07-18`로 맞췄다.
-- 배포 후에는 같은 코드가 바인딩을 그대로 써서 Workers AI·Vectorize를 탄다. 배포 전에는 그 동작을 검증할 수 없다고 README에 명시했다.
+- 배포 후 같은 코드가 바인딩을 그대로 써서 Workers AI·Vectorize를 타는 것이 라이브 Chrome 확인으로 검증됐다 (2026-11-13, VERIFICATION.md 참조).
 
 ## 원본 자산과의 관계
 
@@ -129,6 +129,6 @@ Stage 1은 "새 덱 생성"까지만 한다. 다음 단계는 FlowDesk 방식의
 - `oss-agent-lab`의 Qdrant RAG + LangGraph 라우터 → Vectorize + Durable Objects 세션
 - `enterprise-ops-agent`의 ADK ReAct → `/api/ask` 라우터·근거 표시
 - ChatGPT Sites(Plaud Transcribe Studio, Paperdoc, easy-slides, People Signal 등) → 입력·출력 모듈의 화면·흐름 참고. 단, 이 제출물은 Sites 자체가 아니라 Workers 위에 새로 만든 프로토타입이다.
-- FlowDesk Cloud(개인 작업 공간 Site, https://flowdesk-personal-c7a4.hr-jhkang.chatgpt.site/) → 요약·액션·리플렉션 결과의 저장처. FlowDesk는 별도 비공개 Site라 Worker 안에 직접 넣을 수 없어, 데모 화면의 "FlowDesk에서 열기" 링크 + "요약 복사" 버튼으로 연결한다 (MVP 범위 내 구현됨). 클라우드 자료는 로그인한 계정의 공간에 저장되고 PC와 자동 동기화되지 않는다.
+- FlowDesk Cloud → 요약·액션·리플렉션 결과의 저장처는 앱 안 라이브러리 탭이다. 기존 ChatGPT Sites는 연습작이라 연동·링크하지 않는다 (2026-11-13 결정, C3로 화면·문서에서 링크 제거 완료). FlowDesk의 제자리 편집 방식은 Stage 2 덱 편집기의 참고만 한다.
 - 코드 참고 (Stage 1): `workspace-easyware/flowdesk-cloud` (PPTX 내보내기·R2 저장 패턴, `workspace-easyware/easy-slides` (pptxgenjs 신규 덱 생성·템플릿·workspace API). 두 접근법 중 Stage 1은 easy-slides식 생성, Stage 2는 FlowDesk식 제자리 편집으로 나눴다 — 위 Stage 1/2 참조.
 - 화면 스타일: `people-insight`의 CSS 디자인 토큰(남색 #123863, 배경 #f5f8fc, 포인트 #2d7dde, 카드 radius 16px, Pretendard/Inter)을 `public/index.html`에 그대로 적용했다. Mantine 라이브러리가 아니라 Mantine처럼 보이게 짠 커스텀 CSS다.

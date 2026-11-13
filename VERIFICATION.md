@@ -128,7 +128,7 @@ bash /tmp/people-os-test.sh               # curl 10개 케이스, 3회 반복 �
 ## 프론트 리스타일 + FlowDesk 연결 (2026-11-13)
 - people-insight의 CSS 디자인 토큰(남색 #123863, 배경 #f5f8fc, 포인트 #2d7dde, 카드 radius 16px, Pretendard/Inter)을 public/index.html에 적용. Mantine 라이브러리가 아니라 Mantine처럼 보이게 짠 커스텀 CSS다.
 - 상단 sticky topbar(남색 로고 + 탭 메뉴), 둥근 카드 + 그림자 확인됨 (사용자 Chrome 경유).
-- FlowDesk 연결: 요약 결과 아래 "요약 복사" + "FlowDesk에서 열기" 버튼, 라이브러리 탭에도 FlowDesk 버튼. 링크 https://flowdesk-personal-c7a4.hr-jhkang.chatgpt.site/ 확인됨. FlowDesk는 별도 비공개 Site라 직접 임베드는 불가하고 링크+복사 흐름으로 연결.
+- FlowDesk 연결 (당시 기록, 이후 제거됨): 요약 결과 아래 "요약 복사" + "FlowDesk에서 열기" 버튼, 라이브러리 탭에도 FlowDesk 버튼이 있었다. **2026-11-13 C3로 제거 완료** — 화면·문서에서 ChatGPT Sites 링크 0건 확인 (Chrome 검증, 아래 "C1/C3" 참조). 결과 저장처는 앱 안 라이브러리 탭이다.
 - 리스타일 후 요약 엔진 workers-ai 유지, 에러 없음.
 
 ## 음성 전사 입력 (2026-11-13)
@@ -176,3 +176,30 @@ Plaud Transcribe Studio의 전사 형태를 Cloudflare 네이티브(Workers AI W
 - 배포된 Worker에서의 실제 음성 전사 (R2 실저장 + 원격 D1 행 생성 — 로컬 Miniflare와 같은 API라 동일 동작 예상, 배포 후 Chrome 확인 필요)
 - 긴 오디오(수 분) Whisper 처리 시간·결과 — 1MB(약 2분) 청크는 확인됨, 25MB 상한까지의 긴 파일은 미확인
 - 프론트 브라우저 클릭 테스트 (파일 선택 → 전사하기 → 요약 — curl로 API까지만 확인, 배포 후 사용자 Chrome으로 확인 예정)
+
+## C1 탭 유지 + C3 Sites 링크 제거 (2026-11-13, Chrome 확인)
+
+- 구현: Sonnet 5.5, 로컬 커밋 `239c0bc` (public/index.html 10줄 변경). 탭 선택을 URL 해시(`#home`·`#upload`·`#ask`·`#coaching`·`#tasks`·`#library`)에 반영, 로드 시 복원, `hashchange` 리스너로 뒤로 가기 지원. "FlowDesk에서 열기" 버튼 2곳 제거 → 결과 카드는 "라이브러리에서 보기"로 교체, `FLOWDESK_URL` 상수 및 관련 문구 제거.
+- 로컬 검증: `npx tsc --noEmit` 통과, `wrangler dev --local`에서 `/` 200·`/api/health` 200 (ok:true).
+- 배포: `cf-wrangler.py deploy` → https://people-os.workspace-easyware.workers.dev, Version ID `e3c1d75e-9daf-4b51-882f-d8fd71be8fe6`.
+- Chrome 확인 (사용자 Chrome): 해시 없이 열면 홈 탭·해시 없음. 질문 탭 클릭 → URL `#ask`, 새로고침해도 질문 탭 유지, 뒤로 가기 → 홈 탭. 결과 카드 버튼은 "할 일로 저장"·"PPTX 초안 다운로드"·"요약 복사"·"라이브러리에서 보기" 4개, "FlowDesk에서 열기" 없음. 업로드 화면·라이브러리 탭에서 "FlowDesk" 텍스트 검색 0건. "라이브러리에서 보기" 클릭 → `#library` 이동. 에러 없음, 상단 상태 "health OK · d1, kv, r2, vectorize, ai, durable_objects".
+- 확인 중 샘플 문서 1건이 라이브러리에 저장됨 (id `doc_mweizjym_vjkiuj`) — 데모 데이터, 11/25 정리 예정.
+- GitHub 스냅샷: 원격 md5가 로컬 base 커밋 `8cbb196`과 일치 확인 후 push → 원격 커밋 `fba89291c27901e7231d2a6544957b713b04e220`, 재검증 md5 일치, `FlowDesk`/`chatgpt` 0건. sync record에 6번째 엔트리 추가.
+
+## C2 실음성 전사 Chrome 확인 (2026-11-13)
+
+- 파일: 사용자가 첨부한 Plaud 녹음 `original.mp3` (1.9MB, MP3 40kbps 16kHz mono).
+- 흐름: 업로드·요약 화면 "0. 음성 파일 전사" 카드 → 파일 선택 → "전사하기" → 약 30초 뒤 "전사 완료 · 문서 id doc_mwej585g_axv0p5 — 전사본이 아래에 채워졌습니다".
+- 전사본이 제목("original") + 본문 칸에 채워짐. 본문은 영어 전사본 ("How to use Plod Let's walk through how to use Plod from recording and marking highlights..."). 참고: Whisper가 "Plaud"를 "Plod"로 전사함.
+- 전사 전 비활성화였던 "요약하기" 버튼 활성화 → 요약 실행, 엔진 표시 `workers-ai`, 요약 3항목 + 액션 3개.
+- 녹음 목록: "original.mp3" 표시, 배지 "전사 완료", "2026-11-13 · 1818KB", "불러오기" 버튼. (계획서 C2의 "ready" 문구와 달리 실제 UI 배지 문구는 "전사 완료" — 같은 상태의 화면 표시.)
+- 에러 없음.
+- 미확인: 24.9MB ogg 긴 오디오 (한 번에 시도 → 안 되면 30분→15분 단위 분할 전사, 계획서 B2).
+
+## C6 운영 경로 잠금 (2026-11-13, 로컬 검증)
+
+- `/api/debug-ai`, `/api/seed-vectors`를 `X-Admin-Secret` 헤더 + `ADMIN_SECRET` 환경값 뒤로 잠금 (fail-closed: 시크릿 미설정 시 항상 거부). 시크릿은 코드에 없고 `wrangler secret` / 대시보드에서만 설정.
+- 로컬 검증 (`wrangler dev --local`): 헤더 없음 → 401, 잘못된 헤더 → 401, `/api/health` 200 (ok:true), `/api/home` 200. `npx tsc --noEmit` 통과.
+- 비밀 스캔: 추적 파일 + git 이력 전체에서 토큰·키 패턴(`sk-`·`ghp_`·`AKIA`·개인키·Bearer 등) 0건. `.dev.vars` 없음(있으면 gitignore). `wrangler.toml` 리소스 ID는 비밀이 아니므로 유지.
+- 라이브 Chrome 확인 (401 여부)은 사용자 복귀 후 진행 예정.
+- 배포: `cf-wrangler.py deploy` → Version ID `08a99d43-593e-4e4c-b65f-37fea934e9a8` (2026-11-13, 로컬 커밋 `d9719c5`). GitHub 스냅샷 푸시는 Chrome 확인 후 진행.
