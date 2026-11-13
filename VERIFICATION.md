@@ -130,3 +130,49 @@ bash /tmp/people-os-test.sh               # curl 10개 케이스, 3회 반복 �
 - 상단 sticky topbar(남색 로고 + 탭 메뉴), 둥근 카드 + 그림자 확인됨 (사용자 Chrome 경유).
 - FlowDesk 연결: 요약 결과 아래 "요약 복사" + "FlowDesk에서 열기" 버튼, 라이브러리 탭에도 FlowDesk 버튼. 링크 https://flowdesk-personal-c7a4.hr-jhkang.chatgpt.site/ 확인됨. FlowDesk는 별도 비공개 Site라 직접 임베드는 불가하고 링크+복사 흐름으로 연결.
 - 리스타일 후 요약 엔진 workers-ai 유지, 에러 없음.
+
+## 음성 전사 입력 (2026-11-13)
+
+Plaud Transcribe Studio의 전사 형태를 Cloudflare 네이티브(Workers AI Whisper)로 옮긴 파이프라인 맨 앞단.
+
+### Whisper 사전 검증 (REST API, 2026-11-13)
+
+- 무음 WAV 2초(16kHz mono, 64,044바이트) → HTTP 200, `success: true`, 텍스트는 "Thank you very much." 반복 환각. → 무음·잡음에 대한 반복 환각 가드(`isDegenerateTranscript`)를 넣은 근거.
+- 실제 음성: Wikimedia Commons "Wikipedia - 2024 South Korean martial law.mp3" 앞 1MB 청크 → HTTP 200, `success: true`, 966자 중 coherent한 영어 전사 ("On December 3, 2024, at 1027 PM Korea's standard time, KST. South Korean president Yonseuk Yul declared martial law..."). → `@cf/openai/whisper`가 이 계정에서 실제 음성을 전사함을 REST로 확인.
+
+### 로컬 검증 (`wrangler dev --local`, 포트 8787)
+
+| # | 케이스 | 결과 |
+|---|---|---|
+| 1 | `POST /api/transcribe` 무음 WAV | 201, `transcriptStatus: 'pending'`, `transcript: null`, `reason`에 Whisper 실패 원문 포함. 지은 전사본 없음 |
+| 2 | `GET /api/recordings` | pending 1건 반환 (`doc_id: null`, provider workers-ai, model `@cf/openai/whisper`, size 64044) |
+| 3 | `POST /api/recordings/:id/retry` (pending) | 로컬 AI 불가로 pending 유지, reason 반환 (정직한 실패) |
+| 4 | 텍스트 파일 업로드 | 400 |
+| 5 | 빈 파일 업로드 | 400 |
+| 6 | 26MB mp3 업로드 | 400 (25MB 상한) |
+| 7 | 파일 없이 POST | 400 |
+| 8 | 스모크: `POST /api/documents` | 201, 기존 경로 유지 |
+
+### 바인딩 검증 (`wrangler dev`, 토큰 주입, 포트 8788 — 로컬 서버 + 클라우드 AI)
+
+| # | 케이스 | 결과 |
+|---|---|---|
+| 9 | `POST /api/transcribe` 실제 음성 mp3 1MB | 201, `transcriptStatus: 'ready'`, 966자 실제 전사본, `docId` 생성, `recordingId` 생성 |
+| 10 | `GET /api/recordings` | ready 1건 + pending(무음) 1건 반환 |
+| 11 | `POST /api/recordings/:id/retry` (ready) | `already ready`, 전사본 반환, 행 건드리지 않음 |
+| 12 | `POST /api/documents/:docId/summarize` (전사본 문서) | 200, `engine: workers-ai`, 한국어 1줄 요약 + 액션 3개 — 전사→요약 연결 확인 |
+| 13 | 스모크: `/api/home`, `/api/tasks`, `/api/library` | 기존과 동일하게 응답 (문서 3·요약 2·할 일 1·리플렉션 1은 로컬 테스트 데이터) |
+
+주의: 위 9–13번은 Miniflare 로컬 D1/R2에 쓴 테스트 데이터라 라이브 DB에는 남지 않는다. `wrangler dev --remote`는 KV `preview_id`가 없어 실행 불가(별도 preview 네임스페이스 필요)라 원격 D1/R2 경로는 로컬에서 검증하지 못했다 — 배포 후 사용자 Chrome에서 실제 음성 업로드로 확인할 것.
+
+### 배포 (2026-11-13)
+
+- `cf-wrangler.py deploy` → https://people-os.workspace-easyware.workers.dev, Version ID `46554999-0c63-450a-8fc2-a68c9ed63970`.
+- 마이그레이션 `0003_recordings.sql`은 deploy가 자동 적용하지 않아 `d1 migrations apply people-os-db --remote`로 별도 적용 (✅, 2개 명령 실행). 원격 D1 확인: `recordings` 테이블 존재, 행 0건 (테스트 데이터는 로컬 Miniflare에만 있고 라이브 DB는 깨끗함).
+- 라이브 확인은 이 VM에서 workers.dev에 닿지 않아 수행하지 않음 — 사용자 Chrome으로 확인할 것 (음성 업로드 → 전사본 채워짐 → 요약, 녹음 목록 불러오기/다시 전사).
+
+### 아직 검증하지 않은 것 (음성 전사)
+
+- 배포된 Worker에서의 실제 음성 전사 (R2 실저장 + 원격 D1 행 생성 — 로컬 Miniflare와 같은 API라 동일 동작 예상, 배포 후 Chrome 확인 필요)
+- 긴 오디오(수 분) Whisper 처리 시간·결과 — 1MB(약 2분) 청크는 확인됨, 25MB 상한까지의 긴 파일은 미확인
+- 프론트 브라우저 클릭 테스트 (파일 선택 → 전사하기 → 요약 — curl로 API까지만 확인, 배포 후 사용자 Chrome으로 확인 예정)

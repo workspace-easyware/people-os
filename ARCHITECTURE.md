@@ -34,6 +34,8 @@ flowchart TB
 
 ## 요청 흐름 (데모 1개 흐름)
 
+0. **음성 전사** — `POST /api/transcribe` (multipart `file`, 최대 25MB)
+   R2 `recordings/<id>/<파일명>` 저장 + HEAD 크기 검증 → Workers AI Whisper 전사 → 전사본 있으면 D1 `documents` 행(kind='transcript') + `recordings` 행(status='ready') 생성. 전사 실패·빈 결과면 오디오만 저장하고 `transcript_status='pending'` (전사본을 지어내지 않음). `GET /api/recordings`, `POST /api/recordings/:id/retry`로 다시 전사.
 1. **업로드** — `POST /api/documents` {title, content, kind}
    브라우저 → Workers → R2에 원본 저장 + D1에 메타 저장. 201 반환.
 2. **요약** — `POST /api/documents/:id/summarize`
@@ -62,6 +64,7 @@ flowchart TB
 | KV | 구현됨 | 질문 캐시, 세션별 키 | D1 cache 테이블 |
 | Durable Objects | 구현됨 | AgentSession 대화 기억 | D1 sessions 테이블 |
 | Workers AI | 코드 있음, 로컬 폴백 | 요약·답변·리플렉션 생성 | local-extractive / local-template / local-rule |
+| Workers AI (Whisper) | 구현됨 | 음성 전사 (`@cf/openai/whisper`, 바인딩) | 전사 실패 시 pending 저장 (전사본 없음) |
 | Vectorize | 코드 있음, 로컬 폴백 | 규정·논문 임베딩 검색 | D1 텍스트 검색 |
 | Queues + Workflows | 설계·스텁 | 전사→요약→추출→임베딩 비동기 파이프라인 | 직접 호출 |
 | AI Gateway | 설계만 | 모델 라우팅·폴백·로그 | — |
@@ -70,7 +73,7 @@ flowchart TB
 | Turnstile | 설계만 | 가입·업로드 스팸 방지 | 폼 자리만 |
 | Workers Static Assets | 구현됨 | `public/index.html` 서빙 | — |
 
-## 데이터 모델 (migrations/0001_init.sql, 0002_workspace.sql)
+## 데이터 모델 (migrations/0001_init.sql, 0002_workspace.sql, 0003_recordings.sql)
 
 - `documents(id, title, kind, content, r2_key, created_at)`
 - `policies(id, title, section, content)` — 시드 7건
@@ -80,6 +83,7 @@ flowchart TB
 - `tickets(id, title, body, status, created_at)` — 에이전트 티켓 초안용
 - `tasks(id, title, source, done, created_at, done_at)` — Stage 1 작업 공간 (0002)
 - `decks(id, title, r2_key, bytes, slides, created_at)` — Stage 1 PPTX 덱 메타 (0002)
+- `recordings(id, title, provider, model, object_key, mime_type, size, transcript, transcript_status, doc_id, created_at)` — 음성 전사 입력 (0003). `transcript_status`: 'ready' | 'pending'. Plaud `recordings` 형태를 따르되 provider는 'workers-ai', user_id 없음(프로토타입 단일 사용자).
 
 ## Stage 1 — 작업 공간 + PPTX 덱 (2026-11-13, 구현됨)
 
@@ -91,6 +95,20 @@ flowchart TB
 - **PPTX 초안** (`POST /api/deck` → `GET /api/deck/:id`): easy-slides 방식 — pptxgenjs로 새 덱을 처음부터 생성. 표지(남색 #123863) + 요약 슬라이드 + 액션 슬라이드, Malgun Gothic, 16:9. R2 `decks/<id>.pptx`에 저장하고 D1 `decks`에 메타 저장. 다운로드 시 `Content-Disposition`은 한글 제목을 RFC 5987 `filename*`로 싣고 `filename`은 ASCII 폴백 (브라우저 Fetch 명세상 한글 filename은 TypeError).
 - 참고한 코드: easy-slides `site/` (pptxgenjs 신규 생성, 템플릿·workspace API, drizzle 스키마), FlowDesk Cloud `src/core/slides-export.mjs` (pptxgenjs 호출 패턴, `officeText` XML 금지 문자 제거, Malgun Gothic/`ko-KR`), `cloud/storage.mjs` (R2 저장·다운로드 패턴).
 
+## 음성 전사 입력 (2026-11-13, 구현됨)
+
+파이프라인 맨 앞단. Plaud Transcribe Studio의 전사 형태를 Cloudflare 네이티브로 옮겼다.
+
+- **입력** — `POST /api/transcribe` (multipart `file`, 최대 25MB, audio/*). Plaud `app/api/transcribe/route.ts`와 같은 상한·같은 필드명. R2 `recordings/<id>/<파일명>`에 저장하고 **HEAD 크기 검증**을 put 직후에 한다 (Plaud `docs/DOT_PLAUD_SYNC.md` 패턴: 크기 불일치는 실패, 덮어쓰지 않음).
+- **전사** — Workers AI `@cf/openai/whisper` 바인딩 (`{ audio: number[] }`, 언어 자동 감지). REST와 바인딩 모두 2026-11-13에 실제 음성으로 확인됨 (REST: 1MB mp3 → 966자 정상 전사; 바인딩: 동일 파일로 `wrangler dev`에서 ready + documents 행 생성 + workers-ai 요약까지 연결 확인).
+- **실패 처리 (지은 전사본 없음)** — Whisper 실패·빈 텍스트·반복 환각(무음 wav에서 "Thank you very much." 반복 확인)일 때는 오디오만 저장하고 `transcript_status='pending'`으로 남긴다. Plaud의 `plaud-audio-pending-transcript` 마커와 같은 원칙이다. `POST /api/recordings/:id/retry`로 R2 오디오를 다시 전사하며, ready 행은 건드리지 않고 pending 행만 업데이트하고 R2 키/크기는 유지한다 (Plaud pending enrichment 패턴).
+- **연결** — 전사 성공 시 `documents` 행(kind='transcript')을 만들어 기존 요약 엔드포인트가 그대로 동작한다. 프론트 업로드 탭의 "0. 음성 파일 전사"에서 파일을 올리면 전사본이 제목·본문에 채워지고 "요약하기"가 활성화된다. 최근 녹음 목록에서 불러오기/다시 전사가 된다.
+- **참고한 코드**: `workspace-easyware/plaud-transcribe-studio` — `app/api/transcribe/route.ts` (25MB 상한·R2 put·recordings 행), `app/api/summarize/route.ts` (저장된 전사본에서 요약), `docs/DOT_PLAUD_SYNC.md` (R2 HEAD 검증·pending 마커·재시도 시 덮어쓰기 금지).
+
+### Plaud Dot 동기화 (나중에 할 일, 미구현)
+
+Plaud Dot 기기와의 자동 동기화(페어링·스코프 토큰·별도 Dot 동기화 클라이언트·Plaud 계정 연동)는 이 프로토타입에 옮길 수 없어 구현하지 않았다. `docs/DOT_PLAUD_SYNC.md`의 페어링 흐름(32바이트 verifier·SHA-256 challenge·10분 만료 일회용 코드·`pts_` 토큰)은 Plaud 계정과 Sites 비밀 설정이 필요하고, 지금은 파일 업로드 전사로 대체한다. 나중에 할 때는 Dot 동기화 클라이언트를 별도 서비스로 두고 이 Worker의 `/api/transcribe`·`recordings` 모델을 그대로 재사용하는 것이 맞다.
+
 ## Stage 2 — 덱 편집기 (계획만, 미구현)
 
 Stage 1은 "새 덱 생성"까지만 한다. 다음 단계는 FlowDesk 방식의 **기존 덱 제자리 편집**이다.
@@ -101,7 +119,7 @@ Stage 1은 "새 덱 생성"까지만 한다. 다음 단계는 FlowDesk 방식의
 
 ## 로컬 vs 클라우드 차이 (솔직한 기록)
 
-- 로컬(`wrangler dev --local`)에서는 Workers AI·Vectorize가 안 돈다. `VERIFICATION.md`에 경고 문구 원문과 폴백 엔진을 기록했다.
+- 로컬(`wrangler dev --local`)에서는 Workers AI·Vectorize가 안 돈다. `VERIFICATION.md`에 경고 문구 원문과 폴백 엔진을 기록했다. Whisper도 로컬에서는 인증 문제로 실패해 전사가 pending으로 남는다 (지은 전사본 없음). 단, 토큰을 주입한 `wrangler dev`(로컬 서버 + 클라우드 AI)에서는 바인딩 Whisper가 실제 음성을 전사함을 2026-11-13에 확인했다.
 - `compatibility_date`는 wrangler 3.114.17이 지원하는 최신 `2025-07-18`로 맞췄다.
 - 배포 후에는 같은 코드가 바인딩을 그대로 써서 Workers AI·Vectorize를 탄다. 배포 전에는 그 동작을 검증할 수 없다고 README에 명시했다.
 

@@ -93,7 +93,7 @@ button.iconbtn:hover{color:#c0392b}
   <div class="hero">
     <h1>일잇 People OS</h1>
     <p class="sub">HR·코칭 인텔리전스 플랫폼 — Cloudflare Workers판 프로토타입</p>
-    <p class="small">데모 흐름: 홈 대시보드 → 샘플 전사본 붙여넣기 → 요약 → 액션 할 일로 저장 → PPTX 초안 다운로드 → “연차 3일 쓸 수 있어?” 질문 → 코칭 리플렉션 → FlowDesk 노트로 보내기. <span id="health" class="badge">health 확인 중…</span></p>
+    <p class="small">데모 흐름: 홈 대시보드 → 음성 파일 업로드·전사 → 요약 → 액션 할 일로 저장 → PPTX 초안 다운로드 → “연차 3일 쓸 수 있어?” 질문 → 코칭 리플렉션 → FlowDesk 노트로 보내기. <span id="health" class="badge">health 확인 중…</span></p>
   </div>
 
   <section id="tab-home" class="active">
@@ -115,6 +115,17 @@ button.iconbtn:hover{color:#c0392b}
   </section>
 
   <section id="tab-upload">
+    <div class="card">
+      <h2>0. 음성 파일 전사</h2>
+      <p class="small">회의 녹음 파일(mp3/m4a/wav 등, 최대 25MB)을 올리면 Workers AI Whisper가 전사합니다. 전사본은 아래 텍스트 입력란에 채워져 바로 요약할 수 있습니다. 전사가 안 되면 오디오만 저장되고 “전사 대기”로 남습니다.</p>
+      <div class="btnrow">
+        <input type="file" id="audioFile" accept="audio/*,.mp3,.m4a,.wav,.ogg,.webm,.flac" />
+        <button class="primary" id="transcribeBtn">전사하기</button>
+      </div>
+      <div id="audioResult"></div>
+      <h3 style="margin-top:16px">최근 음성 녹음</h3>
+      <div id="recList"><p class="small">불러오는 중…</p></div>
+    </div>
     <div class="card">
       <h2>1. 문서 업로드</h2>
       <p><button class="secondary" id="loadSample">샘플 전사본 불러오기</button></p>
@@ -186,8 +197,36 @@ function switchTab(name) {
   document.querySelector(`.tabs button[data-tab="${name}"]`).classList.add('nav-active');
   $('tab-' + name).classList.add('active');
   if (name === 'home') loadHome();
+  if (name === 'upload') loadRecordings();
   if (name === 'tasks') loadTasks();
   if (name === 'library') refreshLib();
+}
+async function loadRecordings() {
+  const j = await api('/api/recordings');
+  if (!j.ok) { $('recList').innerHTML = '<p class="small">녹음 목록을 불러오지 못했습니다.</p>'; return; }
+  $('recList').innerHTML = j.recordings.length ? j.recordings.map(r => {
+    const kb = (r.size / 1024).toFixed(0);
+    const badge = r.transcript_status === 'ready' ? '<span class="badge">전사 완료</span>' : '<span class="badge">전사 대기</span>';
+    const btn = r.transcript_status === 'ready'
+      ? `<button class="secondary" onclick="loadRecording('${r.id}')">불러오기</button>`
+      : `<button class="secondary" onclick="retryRecording('${r.id}')">다시 전사</button>`;
+    return `<div class="taskrow"><span class="t-title">${esc(r.title)}</span>${badge}<span class="t-src">${fmtDate(r.created_at)} · ${kb}KB</span>${btn}</div>`;
+  }).join('') : '<p class="small">아직 올린 음성 파일이 없습니다.</p>';
+}
+async function loadRecording(id) {
+  const j = await api('/api/recordings/' + id);
+  if (!j.ok || !j.recording.transcript) { alert('전사본이 없습니다.'); return; }
+  docId = j.recording.doc_id; lastDocTitle = j.recording.title.replace(/\.[^.]+$/, '');
+  $('docTitle').value = lastDocTitle;
+  $('docContent').value = j.recording.transcript;
+  $('summarizeBtn').disabled = false;
+  $('docResult').innerHTML = `<div class="card">녹음 전사본을 불러왔습니다 · 문서 id <code>${docId}</code> — 바로 요약할 수 있습니다.</div>`;
+}
+async function retryRecording(id) {
+  const j = await api('/api/recordings/' + id + '/retry', { method: 'POST' });
+  if (j.ok && j.transcriptStatus === 'ready') { alert('전사가 완료됐습니다.'); loadRecording(id); }
+  else alert('아직 전사가 안 됐습니다. ' + (j.reason || j.error || ''));
+  loadRecordings();
 }
 document.querySelectorAll('.tabs button').forEach(b => b.onclick = () => switchTab(b.dataset.tab));
 async function api(path, opts) {
@@ -301,6 +340,28 @@ $('loadSample').onclick = async () => {
   const j = await api('/api/seed');
   $('docTitle').value = '11월 팀 회의 전사본 (샘플)';
   $('docContent').value = j.sampleTranscript;
+};
+$('transcribeBtn').onclick = async () => {
+  const f = $('audioFile').files[0];
+  if (!f) { alert('음성 파일을 선택하세요.'); return; }
+  $('transcribeBtn').disabled = true;
+  $('audioResult').innerHTML = '<p class="small">전사하는 중입니다… (Workers AI Whisper)</p>';
+  const fd = new FormData();
+  fd.append('file', f);
+  const r = await fetch('/api/transcribe', { method: 'POST', body: fd });
+  const j = await r.json();
+  $('transcribeBtn').disabled = false;
+  if (!j.ok) { $('audioResult').innerHTML = `<p class="small">오류: ${esc(j.error || '전사 실패')}</p>`; return; }
+  if (j.transcriptStatus === 'ready') {
+    docId = j.docId; lastDocTitle = j.title.replace(/\.[^.]+$/, '');
+    $('docTitle').value = lastDocTitle;
+    $('docContent').value = j.transcript;
+    $('summarizeBtn').disabled = false;
+    $('audioResult').innerHTML = `<div class="card">전사 완료 · 문서 id <code>${j.docId}</code> — 전사본이 아래에 채워졌습니다. 바로 요약할 수 있습니다.</div>`;
+  } else {
+    $('audioResult').innerHTML = `<div class="card">오디오만 저장됐습니다 (전사 대기). Whisper가 텍스트를 못 뽑았습니다${j.reason ? ' — ' + esc(j.reason) : ''}. 녹음 목록에서 “다시 전사”를 눌러보세요.</div>`;
+  }
+  loadRecordings(); loadHome();
 };
 $('uploadBtn').onclick = async () => {
   const j = await api('/api/documents', { method: 'POST', body: JSON.stringify({ title: $('docTitle').value, content: $('docContent').value, kind: 'transcript' }) });

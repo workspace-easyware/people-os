@@ -22,6 +22,35 @@ const app = new Hono<{ Bindings: Env }>();
 // 임베딩은 bge-base-en-v1.5 (768차원, Vectorize 인덱스와 동일).
 const LLM_MODEL = "@cf/meta/llama-4-scout-17b-16e-instruct";
 const EMBED_MODEL = "@cf/baai/bge-base-en-v1.5";
+// Plaud 전사본 입력의 Cloudflare판: Workers AI Whisper. REST와 바인딩 모두
+// 2026-11-13에 실제 음성으로 확인됨 (REST: 1MB mp3 → 정상 전사).
+// 바인딩 입력은 { audio: number[] } (8비트 부호 없는 정수 배열), 언어 자동 감지.
+const WHISPER_MODEL = "@cf/openai/whisper";
+const MAX_AUDIO_BYTES = 25 * 1024 * 1024; // Plaud와 동일 상한
+
+// Whisper는 무음·잡음에 "Thank you very much." 같은 문장을 반복하는 환각을
+// 내는 경우가 있다 (무음 wav 테스트에서 확인). 짧은 구절이 절반 이상을 차지하면
+// 전사로 보지 않고 pending 처리한다.
+function isDegenerateTranscript(text: string): boolean {
+  const words = text.trim().split(/\s+/).filter(Boolean);
+  if (words.length < 10) return false;
+  const counts = new Map<string, number>();
+  for (const w of words) counts.set(w.toLowerCase(), (counts.get(w.toLowerCase()) ?? 0) + 1);
+  const top = Math.max(...counts.values());
+  return top / words.length > 0.5;
+}
+
+async function transcribeAudio(env: Env, bytes: Uint8Array): Promise<{ ok: true; text: string } | { ok: false; reason: string }> {
+  try {
+    const out = await env.AI.run(WHISPER_MODEL, { audio: [...bytes] });
+    const text = (out as { text?: string }).text ?? "";
+    if (!text.trim()) return { ok: false, reason: "whisper returned empty text" };
+    if (isDegenerateTranscript(text)) return { ok: false, reason: "whisper returned repeated filler text (likely silence/noise)" };
+    return { ok: true, text: text.trim() };
+  } catch (e) {
+    return { ok: false, reason: e instanceof Error ? e.message : String(e) };
+  }
+}
 
 // Workers AI가 주는 답은 {response: "..."} 상자 안에 있다. response가 문자열이
 // 아닐 때도 있고, JSON 답은 ```json 펜스로 감싸져 오는 경우가 있어 통째로
@@ -101,6 +130,7 @@ async function ensureSchema(db: D1Database) {
     CREATE TABLE IF NOT EXISTS tickets (id TEXT PRIMARY KEY, title TEXT NOT NULL, body TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'draft', created_at TEXT NOT NULL DEFAULT (datetime('now')));
     CREATE TABLE IF NOT EXISTS tasks (id TEXT PRIMARY KEY, title TEXT NOT NULL, source TEXT, done INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL DEFAULT (datetime('now')), done_at TEXT);
     CREATE TABLE IF NOT EXISTS decks (id TEXT PRIMARY KEY, title TEXT NOT NULL, r2_key TEXT NOT NULL, bytes INTEGER NOT NULL DEFAULT 0, slides INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL DEFAULT (datetime('now')));
+    CREATE TABLE IF NOT EXISTS recordings (id TEXT PRIMARY KEY, title TEXT NOT NULL, provider TEXT NOT NULL DEFAULT 'workers-ai', model TEXT NOT NULL DEFAULT '@cf/openai/whisper', object_key TEXT NOT NULL, mime_type TEXT NOT NULL DEFAULT 'application/octet-stream', size INTEGER NOT NULL DEFAULT 0, transcript TEXT, transcript_status TEXT NOT NULL DEFAULT 'pending', doc_id TEXT, created_at TEXT NOT NULL DEFAULT (datetime('now')));
   `);
 }
 
@@ -187,6 +217,87 @@ app.post("/api/documents/:id/summarize", async (c) => {
   await c.env.DB.prepare("UPDATE documents SET summary = ?, actions = ? WHERE id = ?")
     .bind(JSON.stringify(summary), JSON.stringify(actions), id).run();
   return c.json({ ok: true, id, title: doc.title, summary, actions, engine });
+});
+
+// ---- transcribe (음성 전사 입력, Plaud transcribe/route.ts 형태의 Cloudflare판) ----
+// multipart/form-data file 필드(최대 25MB) → R2 저장 + HEAD 크기 검증 → Whisper 전사
+// → 전사본 있으면 documents 행까지 만들고, 없으면 오디오만 pending으로 저장한다.
+// 전사본을 지어내지 않는다.
+app.post("/api/transcribe", async (c) => {
+  await ensureSeeded(c.env.DB);
+  const form = await c.req.raw.formData().catch(() => null);
+  if (!form) return c.json({ ok: false, error: "multipart form-data is required" }, 400);
+  const file = form.get("file");
+  const isUpload = file !== null && typeof file === "object" && "arrayBuffer" in file && typeof (file as File).size === "number";
+  if (!isUpload) return c.json({ ok: false, error: "audio file is required (field: file)" }, 400);
+  const f = file as File;
+  const audioExts = ["mp3", "m4a", "wav", "ogg", "webm", "mp4", "flac", "aac", "wma"];
+  const ext = (f.name.split(".").pop() || "").toLowerCase();
+  const isAudio = f.type.startsWith("audio/") || f.type.startsWith("video/") || audioExts.includes(ext);
+  if (!isAudio) return c.json({ ok: false, error: "audio file is required" }, 400);
+  if (f.size <= 0) return c.json({ ok: false, error: "empty file" }, 400);
+  if (f.size > MAX_AUDIO_BYTES) return c.json({ ok: false, error: "file must be 25MB or smaller" }, 400);
+
+  const id = uid("rec");
+  const title = f.name.replace(/\.[^.]+$/, "") || f.name;
+  const safeName = f.name.replace(/[^a-zA-Z0-9._-]/g, "_").slice(-120) || "audio";
+  const objectKey = `recordings/${id}/${safeName}`;
+  const bytes = new Uint8Array(await f.arrayBuffer());
+  // R2 저장 + HEAD 크기 검증 (Plaud DOT_PLAUD_SYNC.md 패턴: put 직후 HEAD로 검증)
+  await c.env.FILES.put(objectKey, bytes, { httpMetadata: { contentType: f.type || "application/octet-stream" } });
+  const head = await c.env.FILES.head(objectKey).catch(() => null);
+  if (!head || head.size !== f.size) return c.json({ ok: false, error: "r2 verify failed after upload", recordingId: id }, 502);
+
+  const result = await transcribeAudio(c.env, bytes);
+  const now = new Date().toISOString();
+  if (!result.ok) {
+    // 전사 실패/빈 결과: 오디오만 저장하고 pending 마커 (Plaud 'plaud-audio-pending-transcript' 패턴).
+    await c.env.DB.prepare("INSERT INTO recordings (id, title, provider, model, object_key, mime_type, size, transcript, transcript_status, doc_id, created_at) VALUES (?, ?, 'workers-ai', ?, ?, ?, ?, NULL, 'pending', NULL, ?)")
+      .bind(id, f.name, WHISPER_MODEL, objectKey, f.type || "application/octet-stream", f.size, now).run();
+    return c.json({ ok: true, recordingId: id, title: f.name, transcript: null, transcriptStatus: "pending", reason: result.reason, r2Verified: true, provider: "workers-ai", model: WHISPER_MODEL }, 201);
+  }
+  const docId = uid("doc");
+  await c.env.DB.prepare("INSERT INTO documents (id, title, kind, content, r2_key) VALUES (?, ?, 'transcript', ?, ?)")
+    .bind(docId, title, result.text, objectKey).run();
+  await c.env.DB.prepare("INSERT INTO recordings (id, title, provider, model, object_key, mime_type, size, transcript, transcript_status, doc_id, created_at) VALUES (?, ?, 'workers-ai', ?, ?, ?, ?, ?, 'ready', ?, ?)")
+    .bind(id, f.name, WHISPER_MODEL, objectKey, f.type || "application/octet-stream", f.size, result.text, docId, now).run();
+  return c.json({ ok: true, recordingId: id, docId, title: f.name, transcript: result.text, transcriptStatus: "ready", r2Verified: true, provider: "workers-ai", model: WHISPER_MODEL }, 201);
+});
+
+// 최근 음성 녹음 목록 (전사본 내용은 안 돌려준다 — 목록은 메타데이터만)
+app.get("/api/recordings", async (c) => {
+  await ensureSeeded(c.env.DB);
+  const rows = await c.env.DB.prepare("SELECT id, title, provider, model, mime_type, size, transcript_status, doc_id, created_at FROM recordings ORDER BY created_at DESC LIMIT 20").all();
+  return c.json({ ok: true, recordings: rows.results || [] });
+});
+
+app.get("/api/recordings/:id", async (c) => {
+  await ensureSeeded(c.env.DB);
+  const row = await c.env.DB.prepare("SELECT id, title, provider, model, object_key, mime_type, size, transcript, transcript_status, doc_id, created_at FROM recordings WHERE id = ?").bind(c.req.param("id"))
+    .first<{ id: string; title: string; provider: string; model: string; object_key: string; mime_type: string; size: number; transcript: string | null; transcript_status: string; doc_id: string | null; created_at: string }>();
+  if (!row) return c.json({ ok: false, error: "recording not found" }, 404);
+  return c.json({ ok: true, recording: row });
+});
+
+// pending 녹음을 R2 오디오로 다시 전사한다. ready 행은 건드리지 않고,
+// pending 행만 업데이트하며 R2 키/크기는 유지한다 (Plaud pending enrichment 패턴).
+app.post("/api/recordings/:id/retry", async (c) => {
+  await ensureSeeded(c.env.DB);
+  const row = await c.env.DB.prepare("SELECT id, title, object_key, transcript, transcript_status, doc_id FROM recordings WHERE id = ?").bind(c.req.param("id"))
+    .first<{ id: string; title: string; object_key: string; transcript: string | null; transcript_status: string; doc_id: string | null }>();
+  if (!row) return c.json({ ok: false, error: "recording not found" }, 404);
+  if (row.transcript_status === "ready" && row.transcript) return c.json({ ok: true, recordingId: row.id, transcriptStatus: "ready", transcript: row.transcript, docId: row.doc_id, note: "already ready" });
+  const obj = await c.env.FILES.get(row.object_key);
+  if (!obj) return c.json({ ok: false, error: "audio file not found in R2" }, 404);
+  const bytes = new Uint8Array(await obj.arrayBuffer());
+  const result = await transcribeAudio(c.env, bytes);
+  if (!result.ok) return c.json({ ok: true, recordingId: row.id, transcriptStatus: "pending", reason: result.reason });
+  const docId = uid("doc");
+  await c.env.DB.prepare("INSERT INTO documents (id, title, kind, content, r2_key) VALUES (?, ?, 'transcript', ?, ?)")
+    .bind(docId, row.title.replace(/\.[^.]+$/, ""), result.text, row.object_key).run();
+  await c.env.DB.prepare("UPDATE recordings SET transcript = ?, transcript_status = 'ready', doc_id = ? WHERE id = ? AND transcript_status = 'pending'")
+    .bind(result.text, docId, row.id).run();
+  return c.json({ ok: true, recordingId: row.id, docId, transcriptStatus: "ready", transcript: result.text });
 });
 
 // ---- ask (RAG) ----
