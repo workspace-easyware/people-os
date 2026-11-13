@@ -19,6 +19,12 @@ type Env = {
   // 코드·wrangler.toml에 넣지 않고 `wrangler secret put ADMIN_SECRET` /
   // Cloudflare 대시보드에서만 설정한다. 미설정 시 운영 경로는 항상 거부된다.
   ADMIN_SECRET?: string;
+  // Turnstile (C7): 봇 보호용. SECRET은 코드에 절대 넣지 않고
+  // `wrangler secret put TURNSTILE_SECRET` / 대시보드에서만 설정한다.
+  // SITEKEY는 공개 값이라 wrangler.toml [vars]에 넣어도 된다.
+  // 둘 다 미설정 시 질문 검증은 건너뛴다 (데모 진행용 fail-open).
+  TURNSTILE_SECRET?: string;
+  TURNSTILE_SITEKEY?: string;
 };
 
 const app = new Hono<{ Bindings: Env }>();
@@ -58,6 +64,12 @@ const SCORE_FLOOR = 0.55;
 // "연차 3일"은 연차 15/근태 7/출장 1, "출장비"는 출장 8, "출산 전후 재택"은
 // 전원 0이라 2가 적정하다 (로컬 검증, 2026-11-13).
 const KEYWORD_GATE_MIN = 2;
+// 질문 레이트 리밋 (C7): 세션/IP 기준 분당 20회. 초과 시 429 + 재시도 안내.
+// 계획서에 수치가 없어 분당 20회로 잡았다. KV get+put이라 동시 호출에
+// 완벽하지 않지만 데모 보호용으로는 충분하다.
+const ASK_RATE_LIMIT_PER_MINUTE = 20;
+// Turnstile siteverify 엔드포인트 (C7).
+const TURNSTILE_VERIFY_URL = "https://challenges.cloudflare.com/turnstile/v0/siteverify";
 // Vectorize 시딩 상태 키 (C5 Phase 2 lazy 시딩, D1 meta 테이블).
 const VECTOR_INDEX_NAME = "people-os-index-m3";
 const VECTOR_SEED_KEY = "vector_seeded:bge-m3:people-os-index-m3";
@@ -74,6 +86,46 @@ function adminAllowed(env: Env, given: string | undefined): boolean {
   let diff = 0;
   for (let i = 0; i < secret.length; i++) diff |= secret.charCodeAt(i) ^ given.charCodeAt(i);
   return diff === 0;
+}
+
+// Turnstile 토큰 검증 (C7). 시크릿이 설정돼 있지 않으면 검증을 건너뛰고
+// 로그만 남긴다 (데모 진행용 fail-open — 키를 설정하면 검증이 켜진다).
+// siteverify 호출 자체가 실패해도 fail-open으로 넘긴다 (일시 장애 시
+// 데모가 멈추지 않게). 검증 실패(토큰 없음·위조)만 403으로 막는다.
+async function verifyTurnstile(env: Env, token: string | undefined, ip: string | undefined): Promise<{ ok: boolean; skipped?: boolean; error?: string }> {
+  if (!env.TURNSTILE_SECRET) {
+    console.log("[turnstile] skipped: TURNSTILE_SECRET not set (fail-open for demo)");
+    return { ok: true, skipped: true };
+  }
+  if (!token) return { ok: false, error: "bot check token is required — please retry the question" };
+  try {
+    const form = new URLSearchParams({ secret: env.TURNSTILE_SECRET, response: token });
+    if (ip) form.set("remoteip", ip);
+    const res = await fetch(TURNSTILE_VERIFY_URL, { method: "POST", body: form });
+    const data = await res.json() as { success?: boolean; "error-codes"?: string[] };
+    if (data.success) return { ok: true };
+    return { ok: false, error: `turnstile verification failed: ${(data["error-codes"] || []).join(",") || "unknown"}` };
+  } catch (e) {
+    console.log("[turnstile] verify call failed, fail-open:", e instanceof Error ? e.message : String(e));
+    return { ok: true, skipped: true, error: "verify service unreachable (fail-open)" };
+  }
+}
+
+// KV 레이트 리밋 (C7): 클라이언트(IP 우선, 없으면 세션) 기준 분당
+// ASK_RATE_LIMIT_PER_MINUTE회. KV 실패 시 fail-open (차단하지 않음) —
+// 로컬 Miniflare KV가 없어도 질문이 막히지 않게 한다.
+async function checkAskRateLimit(env: Env, clientKey: string): Promise<{ allowed: boolean; remaining: number; resetInSec: number }> {
+  const window = Math.floor(Date.now() / 60_000);
+  const key = `rl:ask:${clientKey}:${window}`;
+  const resetInSec = 60 - (Math.floor(Date.now() / 1000) % 60);
+  try {
+    const cur = parseInt((await env.CACHE.get(key)) || "0", 10) || 0;
+    if (cur >= ASK_RATE_LIMIT_PER_MINUTE) return { allowed: false, remaining: 0, resetInSec };
+    await env.CACHE.put(key, String(cur + 1), { expirationTtl: 120 });
+    return { allowed: true, remaining: ASK_RATE_LIMIT_PER_MINUTE - cur - 1, resetInSec };
+  } catch {
+    return { allowed: true, remaining: ASK_RATE_LIMIT_PER_MINUTE, resetInSec };
+  }
 }
 
 // Whisper는 무음·잡음에 "Thank you very much." 같은 문장을 반복하는 환각을
@@ -269,6 +321,7 @@ async function ensureSchema(db: D1Database) {
     CREATE TABLE IF NOT EXISTS recordings (id TEXT PRIMARY KEY, title TEXT NOT NULL, provider TEXT NOT NULL DEFAULT 'workers-ai', model TEXT NOT NULL DEFAULT '@cf/openai/whisper', object_key TEXT NOT NULL, mime_type TEXT NOT NULL DEFAULT 'application/octet-stream', size INTEGER NOT NULL DEFAULT 0, transcript TEXT, transcript_status TEXT NOT NULL DEFAULT 'pending', doc_id TEXT, progress TEXT, partial TEXT DEFAULT '', done_chunks INTEGER DEFAULT 0, lock_until INTEGER, created_at TEXT NOT NULL DEFAULT (datetime('now')));
     CREATE TABLE IF NOT EXISTS chunks (id TEXT PRIMARY KEY, doc_id TEXT NOT NULL, article TEXT NOT NULL, text TEXT NOT NULL, ord INTEGER NOT NULL);
     CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL, updated_at TEXT NOT NULL DEFAULT (datetime('now')));
+    CREATE TABLE IF NOT EXISTS ask_events (id TEXT PRIMARY KEY, session_id TEXT, question TEXT NOT NULL, answer TEXT NOT NULL DEFAULT '', source_ids TEXT NOT NULL DEFAULT '[]', grounded INTEGER NOT NULL DEFAULT 0, engine TEXT NOT NULL DEFAULT '', search_engine TEXT NOT NULL DEFAULT '', timings_json TEXT NOT NULL DEFAULT '{}', feedback TEXT, feedback_comment TEXT, feedback_at TEXT, created_at TEXT NOT NULL DEFAULT (datetime('now')));
   `);
 }
 
@@ -626,27 +679,53 @@ async function keywordGate(
 // ---- ask (RAG) ----
 app.post("/api/ask", async (c) => {
   await ensureSeeded(c.env.DB);
-  const body = await c.req.json().catch(() => ({})) as { question?: string; sessionId?: string };
+  const body = await c.req.json().catch(() => ({})) as { question?: string; sessionId?: string; turnstileToken?: string; force?: boolean };
   if (!body.question || body.question.trim().length < 2) return c.json({ ok: false, error: "question is required" }, 400);
   const question = body.question.trim();
   const sessionId = body.sessionId || uid("sess");
+  // 처리 시간 측정 (C7): 단계별 ms를 응답·감사 기록에 남긴다.
+  const t0 = Date.now();
+  const timings: Record<string, number> = {};
+  const mark = (stage: string, started: number) => { timings[stage] = Date.now() - started; };
 
-  // KV 캐시 조회 (실패 시 D1 cache 테이블 폴백)
+  // C7 봇 보호: Turnstile 토큰 검증 (시크릿 미설정 시 fail-open, 로그만 남김).
+  const clientIp = c.req.header("cf-connecting-ip") || undefined;
+  const turnstile = await verifyTurnstile(c.env, body.turnstileToken, clientIp);
+  if (!turnstile.ok) return c.json({ ok: false, error: turnstile.error || "bot check failed" }, 403);
+  // C7 레이트 리밋: 세션/IP 기준 분당 20회. 초과 시 429 + 재시도 안내.
+  // 식별자는 세션 우선: cf-connecting-ip는 클라우드 브라우저 등에서 요청마다
+  // 바뀔 수 있어 IP 기준이면 카운터가 분산돼 제한이 안 걸린다. 세션이 없을 때만 IP로.
+  const rateKey = sessionId || clientIp || "anon";
+  const rate = await checkAskRateLimit(c.env, rateKey);
+  if (!rate.allowed) {
+    return c.json(
+      { ok: false, error: `너무 많은 질문입니다. ${rate.resetInSec}초 후에 다시 시도해 주세요.` },
+      429,
+      { "Retry-After": String(rate.resetInSec) }
+    );
+  }
+
+  // KV 캐시 조회 (실패 시 D1 cache 테이블 폴백). force면 다시 생성한다.
   // 캐시 키에 sessionId를 포함한다: 후속 질문은 세션 문맥에 따라 답이 달라지므로,
   // 세션과 무관한 키로 캐시하면 다른 세션의 오래된(잘못된) 답을 돌려주게 된다.
   const cacheKey = `ask:${sessionId}:${question}`;
-  try {
-    const cached = await c.env.CACHE.get(cacheKey);
-    if (cached) return c.json({ ...JSON.parse(cached), cached: true, sessionId });
-  } catch { /* KV 로컬 실패 시 아래 D1 캐시로 */ }
-  const d1Cache = await c.env.DB.prepare("SELECT value FROM cache WHERE key = ?").bind(cacheKey).first<{ value: string }>();
-  if (d1Cache) return c.json({ ...JSON.parse(d1Cache.value), cached: true, cacheVia: "d1", sessionId });
+  const cacheStart = Date.now();
+  if (!body.force) {
+    try {
+      const cached = await c.env.CACHE.get(cacheKey);
+      if (cached) return c.json({ ...JSON.parse(cached), cached: true, sessionId });
+    } catch { /* KV 로컬 실패 시 아래 D1 캐시로 */ }
+    const d1Cache = await c.env.DB.prepare("SELECT value FROM cache WHERE key = ?").bind(cacheKey).first<{ value: string }>();
+    if (d1Cache) return c.json({ ...JSON.parse(d1Cache.value), cached: true, cacheVia: "d1", sessionId });
+  }
+  mark("cache", cacheStart);
 
   // 후속 질문 문맥: 같은 세션의 직전 질문을 검색 쿼리에 보태 주제를 잃지 않게 한다.
   // 단, 현재 질문에 내용 토큰이 하나라도 있으면 독립 질문으로 보고 보태지 않는다
   // ("출산 전후 재택" 뒤에 "연차 3일"을 보태면 연차 근거가 딸려오는 오염이 생긴다).
   // 내용 토큰이 전혀 없는 지시어성 후속 질문("그건 어떻게 돼?", "며칠 전에?")에만 보탠다.
   let searchQuestion = question;
+  const sessionStart = Date.now();
   try {
     const stub = c.env.AGENT_SESSION.get(c.env.AGENT_SESSION.idFromName(sessionId));
     const res = await stub.fetch("https://do/history");
@@ -663,6 +742,7 @@ app.post("/api/ask", async (c) => {
       }
     } catch { /* 세션 조회 실패 시 현재 질문만으로 검색 */ }
   }
+  mark("session", sessionStart);
 
   // 근거 검색: 질문을 임베딩해 Vectorize에서 검색 → 실패 시 D1 조문 텍스트 검색 폴백
   // C5 (Baryon AX): Vectorize 점수 하한 SCORE_FLOOR를 적용한다. 조회는
@@ -675,13 +755,18 @@ app.post("/api/ask", async (c) => {
   let noEvidence = false; // Vectorize가 성공했는데 하한을 넘는 근거가 없음
   try {
     await ensureVectorSeeded(c.env);
+    const embedStart = Date.now();
     const emb = await c.env.AI.run(EMBED_MODEL, { text: [searchQuestion] }) as { data: number[][] | number[] };
+    mark("embed", embedStart);
     const raw = emb.data;
     const values = new Float32Array(Array.isArray(raw[0]) ? (raw[0] as number[]) : (raw as number[]));
+    const vecStart = Date.now();
     const vec = await c.env.VECTOR.query(values, { topK: 3, returnMetadata: "all" });
+    mark("vectorize", vecStart);
     const all = vec.matches || [];
     const matches = all.filter((m) => (m.score || 0) >= SCORE_FLOOR);
     if (matches.length > 0) {
+      const gateStart = Date.now();
       const gated = await keywordGate(c.env, searchQuestion, matches.map((m) => ({ id: String(m.id), score: m.score || 0, metadata: (m.metadata || {}) as Record<string, unknown> })));
       if (gated.length === 0) {
         noEvidence = true; // Vectorize는 찾았으나 키워드 관련성 없음 — D1 폴백도 안 탐
@@ -690,6 +775,7 @@ app.post("/api/ask", async (c) => {
         sources = await resolveSources(c.env, searchQuestion, gated);
         if (sources.length === 0) throw new Error("no resolvable matches");
       }
+      mark("gate", gateStart);
     } else if (all.length > 0) {
       noEvidence = true; // 하한 이하 — 근거 없음 확정, 폴백 안 탐
     } else {
@@ -714,8 +800,10 @@ app.post("/api/ask", async (c) => {
   if (!grounded) {
     answer = "등록된 규정에서 근거를 찾지 못했습니다. 이 질문에 대한 답은 아직 등록된 규정에 없습니다. 인사팀에 확인해 주세요.";
     engine = "none";
+    timings.llm = 0; // 근거 없음 — LLM을 호출하지 않는다
   } else {
     // 답변 생성: Workers AI 시도 → 실패 시 근거 기반 템플릿 답변
+    const llmStart = Date.now();
     try {
       const context = sources.map((s) => `[${s.title} › ${s.section}] ${s.snippet}`).join("\n");
       const out = await c.env.AI.run(LLM_MODEL, {
@@ -731,6 +819,7 @@ app.post("/api/ask", async (c) => {
       answer = `근거 문서 「${top.title}(${top.section})」에 따르면, ${top.snippet} 질문하신 "${question}"에 대해서는 위 규정을 기준으로 안내드립니다. 정확한 적용은 인사팀 확인이 필요합니다.`;
       engine = "local-template";
     }
+    mark("llm", llmStart);
   }
 
   // Durable Objects 세션에 대화 저장 시도 → 실패 시 D1 sessions 폴백
@@ -747,11 +836,48 @@ app.post("/api/ask", async (c) => {
     await c.env.DB.prepare("INSERT OR REPLACE INTO sessions (id, history, updated_at) VALUES (?, ?, datetime('now'))").bind(sessionId, JSON.stringify(history.slice(-20))).run();
   }
 
-  const result = { ok: true, sessionId, question, answer, sources, grounded, engine, searchEngine, sessionVia, cached: false };
+  timings.total = Date.now() - t0;
+  const eventId = uid("evt");
+  const result = { ok: true, sessionId, question, answer, sources, grounded, engine, searchEngine, sessionVia, cached: false, eventId, timings };
+  // C7 답변 감사: 질문 1건마다 ask_events 행 1건. 기록 실패가 질문 자체를
+  // 망가뜨리지는 않게 try/catch로 감싼다. 캐시된 답은 원본 호출의 행을
+  // 공유하므로(같은 eventId) 새로 기록하지 않는다.
+  try {
+    await c.env.DB.prepare(
+      "INSERT INTO ask_events (id, session_id, question, answer, source_ids, grounded, engine, search_engine, timings_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)"
+    ).bind(eventId, sessionId, question, answer, JSON.stringify(sources.map((s) => s.id)), grounded ? 1 : 0, engine, searchEngine, JSON.stringify(timings)).run();
+  } catch (e) {
+    console.log("[audit] ask_events insert failed:", e instanceof Error ? e.message : String(e));
+  }
   // 캐시 저장 (KV 시도, 실패 시 D1)
   try { await c.env.CACHE.put(cacheKey, JSON.stringify(result), { expirationTtl: 3600 }); }
   catch { await c.env.DB.prepare("INSERT OR REPLACE INTO cache (key, value) VALUES (?, ?)").bind(cacheKey, JSON.stringify(result)).run(); }
   return c.json(result);
+});
+
+// ---- feedback (C7) ----
+// 답변 카드의 👍/👎를 ask_events에 기록한다. 👎는 C5-b에서 지식 공백 큐로
+// 연결한다 (지금은 기록만 — 큐 UI는 C5-b에서 만든다).
+app.post("/api/feedback", async (c) => {
+  await ensureSeeded(c.env.DB);
+  const body = await c.req.json().catch(() => ({})) as { eventId?: string; rating?: string; comment?: string };
+  if (!body.eventId) return c.json({ ok: false, error: "eventId is required" }, 400);
+  if (body.rating !== "up" && body.rating !== "down") return c.json({ ok: false, error: "rating must be 'up' or 'down'" }, 400);
+  const row = await c.env.DB.prepare("SELECT id FROM ask_events WHERE id = ?").bind(body.eventId).first<{ id: string }>();
+  if (!row) return c.json({ ok: false, error: "event not found" }, 404);
+  await c.env.DB.prepare("UPDATE ask_events SET feedback = ?, feedback_comment = ?, feedback_at = datetime('now') WHERE id = ?")
+    .bind(body.rating, (body.comment || "").slice(0, 500) || null, body.eventId).run();
+  return c.json({
+    ok: true,
+    eventId: body.eventId,
+    rating: body.rating,
+    note: body.rating === "down" ? "이 질문은 답변 보완 대상으로 기록되었습니다 (C5-b 지식 공백 큐 연결 예정)." : null,
+  });
+});
+
+// 프론트가 Turnstile 위젯을 그릴 때 필요한 공개 설정. 시크릿은 절대 안 나온다.
+app.get("/api/config", async (c) => {
+  return c.json({ ok: true, turnstileSitekey: c.env.TURNSTILE_SITEKEY || null, turnstileEnabled: !!c.env.TURNSTILE_SITEKEY });
 });
 
 // ---- coaching ----
