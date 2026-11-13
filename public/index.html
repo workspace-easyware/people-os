@@ -248,6 +248,7 @@ details.timings ul li b{color:var(--color-text);font-weight:600}
         <button class="primary" id="refreshLib">새로고침</button>
       </div>
       <p class="small">업로드한 문서와 요약·액션 결과가 이곳에 모입니다. 요약은 복사하고, 액션은 할 일로 저장할 수 있습니다.</p>
+      <div id="libNotice" title="클릭하면 닫힙니다" onclick="this.innerHTML='';try{sessionStorage.removeItem('people-os-publish-notice')}catch(e){}" style="cursor:pointer"></div>
       <div id="libResult"></div>
     </div>
   </section>
@@ -463,10 +464,30 @@ async function publishGap(id) {
   const j = await api('/api/gaps/' + id + '/publish', { method: 'POST', body: JSON.stringify({ answer: ans, author }) });
   if (!j.ok) { box.innerHTML = `<p class="err">게시 실패: ${esc(j.error || '')}</p>`; return; }
   const idxErr = j.indexed && j.indexed.indexError ? ` <span class="err">색인 실패: ${esc(j.indexed.indexError)}</span>` : '';
-  box.innerHTML = j.status === 'resolved'
-    ? '<p class="small">게시됨 · 검증 완료 — 같은 질문에 암묵지 출처로 답변됩니다.</p>'
-    : `<p class="small">게시됨 · 검증: 근거가 아직 잡히지 않아 대기 상태로 돌아갔습니다.${idxErr}</p>`;
-  refreshLib(); loadHome();
+  const msg = j.status === 'resolved'
+    ? '게시됨 · 검증 완료 — 같은 질문에 암묵지 출처로 답변됩니다.'
+    : `게시됨 · 검증: 근거가 아직 잡히지 않아 대기 상태로 돌아갔습니다.${idxErr}`;
+  box.innerHTML = `<p class="small">${msg}</p>`;
+  // refreshLib이 라이브러리 전체를 다시 그려서 box가 사라지므로,
+  // 확인 문구는 다시 그려지지 않는 libNotice에 남긴다.
+  // 새로고침(F5)·라이브러리 새로고침 뒤에도 남아야 해서 sessionStorage에
+  // 저장하고, refreshLib이 렌더링 뒤에 다시 붙인다 (10분 지나면 버린다).
+  await refreshLib(); loadHome();
+  setPublishNotice(msg);
+}
+function setPublishNotice(msg) {
+  try { sessionStorage.setItem('people-os-publish-notice', JSON.stringify({ msg, at: Date.now() })); } catch {}
+  $('libNotice').innerHTML = `<p class="small">${msg}</p>`;
+}
+function restorePublishNotice() {
+  let saved = null;
+  try { saved = JSON.parse(sessionStorage.getItem('people-os-publish-notice') || 'null'); } catch {}
+  if (saved && saved.msg && Date.now() - (saved.at || 0) < 10 * 60 * 1000) {
+    $('libNotice').innerHTML = `<p class="small">${saved.msg}</p>`;
+  } else {
+    $('libNotice').innerHTML = '';
+    try { sessionStorage.removeItem('people-os-publish-notice'); } catch {}
+  }
 }
 async function refreshLib() {
   const j = await api('/api/library');
@@ -494,6 +515,8 @@ async function refreshLib() {
     `<h3>문서 ${j.documents.length}건</h3><div class="libgrid">${docs || '<p class="empty">문서가 없습니다.</p>'}</div>` +
     `<h3>규정 ${j.policies.length}건</h3><div class="libgrid">${pols}</div>` +
     `<h3>리플렉션 ${j.reflections.length}건</h3><div class="libgrid">${refls || '<p class="empty">리플렉션이 없습니다.</p>'}</div>`;
+  // 게시 확인 문구는 다시 그릴 때마다 복원한다 (없으면 비워둔다).
+  restorePublishNotice();
 }
 function toggleSidebar() {
   const sb = $('sidebar');

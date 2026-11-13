@@ -804,14 +804,18 @@ async function verifyTacitEvidence(
       const gated = await keywordGate(env, question, matches.map((m) => ({ id: String(m.id), score: m.score || 0, metadata: (m.metadata || {}) as Record<string, unknown> })));
       const sources = await resolveSources(env, question, gated);
       if (isTacit(sources)) return { resolved: true, sources: summarize(sources) };
-      if (sources.length > 0) return { resolved: false, sources: summarize(sources) };
-      // Vectorize에 암묵지 벡터가 아직 없으면(게시 직후 upsert 지연·실패)
-      // D1 chunk로 확인한다 — ask 경로의 D1 폴백과 같은 신호다.
-      const found = localSearchChunks(question, (chunkRows.results || []).map((ch) => ({ ...ch, title: docTitle })));
+      // 이 문서 chunk가 근거에 안 잡혔어도 D1으로 직접 확인한다.
+      // 오래된 중복 문서의 벡터가 위로 와서 가려지는 섀도잉이 있어도,
+      // 이 문서 chunk가 질문과 맞으면 근거가 있는 것이다.
+      // ask 경로의 D1 폴백과 같은 ≥2 키워드 하한을 쓴다.
+      const docChunks = (chunkRows.results || []).map((ch) => ({ ...ch, title: docTitle }));
+      const found = localSearchChunks(question, docChunks).filter((f) => f.score >= KEYWORD_GATE_MIN);
       if (found.length) return { resolved: true, sources: found.map((f) => ({ id: f.id, title: docTitle, section: f.article, score: f.score })) };
+      if (sources.length > 0) return { resolved: false, sources: summarize(sources) };
+      // 근거가 아예 없을 때만 아래 재시도 루프가 돈다.
     } catch {
       // Vectorize/AI 실패 — D1 텍스트 검색으로 확인한다 (로컬 dev 경로).
-      const found = localSearchChunks(question, (chunkRows.results || []).map((ch) => ({ ...ch, title: docTitle })));
+      const found = localSearchChunks(question, (chunkRows.results || []).map((ch) => ({ ...ch, title: docTitle }))).filter((f) => f.score >= KEYWORD_GATE_MIN);
       if (found.length) return { resolved: true, sources: found.map((f) => ({ id: f.id, title: docTitle, section: f.article, score: f.score })) };
       return { resolved: false, sources: [] };
     }
@@ -1085,10 +1089,15 @@ app.post("/api/gaps/:id/publish", async (c) => {
   // 본문 상단에 작성자·작성일·원 질문 메타를 포함한다 (계획서 C5-b 명세).
   const content = `작성자: ${author} · 작성일: ${today}\n원 질문: ${gap.question}\n\n${body.answer.trim()}`;
   // 기존 게시 문서가 있으면 같은 문서에 덮어쓴다 (버전 분산 방지).
+  // gap.doc_id가 없어도(👎로 새로 열린 gap) 같은 제목의 암묵지 문서가
+  // 있으면 그 문서를 재사용한다 — 같은 질문에 중복 문서가 생기던 문제.
   let docId = gap.doc_id;
-  const existing = docId
+  let existing = docId
     ? await c.env.DB.prepare("SELECT id, r2_key FROM documents WHERE id = ?").bind(docId).first<{ id: string; r2_key: string | null }>()
     : null;
+  if (!existing) {
+    existing = await c.env.DB.prepare("SELECT id, r2_key FROM documents WHERE kind = 'tacit' AND title = ? ORDER BY created_at DESC LIMIT 1").bind(title).first<{ id: string; r2_key: string | null }>();
+  }
   if (existing) {
     docId = existing.id;
     const r2Key = existing.r2_key || `documents/${docId}.md`;
