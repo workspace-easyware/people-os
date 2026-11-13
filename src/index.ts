@@ -1,0 +1,360 @@
+import { Hono } from "hono";
+import { AgentSession } from "./agent-session";
+import { coachingTranscript, localReflect, localSearch, localSummarize, policies, sampleTranscript, uid } from "./lib";
+
+export { AgentSession };
+
+type Env = {
+  DB: D1Database;
+  CACHE: KVNamespace;
+  FILES: R2Bucket;
+  VECTOR: VectorizeIndex;
+  AI: Ai;
+  AGENT_SESSION: DurableObjectNamespace;
+  ASSETS: Fetcher;
+};
+
+const app = new Hono<{ Bindings: Env }>();
+
+// llama-3-8b-instruct와 llama-3.1-8b-instruct는 2026-05-30에 deprecated 되어
+// Workers AI 바인딩에서 5028을 반환한다. (REST API에서는 3.1-8b가 되지만 바인딩에서는 안 된다.)
+// 임베딩은 bge-base-en-v1.5 (768차원, Vectorize 인덱스와 동일).
+const LLM_MODEL = "@cf/meta/llama-4-scout-17b-16e-instruct";
+const EMBED_MODEL = "@cf/baai/bge-base-en-v1.5";
+
+// Workers AI가 주는 답은 {response: "..."} 상자 안에 있다. response가 문자열이
+// 아닐 때도 있고, JSON 답은 ```json 펜스로 감싸져 오는 경우가 있어 통째로
+// JSON.parse하면 실패한다. 문자열로 바꾸고 펜스를 벗긴 뒤 첫 {부터 마지막 }까지만 파싱한다.
+function responseText(out: unknown): string {
+  if (typeof out === "string") return out;
+  const res = (out as { response?: unknown } | null)?.response;
+  if (typeof res === "string") return res;
+  return JSON.stringify(res ?? out);
+}
+
+function extractJson(text: string): Record<string, unknown> {
+  const cleaned = text.replace(/```json\s*/gi, "").replace(/```\s*/g, "");
+  const start = cleaned.indexOf("{");
+  const end = cleaned.lastIndexOf("}");
+  if (start === -1 || end === -1 || end <= start) throw new Error("no json object in ai response");
+  return JSON.parse(cleaned.slice(start, end + 1)) as Record<string, unknown>;
+}
+
+async function ensureSchema(db: D1Database) {
+  await db.exec(`
+    CREATE TABLE IF NOT EXISTS documents (id TEXT PRIMARY KEY, title TEXT NOT NULL, kind TEXT NOT NULL DEFAULT 'transcript', content TEXT NOT NULL, summary TEXT, actions TEXT, r2_key TEXT, created_at TEXT NOT NULL DEFAULT (datetime('now')));
+    CREATE TABLE IF NOT EXISTS policies (id TEXT PRIMARY KEY, title TEXT NOT NULL, section TEXT NOT NULL, body TEXT NOT NULL);
+    CREATE TABLE IF NOT EXISTS cache (key TEXT PRIMARY KEY, value TEXT NOT NULL, created_at TEXT NOT NULL DEFAULT (datetime('now')));
+    CREATE TABLE IF NOT EXISTS sessions (id TEXT PRIMARY KEY, history TEXT NOT NULL DEFAULT '[]', updated_at TEXT NOT NULL DEFAULT (datetime('now')));
+    CREATE TABLE IF NOT EXISTS reflections (id TEXT PRIMARY KEY, session_id TEXT, transcript TEXT NOT NULL, questions TEXT, patterns TEXT, next_questions TEXT, created_at TEXT NOT NULL DEFAULT (datetime('now')));
+    CREATE TABLE IF NOT EXISTS tickets (id TEXT PRIMARY KEY, title TEXT NOT NULL, body TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'draft', created_at TEXT NOT NULL DEFAULT (datetime('now')));
+  `);
+}
+
+async function ensureSeeded(db: D1Database) {
+  await ensureSchema(db);
+  const count = await db.prepare("SELECT COUNT(*) AS n FROM policies").first<{ n: number }>();
+  if (!count || count.n === 0) {
+    for (const p of policies()) {
+      await db.prepare("INSERT OR IGNORE INTO policies (id, title, section, body) VALUES (?, ?, ?, ?)").bind(p.id, p.title, p.section, p.body).run();
+    }
+  }
+}
+
+function bindingStatus(env: Env) {
+  return {
+    d1: !!env.DB,
+    kv: !!env.CACHE,
+    r2: !!env.FILES,
+    vectorize: !!env.VECTOR,
+    ai: !!env.AI,
+    durable_objects: !!env.AGENT_SESSION,
+  };
+}
+
+// ---- health ----
+app.post("/api/health", async (c) => {
+  await ensureSeeded(c.env.DB);
+  return c.json({ ok: true, service: "people-os", mode: "live", bindings: bindingStatus(c.env), note: "Workers AI / Vectorize는 로컬에서 폴백으로 동작할 수 있다. wrangler dev --local 기준." });
+});
+app.get("/api/health", async (c) => {
+  await ensureSeeded(c.env.DB);
+  return c.json({ ok: true, service: "people-os", mode: "live", bindings: bindingStatus(c.env) });
+});
+
+// ---- documents ----
+app.post("/api/documents", async (c) => {
+  await ensureSeeded(c.env.DB);
+  const body = await c.req.json().catch(() => ({})) as { title?: string; content?: string; kind?: string };
+  if (!body.content || body.content.trim().length < 3) return c.json({ ok: false, error: "content is required" }, 400);
+  const id = uid("doc");
+  const title = body.title || body.content.slice(0, 40);
+  const r2Key = `documents/${id}.txt`;
+  let r2Stored = false;
+  try {
+    await c.env.FILES.put(r2Key, body.content);
+    r2Stored = true;
+  } catch {
+    r2Stored = false; // 로컬 Miniflare R2 실패 시 D1에만 저장 (폴백)
+  }
+  await c.env.DB.prepare("INSERT INTO documents (id, title, kind, content, r2_key) VALUES (?, ?, ?, ?, ?)")
+    .bind(id, title, body.kind || "transcript", body.content, r2Stored ? r2Key : null).run();
+  return c.json({ ok: true, id, title, r2Stored, fallback: !r2Stored ? "d1-only" : null }, 201);
+});
+
+app.post("/api/documents/:id/summarize", async (c) => {
+  await ensureSeeded(c.env.DB);
+  const id = c.req.param("id");
+  const doc = await c.env.DB.prepare("SELECT * FROM documents WHERE id = ?").bind(id).first<{ id: string; title: string; content: string }>();
+  if (!doc) return c.json({ ok: false, error: "document not found" }, 404);
+  let engine = "local-extractive";
+  let summary: string[] = [];
+  let actions: string[] = [];
+  // 1) Workers AI 시도 (클라우드에서 동작, 로컬에서는 실패할 수 있음)
+  try {
+    const out = await c.env.AI.run(LLM_MODEL, {
+      messages: [
+        { role: "system", content: "다음 회의 전사본을 한국어로 3줄 요약하고 액션 아이템을 뽑아라. JSON으로만 답하라: {\"summary\":[\"...\"],\"actions\":[\"...\"]}" },
+        { role: "user", content: doc.content.slice(0, 4000) },
+      ],
+    });
+    const text = responseText(out);
+    const parsed = extractJson(text);
+    if (Array.isArray(parsed.summary) && parsed.summary.length) {
+      summary = parsed.summary.slice(0, 3);
+      actions = Array.isArray(parsed.actions) ? parsed.actions.slice(0, 5) : [];
+      engine = "workers-ai";
+    } else throw new Error("empty ai summary");
+  } catch {
+    const fb = localSummarize(doc.content);
+    summary = fb.summary;
+    actions = fb.actions;
+    engine = "local-extractive";
+  }
+  await c.env.DB.prepare("UPDATE documents SET summary = ?, actions = ? WHERE id = ?")
+    .bind(JSON.stringify(summary), JSON.stringify(actions), id).run();
+  return c.json({ ok: true, id, title: doc.title, summary, actions, engine });
+});
+
+// ---- ask (RAG) ----
+app.post("/api/ask", async (c) => {
+  await ensureSeeded(c.env.DB);
+  const body = await c.req.json().catch(() => ({})) as { question?: string; sessionId?: string };
+  if (!body.question || body.question.trim().length < 2) return c.json({ ok: false, error: "question is required" }, 400);
+  const question = body.question.trim();
+  const sessionId = body.sessionId || uid("sess");
+
+  // KV 캐시 조회 (실패 시 D1 cache 테이블 폴백)
+  // 캐시 키에 sessionId를 포함한다: 후속 질문은 세션 문맥에 따라 답이 달라지므로,
+  // 세션과 무관한 키로 캐시하면 다른 세션의 오래된(잘못된) 답을 돌려주게 된다.
+  const cacheKey = `ask:${sessionId}:${question}`;
+  try {
+    const cached = await c.env.CACHE.get(cacheKey);
+    if (cached) return c.json({ ...JSON.parse(cached), cached: true, sessionId });
+  } catch { /* KV 로컬 실패 시 아래 D1 캐시로 */ }
+  const d1Cache = await c.env.DB.prepare("SELECT value FROM cache WHERE key = ?").bind(cacheKey).first<{ value: string }>();
+  if (d1Cache) return c.json({ ...JSON.parse(d1Cache.value), cached: true, cacheVia: "d1", sessionId });
+
+  // 후속 질문 문맥: 같은 세션의 직전 질문을 검색 쿼리에 보태 연차/출장 등 주제를 잃지 않게 한다
+  let searchQuestion = question;
+  try {
+    const stub = c.env.AGENT_SESSION.get(c.env.AGENT_SESSION.idFromName(sessionId));
+    const res = await stub.fetch("https://do/history");
+    const data = await res.json() as { history?: Array<{ role: string; content: string }> };
+    const lastUser = [...(data.history || [])].reverse().find((h) => h.role === "user");
+    if (lastUser && !/연차|출장|근무|평가|보안|교육/.test(question)) searchQuestion = `${question} ${lastUser.content}`;
+  } catch {
+    try {
+      const prev = await c.env.DB.prepare("SELECT history FROM sessions WHERE id = ?").bind(sessionId).first<{ history: string }>();
+      if (prev) {
+        const hist = JSON.parse(prev.history) as Array<{ role: string; content: string }>;
+        const lastUser = [...hist].reverse().find((h) => h.role === "user");
+        if (lastUser && !/연차|출장|근무|평가|보안|교육/.test(question)) searchQuestion = `${question} ${lastUser.content}`;
+      }
+    } catch { /* 세션 조회 실패 시 현재 질문만으로 검색 */ }
+  }
+
+  // 근거 검색: 질문을 임베딩해 Vectorize에서 검색 → 실패 시 D1 텍스트 검색 폴백
+  let sources: Array<{ id: string; title: string; section: string; snippet: string; score: number }> = [];
+  let searchEngine = "d1-text";
+  try {
+    const emb = await c.env.AI.run(EMBED_MODEL, { text: [searchQuestion] }) as { data: number[][] | number[] };
+    const raw = emb.data;
+    const values = new Float32Array(Array.isArray(raw[0]) ? (raw[0] as number[]) : (raw as number[]));
+    const vec = await c.env.VECTOR.query(values, { topK: 3, returnMetadata: "all" });
+    if (vec.matches && vec.matches.length) {
+      searchEngine = "vectorize";
+      sources = vec.matches.map((m) => {
+        const meta = (m.metadata || {}) as { title?: string; section?: string; snippet?: string };
+        return { id: String(m.id), title: meta.title || String(m.id), section: meta.section || "", snippet: meta.snippet || "", score: m.score || 0 };
+      });
+      // 메타데이터가 비어 있으면 D1에서 규정 본문을 채운다
+      for (const s of sources) {
+        if (!s.snippet) {
+          const row = await c.env.DB.prepare("SELECT title, section, body FROM policies WHERE id = ?").bind(s.id).first<{ title: string; section: string; body: string }>();
+          if (row) { s.title = row.title; s.section = row.section; s.snippet = row.body.slice(0, 220); }
+        }
+      }
+      if (!sources.length || !sources[0].snippet) throw new Error("no vectorize matches");
+    } else throw new Error("no vectorize matches");
+  } catch {
+    const rows = await c.env.DB.prepare("SELECT id, title, section, body FROM policies").all<{ id: string; title: string; section: string; body: string }>();
+    sources = localSearch(searchQuestion, rows.results || []);
+    searchEngine = "d1-text";
+  }
+  // 문서 본문도 근거 후보에 추가 (키워드 겹침이 있으면)
+  if (sources.length === 0) {
+    sources = [{ id: "policy-leave", title: "연차휴가", section: "제3장 휴가 — 제12조 연차휴가", snippet: policies()[0].body.slice(0, 220), score: 1 }];
+  }
+
+  // 답변 생성: Workers AI 시도 → 실패 시 근거 기반 템플릿 답변
+  let answer = "";
+  let engine = "local-template";
+  try {
+    const context = sources.map((s) => `[${s.title} ${s.section}] ${s.snippet}`).join("\n");
+    const out = await c.env.AI.run(LLM_MODEL, {
+      messages: [
+        { role: "system", content: "너는 HR 규정 안내 에이전트다. 주어진 근거 문서만을 근거로 한국어로 답하고, 근거에 없는 내용은 지어내지 마라. 근거 문서명을 답에 포함하라." },
+        { role: "user", content: `질문: ${question}\n근거:\n${context}` },
+      ],
+    });
+    const text = responseText(out);
+    if (text && text.trim().length > 10) { answer = text.trim(); engine = "workers-ai"; } else throw new Error("empty ai answer");
+  } catch {
+    const top = sources[0];
+    answer = `근거 문서 「${top.title}(${top.section})」에 따르면, ${top.snippet} 질문하신 "${question}"에 대해서는 위 규정을 기준으로 안내드립니다. 정확한 적용은 인사팀 확인이 필요합니다.`;
+    engine = "local-template";
+  }
+
+  // Durable Objects 세션에 대화 저장 시도 → 실패 시 D1 sessions 폴백
+  let sessionVia = "durable-objects";
+  try {
+    const stub = c.env.AGENT_SESSION.get(c.env.AGENT_SESSION.idFromName(sessionId));
+    await stub.fetch("https://do/message", { method: "POST", body: JSON.stringify({ role: "user", content: question }) });
+    await stub.fetch("https://do/message", { method: "POST", body: JSON.stringify({ role: "assistant", content: answer }) });
+  } catch {
+    sessionVia = "d1";
+    const existing = await c.env.DB.prepare("SELECT history FROM sessions WHERE id = ?").bind(sessionId).first<{ history: string }>();
+    const history = existing ? JSON.parse(existing.history) : [];
+    history.push({ role: "user", content: question }, { role: "assistant", content: answer });
+    await c.env.DB.prepare("INSERT OR REPLACE INTO sessions (id, history, updated_at) VALUES (?, ?, datetime('now'))").bind(sessionId, JSON.stringify(history.slice(-20))).run();
+  }
+
+  const result = { ok: true, sessionId, question, answer, sources, engine, searchEngine, sessionVia, cached: false };
+  // 캐시 저장 (KV 시도, 실패 시 D1)
+  try { await c.env.CACHE.put(cacheKey, JSON.stringify(result), { expirationTtl: 3600 }); }
+  catch { await c.env.DB.prepare("INSERT OR REPLACE INTO cache (key, value) VALUES (?, ?)").bind(cacheKey, JSON.stringify(result)).run(); }
+  return c.json(result);
+});
+
+// ---- coaching ----
+app.post("/api/coaching/reflect", async (c) => {
+  await ensureSeeded(c.env.DB);
+  const body = await c.req.json().catch(() => ({})) as { transcript?: string; sessionId?: string };
+  const transcript = body.transcript || coachingTranscript();
+  if (transcript.trim().length < 10) return c.json({ ok: false, error: "transcript is required" }, 400);
+  let engine = "local-rule";
+  let out = localReflect(transcript);
+  try {
+    const ai = await c.env.AI.run(LLM_MODEL, {
+      messages: [
+        { role: "system", content: "너는 코칭 리플렉션 분석가다. 세션 전사본에서 핵심 질문, 반복 패턴, 다음 세션 질문 3개를 한국어로 뽑아 JSON으로만 답하라: {\"questions\":[],\"patterns\":[],\"next_questions\":[]}" },
+        { role: "user", content: transcript.slice(0, 4000) },
+      ],
+    });
+    const text = responseText(ai);
+    const parsed = extractJson(text) as { questions?: unknown; patterns?: unknown; next_questions?: unknown };
+    if (Array.isArray(parsed.patterns) && parsed.patterns.length) {
+      out = {
+        questions: (parsed.questions as string[]) || [],
+        patterns: parsed.patterns as string[],
+        next_questions: (parsed.next_questions as string[]) || [],
+      };
+      engine = "workers-ai";
+    }
+  } catch { /* 로컬 폴백 유지 */ }
+  const id = uid("refl");
+  await c.env.DB.prepare("INSERT INTO reflections (id, session_id, transcript, questions, patterns, next_questions) VALUES (?, ?, ?, ?, ?, ?)")
+    .bind(id, body.sessionId || null, transcript, JSON.stringify(out.questions), JSON.stringify(out.patterns), JSON.stringify(out.next_questions)).run();
+  return c.json({ ok: true, id, ...out, engine });
+});
+
+// ---- library ----
+app.get("/api/library", async (c) => {
+  await ensureSeeded(c.env.DB);
+  const docs = await c.env.DB.prepare("SELECT id, title, kind, summary, actions, created_at FROM documents ORDER BY created_at DESC LIMIT 20").all();
+  const pols = await c.env.DB.prepare("SELECT id, title, section FROM policies ORDER BY id").all();
+  const refls = await c.env.DB.prepare("SELECT id, session_id, patterns, next_questions, created_at FROM reflections ORDER BY created_at DESC LIMIT 10").all();
+  return c.json({ ok: true, documents: docs.results || [], policies: pols.results || [], reflections: refls.results || [] });
+});
+
+// 디버그용: 임베딩·Vectorize 조회·LLM 호출을 직접 돌려 원인을 확인한다.
+app.get("/api/debug-ai", async (c) => {
+  const out: Record<string, unknown> = {};
+  try {
+    const emb = await c.env.AI.run(EMBED_MODEL, { text: ["출장비 청구"] }) as { data: number[][] | number[] };
+    const raw = emb.data;
+    const vals = Array.isArray(raw[0]) ? (raw[0] as number[]) : (raw as number[]);
+    out.embed = { ok: true, dims: vals.length };
+    try {
+      const vec = await c.env.VECTOR.query(new Float32Array(vals), { topK: 3, returnMetadata: "all" });
+      out.vectorize = { ok: true, matches: (vec.matches || []).map((m) => ({ id: String(m.id), score: m.score })) };
+    } catch (e) {
+      out.vectorize = { ok: false, error: e instanceof Error ? e.message : String(e) };
+    }
+  } catch (e) {
+    out.embed = { ok: false, error: e instanceof Error ? e.message : String(e) };
+  }
+  // LLM 후보를 순서대로 시도해 바인딩에서 실제로 되는 모델을 확인한다.
+  const llmCandidates = [LLM_MODEL, "@cf/meta/llama-3.2-1b-instruct", "@cf/meta/llama-3.3-70b-instruct-fp8-fast"];
+  const llmResults: Array<Record<string, unknown>> = [];
+  for (const model of llmCandidates) {
+    try {
+      const res = await c.env.AI.run(model, { messages: [{ role: "user", content: "한 줄로 답해: 2+2는?" }] });
+      const text = responseText(res);
+      llmResults.push({ model, ok: true, text: text.slice(0, 200) });
+    } catch (e) {
+      llmResults.push({ model, ok: false, error: e instanceof Error ? e.message : String(e) });
+    }
+  }
+  out.llm = llmResults;
+  return c.json({ ok: true, ...out });
+});
+
+app.get("/api/seed", async (c) => {
+  await ensureSeeded(c.env.DB);
+  return c.json({ ok: true, sampleTranscript: sampleTranscript(), coachingTranscript: coachingTranscript(), policies: policies() });
+});
+
+// 규정 7건을 임베딩해 Vectorize 인덱스에 넣는다. 인덱스가 비어 있으면 ask는
+// Vectorize에 걸릴 게 없어 D1 텍스트 검색으로 떨어지므로, 배포 후 한 번 호출한다.
+app.get("/api/seed-vectors", async (c) => {
+  await ensureSeeded(c.env.DB);
+  const list = policies();
+  let upserted = 0;
+  const errors: string[] = [];
+  for (const p of list) {
+    try {
+      const emb = await c.env.AI.run(EMBED_MODEL, { text: [`${p.title} ${p.section} ${p.body}`] }) as { data: number[][] | number[] };
+      const raw = emb.data;
+      const values = Array.isArray(raw[0]) ? (raw[0] as number[]) : (raw as number[]);
+      await c.env.VECTOR.upsert([{ id: p.id, values, metadata: { title: p.title, section: p.section, snippet: p.body.slice(0, 220) } }]);
+      upserted++;
+    } catch (e) {
+      errors.push(`${p.id}: ${e instanceof Error ? e.message : String(e)}`);
+    }
+  }
+  return c.json({ ok: errors.length === 0, upserted, total: list.length, errors });
+});
+
+// 프론트는 [assets] 바인딩이 서빙한다. / 가 없으면 index.html로.
+app.all("*", async (c) => {
+  if (c.req.path.startsWith("/api/")) return c.json({ ok: false, error: "unknown api route" }, 404);
+  try {
+    const res = await c.env.ASSETS.fetch(c.req.raw);
+    if (res.status !== 404) return res;
+  } catch { /* assets 없으면 아래 폴백 */ }
+  return c.html("<h1>People OS</h1><p>Frontend asset not found. Run wrangler dev with public/ present.</p>", 404);
+});
+
+export default app;

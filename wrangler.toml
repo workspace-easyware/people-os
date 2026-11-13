@@ -1,0 +1,39 @@
+# 일잇 People OS — 로컬 MVP용 wrangler 설정. 배포하지 않음 (wrangler deploy 금지).
+name = "people-os"
+main = "src/index.ts"
+compatibility_date = "2025-07-18"
+compatibility_flags = ["nodejs_compat"]
+
+# 정적 프론트 (public/)
+[assets]
+directory = "./public"
+binding = "ASSETS"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "people-os-db"
+database_id = "5dff997a-fe7b-4f27-9624-1c88e40857c1"
+migrations_dir = "migrations"
+
+[[kv_namespaces]]
+binding = "CACHE"
+id = "de4c7ddf4c76495381ba82c56fb23dbb"
+
+[[r2_buckets]]
+binding = "FILES"
+bucket_name = "people-os-files"
+
+[[vectorize]]
+binding = "VECTOR"
+index_name = "people-os-index"
+
+[ai]
+binding = "AI"
+
+[[durable_objects.bindings]]
+name = "AGENT_SESSION"
+class_name = "AgentSession"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["AgentSession"]

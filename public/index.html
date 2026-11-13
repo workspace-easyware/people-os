@@ -1,0 +1,116 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>일잇 People OS — Workers 프로토타입</title>
+<style>
+body{font-family:system-ui,-apple-system,'Segoe UI',sans-serif;max-width:900px;margin:0 auto;padding:24px;color:#111}
+h1{font-size:24px} .sub{color:#555;margin-top:-8px}
+.tabs{display:flex;gap:8px;margin:16px 0;flex-wrap:wrap}
+.tabs button{padding:8px 14px;border:1px solid #ccc;background:#fff;border-radius:8px;cursor:pointer}
+.tabs button.active{background:#111;color:#fff}
+section{display:none} section.active{display:block}
+textarea{width:100%;min-height:140px;padding:10px;border:1px solid #ccc;border-radius:8px}
+input[type=text]{width:100%;padding:10px;border:1px solid #ccc;border-radius:8px}
+button.primary{background:#f6821f;color:#fff;border:0;padding:10px 16px;border-radius:8px;cursor:pointer;margin-top:8px}
+.card{border:1px solid #e0e0e0;border-radius:10px;padding:14px;margin:10px 0;background:#fafafa}
+.small{color:#666;font-size:13px} pre{white-space:pre-wrap;background:#fff;border:1px solid #eee;padding:10px;border-radius:8px}
+.badge{display:inline-block;background:#eef;border:1px solid #ccd;padding:2px 8px;border-radius:999px;font-size:12px}
+</style>
+</head>
+<body>
+<h1>일잇 People OS</h1>
+<p class="sub">HR·코칭 인텔리전스 플랫폼 — Cloudflare Workers판 프로토타입</p>
+<p class="small">데모 흐름: 샘플 전사본 붙여넣기 → 요약 → “연차 3일 쓸 수 있어?” 질문 → 근거付き 답변 → 코칭 리플렉션. <span id="health" class="badge">health 확인 중…</span></p>
+
+<div class="tabs">
+  <button class="active" data-tab="upload">업로드·요약</button>
+  <button data-tab="ask">질문 (HR 에이전트)</button>
+  <button data-tab="coaching">코칭 리플렉션</button>
+  <button data-tab="library">라이브러리</button>
+</div>
+
+<section id="tab-upload" class="active">
+  <h2>1. 문서 업로드</h2>
+  <p><button id="loadSample">샘플 전사본 불러오기</button></p>
+  <input type="text" id="docTitle" placeholder="제목 (예: 11월 팀 회의 전사본)" />
+  <textarea id="docContent" placeholder="회의 전사본 / 문서 텍스트를 붙여넣으세요"></textarea>
+  <button class="primary" id="uploadBtn">업로드</button>
+  <button class="primary" id="summarizeBtn" disabled>요약하기</button>
+  <div id="docResult"></div>
+</section>
+
+<section id="tab-ask">
+  <h2>2. HR 에이전트에게 질문</h2>
+  <input type="text" id="question" value="연차 3일 쓸 수 있어?" />
+  <button class="primary" id="askBtn">질문하기</button>
+  <div id="askResult"></div>
+  <p class="small">근거: 연차·근무시간·출장·정보보안·평가·교육·근태 규정 7건 시드됨. 두 번째 질문을 하면 세션 기억이 유지됩니다.</p>
+</section>
+
+<section id="tab-coaching">
+  <h2>3. 코칭 리플렉션</h2>
+  <p><button id="loadCoaching">샘플 코칭 전사본 불러오기</button></p>
+  <textarea id="coachingText" placeholder="코칭 세션 전사본을 붙여넣으세요"></textarea>
+  <button class="primary" id="reflectBtn">리플렉션 생성</button>
+  <div id="coachingResult"></div>
+</section>
+
+<section id="tab-library">
+  <h2>4. 라이브러리</h2>
+  <button class="primary" id="refreshLib">새로고침</button>
+  <div id="libResult"></div>
+</section>
+
+<script>
+let docId = null, sessionId = null;
+const $ = (id) => document.getElementById(id);
+document.querySelectorAll('.tabs button').forEach(b => b.onclick = () => {
+  document.querySelectorAll('.tabs button').forEach(x => x.classList.remove('active'));
+  document.querySelectorAll('section').forEach(x => x.classList.remove('active'));
+  b.classList.add('active'); $('tab-' + b.dataset.tab).classList.add('active');
+});
+async function api(path, opts) {
+  const r = await fetch(path, { headers: { 'content-type': 'application/json' }, ...opts });
+  return r.json();
+}
+fetch('/api/health', { method: 'POST' }).then(r => r.json()).then(j => {
+  $('health').textContent = j.ok ? 'health OK · ' + Object.entries(j.bindings).filter(([,v])=>v).map(([k])=>k).join(', ') : 'health 실패';
+}).catch(() => $('health').textContent = 'health 실패');
+$('loadSample').onclick = async () => {
+  const j = await api('/api/seed');
+  $('docTitle').value = '11월 팀 회의 전사본 (샘플)';
+  $('docContent').value = j.sampleTranscript;
+};
+$('uploadBtn').onclick = async () => {
+  const j = await api('/api/documents', { method: 'POST', body: JSON.stringify({ title: $('docTitle').value, content: $('docContent').value, kind: 'transcript' }) });
+  if (j.ok) { docId = j.id; $('summarizeBtn').disabled = false; $('docResult').innerHTML = `<div class="card">업로드됨 · id <code>${j.id}</code> · R2 저장: ${j.r2Stored ? '예' : '아니오 (D1 폴백)'}</div>`; }
+  else $('docResult').innerHTML = `<div class="card">오류: ${j.error}</div>`;
+};
+$('summarizeBtn').onclick = async () => {
+  const j = await api('/api/documents/' + docId + '/summarize', { method: 'POST' });
+  $('docResult').innerHTML = `<div class="card"><b>요약</b> <span class="badge">엔진: ${j.engine}</span><ul>${j.summary.map(s => `<li>${s}</li>`).join('')}</ul><b>액션</b><ul>${j.actions.map(s => `<li>${s}</li>`).join('')}</ul></div>`;
+};
+$('askBtn').onclick = async () => {
+  const j = await api('/api/ask', { method: 'POST', body: JSON.stringify({ question: $('question').value, sessionId }) });
+  if (j.ok) {
+    sessionId = j.sessionId;
+    $('askResult').innerHTML = `<div class="card"><b>답변</b> <span class="badge">엔진: ${j.engine} · 검색: ${j.searchEngine} · 세션: ${j.sessionVia}${j.cached ? ' · 캐시됨' : ''}</span><p>${j.answer}</p><b>근거</b><ul>${j.sources.map(s => `<li>${s.title} (${s.section}) — ${s.snippet}</li>`).join('')}</ul></div>`;
+  } else $('askResult').innerHTML = `<div class="card">오류: ${j.error}</div>`;
+};
+$('loadCoaching').onclick = async () => {
+  const j = await api('/api/seed');
+  $('coachingText').value = j.coachingTranscript;
+};
+$('reflectBtn').onclick = async () => {
+  const j = await api('/api/coaching/reflect', { method: 'POST', body: JSON.stringify({ transcript: $('coachingText').value, sessionId }) });
+  $('coachingResult').innerHTML = `<div class="card"><b>핵심 질문</b> <span class="badge">엔진: ${j.engine}</span><ul>${j.questions.map(s => `<li>${s}</li>`).join('')}</ul><b>패턴</b><ul>${j.patterns.map(s => `<li>${s}</li>`).join('')}</ul><b>다음 세션 질문</b><ul>${j.next_questions.map(s => `<li>${s}</li>`).join('')}</ul></div>`;
+};
+$('refreshLib').onclick = async () => {
+  const j = await api('/api/library');
+  $('libResult').innerHTML = `<div class="card"><b>문서 ${j.documents.length}건</b><pre>${JSON.stringify(j.documents, null, 2)}</pre><b>규정 ${j.policies.length}건</b><pre>${JSON.stringify(j.policies, null, 2)}</pre><b>리플렉션 ${j.reflections.length}건</b><pre>${JSON.stringify(j.reflections, null, 2)}</pre></div>`;
+};
+</script>
+</body>
+</html>

@@ -1,0 +1,86 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="720" viewBox="0 0 1200 720" font-family="system-ui, -apple-system, sans-serif">
+  <rect width="1200" height="720" fill="#ffffff"/>
+  <text x="40" y="48" font-size="28" font-weight="700" fill="#111827">일잇 People OS — Cloudflare 아키텍처 (Workers 프로토타입)</text>
+  <text x="40" y="76" font-size="14" fill="#6b7280">실선 = MVP 구현됨 (로컬 검증 완료) · 점선 = 설계·스텁 / 보강 예정 · 로컬에서는 Workers AI·Vectorize가 폴백으로 동작</text>
+
+  <!-- User -->
+  <rect x="40" y="110" width="220" height="80" rx="10" fill="#eff6ff" stroke="#2563eb" stroke-width="2"/>
+  <text x="150" y="140" font-size="16" font-weight="700" text-anchor="middle" fill="#1e40af">사용자</text>
+  <text x="150" y="164" font-size="13" text-anchor="middle" fill="#374151">HR 실무자 · 코치</text>
+  <text x="150" y="182" font-size="13" text-anchor="middle" fill="#374151">브라우저</text>
+
+  <!-- Workers -->
+  <rect x="360" y="110" width="300" height="100" rx="10" fill="#f97316" stroke="#c2410c" stroke-width="2"/>
+  <text x="510" y="140" font-size="18" font-weight="700" text-anchor="middle" fill="#ffffff">Workers (Hono)</text>
+  <text x="510" y="164" font-size="13" text-anchor="middle" fill="#fff7ed">src/index.ts · API + 프론트 서빙</text>
+  <text x="510" y="184" font-size="13" text-anchor="middle" fill="#fff7ed">public/index.html · 4개 탭</text>
+
+  <!-- Arrow user -> workers -->
+  <line x1="260" y1="150" x2="360" y2="150" stroke="#111827" stroke-width="2" marker-end="url(#a)"/>
+  <text x="310" y="140" font-size="12" text-anchor="middle" fill="#374151">HTTPS</text>
+
+  <!-- Row 2: core storage -->
+  <g font-size="13">
+    <rect x="40" y="270" width="200" height="90" rx="10" fill="#ecfdf5" stroke="#059669" stroke-width="2"/>
+    <text x="140" y="300" font-size="15" font-weight="700" text-anchor="middle">D1</text>
+    <text x="140" y="322" text-anchor="middle">문서·규정·세션</text>
+    <text x="140" y="340" text-anchor="middle">리플렉션·캐시</text>
+
+    <rect x="270" y="270" width="200" height="90" rx="10" fill="#ecfdf5" stroke="#059669" stroke-width="2"/>
+    <text x="370" y="300" font-size="15" font-weight="700" text-anchor="middle">R2</text>
+    <text x="370" y="322" text-anchor="middle">음성·PDF·PPTX</text>
+    <text x="370" y="340" text-anchor="middle">원본 저장</text>
+
+    <rect x="500" y="270" width="200" height="90" rx="10" fill="#ecfdf5" stroke="#059669" stroke-width="2"/>
+    <text x="600" y="300" font-size="15" font-weight="700" text-anchor="middle">KV</text>
+    <text x="600" y="322" text-anchor="middle">질문 캐시</text>
+    <text x="600" y="340" text-anchor="middle">ask:{session}:{q}</text>
+
+    <rect x="730" y="270" width="200" height="90" rx="10" fill="#ecfdf5" stroke="#059669" stroke-width="2"/>
+    <text x="830" y="300" font-size="15" font-weight="700" text-anchor="middle">Durable Objects</text>
+    <text x="830" y="322" text-anchor="middle">AgentSession</text>
+    <text x="830" y="340" text-anchor="middle">대화 기억</text>
+
+    <rect x="960" y="270" width="200" height="90" rx="10" fill="#fef3c7" stroke="#d97706" stroke-width="2"/>
+    <text x="1060" y="300" font-size="15" font-weight="700" text-anchor="middle">Workers AI</text>
+    <text x="1060" y="322" text-anchor="middle">요약·답변·리플렉션</text>
+    <text x="1060" y="340" text-anchor="middle">로컬 폴백 있음</text>
+  </g>
+
+  <!-- Row 3 -->
+  <g font-size="13">
+    <rect x="40" y="410" width="200" height="90" rx="10" fill="#fef3c7" stroke="#d97706" stroke-width="2" stroke-dasharray="6 4"/>
+    <text x="140" y="440" font-size="15" font-weight="700" text-anchor="middle">Vectorize</text>
+    <text x="140" y="462" text-anchor="middle">규정·논문 RAG</text>
+    <text x="140" y="480" text-anchor="middle">로컬 D1 검색 폴백</text>
+
+    <rect x="270" y="410" width="200" height="90" rx="10" fill="#f3f4f6" stroke="#6b7280" stroke-width="2" stroke-dasharray="6 4"/>
+    <text x="370" y="440" font-size="15" font-weight="700" text-anchor="middle">Queues + Workflows</text>
+    <text x="370" y="462" text-anchor="middle">전사→요약→추출</text>
+    <text x="370" y="480" text-anchor="middle">→임베딩</text>
+
+    <rect x="500" y="410" width="200" height="90" rx="10" fill="#f3f4f6" stroke="#6b7280" stroke-width="2" stroke-dasharray="6 4"/>
+    <text x="600" y="440" font-size="15" font-weight="700" text-anchor="middle">AI Gateway</text>
+    <text x="600" y="462" text-anchor="middle">모델 라우팅·폴백</text>
+    <text x="600" y="480" text-anchor="middle">· 로그</text>
+
+    <rect x="730" y="410" width="200" height="90" rx="10" fill="#f3f4f6" stroke="#6b7280" stroke-width="2" stroke-dasharray="6 4"/>
+    <text x="830" y="440" font-size="15" font-weight="700" text-anchor="middle">Hyperdrive</text>
+    <text x="830" y="462" text-anchor="middle">기존 HR Postgres</text>
+    <text x="830" y="480" text-anchor="middle">연결 (모의)</text>
+
+    <rect x="960" y="410" width="200" height="90" rx="10" fill="#f3f4f6" stroke="#6b7280" stroke-width="2" stroke-dasharray="6 4"/>
+    <text x="1060" y="440" font-size="15" font-weight="700" text-anchor="middle">Cron · Turnstile</text>
+    <text x="1060" y="462" text-anchor="middle">아침 다이제스트</text>
+    <text x="1060" y="480" text-anchor="middle">· 스팸 방지</text>
+  </g>
+
+  <!-- Flow -->
+  <text x="40" y="560" font-size="16" font-weight="700" fill="#111827">데모 흐름 (3분)</text>
+  <text x="40" y="588" font-size="14" fill="#374151">1. 전사본 업로드 → R2 저장  ·  2. 요약 (Workers AI / 로컬 폴백)  ·  3. “연차 3일 쓸 수 있어?” → RAG 근거 답변 + Durable Objects 세션 기억</text>
+  <text x="40" y="612" font-size="14" fill="#374151">4. 코칭 리플렉션 (핵심 질문·패턴·다음 질문)  ·  5. 라이브러리 조회 · PPTX 초안 (보강 예정)</text>
+  <text x="40" y="652" font-size="13" fill="#6b7280">검증: wrangler dev --local, 10개 curl 케이스 3회 반복 통과 · VERIFICATION.md 참조 · 배포 없음 (wrangler login / deploy 미실행)</text>
+  <text x="40" y="676" font-size="13" fill="#6b7280">제출 조건: Workers + D1·KV·R2·Durable Objects + Workers AI·Vectorize · Workers판 프로토타입 (이미 출시한 Sites가 아님)</text>
+
+  <defs><marker id="a" markerWidth="8" markerHeight="8" refX="6" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="#111827"/></marker></defs>
+</svg>
