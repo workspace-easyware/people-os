@@ -331,6 +331,37 @@ function officeText(value: string): string {
 
 type DeckSection = { heading: string; items: string[] };
 
+// S3 덱 개요 편집: 클라이언트가 보낸 개요를 검증·정리해 DeckSection[]으로.
+// - 개요가 없으면 present=false (기존 요약/액션/bullets 경로 그대로).
+// - 개요가 들어왔는데 정리 후 남는 슬라이드가 없으면 400 (빈 슬라이드는
+//   만들지 않는다). 제목이 빈 슬라이드는 "내용"으로, 빈 불릿은 버린다.
+// - 슬라이드 최대 12장, 슬라이드당 불릿 최대 12개, 제목 120자·불릿 500자로 자른다.
+type DeckOutlineSlide = { heading?: unknown; bullets?: unknown };
+type DeckOutline = { title?: unknown; slides?: unknown };
+
+function normalizeOutline(outline: unknown): { present: boolean; sections: DeckSection[]; title: string } {
+  if (outline == null) return { present: false, sections: [], title: "" };
+  if (typeof outline !== "object" || Array.isArray(outline)) return { present: true, sections: [], title: "" };
+  const o = outline as DeckOutline;
+  const title = typeof o.title === "string" ? o.title.trim().slice(0, 120) : "";
+  const sections: DeckSection[] = [];
+  if (Array.isArray(o.slides)) {
+    for (const raw of o.slides.slice(0, 12)) {
+      if (raw == null || typeof raw !== "object" || Array.isArray(raw)) continue;
+      const slide = raw as DeckOutlineSlide;
+      const heading = (typeof slide.heading === "string" ? slide.heading.trim() : "").slice(0, 120) || "내용";
+      const items = (Array.isArray(slide.bullets) ? slide.bullets : [])
+        .map((b) => String(b ?? "").trim())
+        .filter((b) => b.length > 0)
+        .slice(0, 12)
+        .map((b) => b.slice(0, 500));
+      if (!items.length) continue; // 불릿이 없는 슬라이드는 만들지 않는다
+      sections.push({ heading, items });
+    }
+  }
+  return { present: true, sections, title };
+}
+
 // Stage 1 덱 생성 — easy-slides 방식: pptxgenjs로 새 덱을 처음부터 만든다.
 // 표지(남색) + 섹션별 내용 슬라이드. people-insight 팔레트(#123863/#2d7dde/#14233a).
 // Stage 2(보류): FlowDesk식 기존 덱 제자리 편집(jszip 왕복) + R2 버전 관리 — ARCHITECTURE.md 참조.
@@ -1310,19 +1341,28 @@ app.delete("/api/tasks/:id", async (c) => {
 // ---- deck (PPTX 초안, easy-slides식 신규 생성) ----
 app.post("/api/deck", async (c) => {
   await ensureSeeded(c.env.DB);
-  const body = await c.req.json().catch(() => ({})) as { title?: string; summary?: string[]; actions?: string[]; bullets?: string[]; source?: string };
-  const title = (body.title || "People OS 요약").slice(0, 120);
-  const sections: DeckSection[] = [];
-  if (Array.isArray(body.summary) && body.summary.length) sections.push({ heading: "요약", items: body.summary.slice(0, 6).map(String) });
-  if (Array.isArray(body.actions) && body.actions.length) sections.push({ heading: "액션", items: body.actions.slice(0, 8).map(String) });
-  if (!sections.length && Array.isArray(body.bullets) && body.bullets.length) sections.push({ heading: "내용", items: body.bullets.slice(0, 10).map(String) });
-  if (!sections.length) return c.json({ ok: false, error: "summary, actions or bullets is required" }, 400);
+  const body = await c.req.json().catch(() => ({})) as { title?: string; summary?: string[]; actions?: string[]; bullets?: string[]; source?: string; outline?: unknown };
+  // S3: 개요가 오면 개요를 우선으로 쓴다 (고친 문구가 그대로 .pptx에 들어감).
+  // 개요가 없으면 기존 요약/액션/bullets 경로 그대로.
+  const outline = normalizeOutline(body.outline);
+  let title = (body.title || "People OS 요약").slice(0, 120);
+  let sections: DeckSection[] = [];
+  if (outline.present) {
+    if (!outline.sections.length) return c.json({ ok: false, error: "outline is empty: add at least one bullet" }, 400);
+    if (outline.title) title = outline.title;
+    sections = outline.sections;
+  } else {
+    if (Array.isArray(body.summary) && body.summary.length) sections.push({ heading: "요약", items: body.summary.slice(0, 6).map(String) });
+    if (Array.isArray(body.actions) && body.actions.length) sections.push({ heading: "액션", items: body.actions.slice(0, 8).map(String) });
+    if (!sections.length && Array.isArray(body.bullets) && body.bullets.length) sections.push({ heading: "내용", items: body.bullets.slice(0, 10).map(String) });
+    if (!sections.length) return c.json({ ok: false, error: "summary, actions or bullets is required" }, 400);
+  }
   const { bytes, slides } = await buildDeck(title, sections);
   const id = uid("deck");
   const r2Key = `decks/${id}.pptx`;
   await c.env.FILES.put(r2Key, bytes, { httpMetadata: { contentType: PPTX_MIME } });
   await c.env.DB.prepare("INSERT INTO decks (id, title, r2_key, bytes, slides) VALUES (?, ?, ?, ?, ?)").bind(id, title, r2Key, bytes.length, slides).run();
-  return c.json({ ok: true, id, title, url: `/api/deck/${id}`, bytes: bytes.length, slides, source: body.source || null }, 201);
+  return c.json({ ok: true, id, title, url: `/api/deck/${id}`, bytes: bytes.length, slides, source: body.source || null, outline: outline.present }, 201);
 });
 
 app.get("/api/deck/:id", async (c) => {

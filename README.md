@@ -37,7 +37,7 @@ npx wrangler dev --local
 | POST/GET | `/api/health` | 상태 + 바인딩 확인 (규정 시드도 여기서 초기화) |
 | GET | `/api/home` | 홈 대시보드: 현황 숫자 + 최근 문서·할 일·리플렉션 |
 | GET/POST/PATCH/DELETE | `/api/tasks`, `/api/tasks/:id` | 할 일 체크리스트 (생성·토글·삭제) |
-| POST | `/api/deck` | `{title, summary, actions}` → pptxgenjs 덱 생성, R2 저장, `{url}` 반환 |
+| POST | `/api/deck` | `{title, summary, actions}` 또는 `{title, outline: {title, slides: [{heading, bullets}]}}` → pptxgenjs 덱 생성, R2 저장, `{url}` 반환. 개요가 오면 고친 문구를 그대로 쓰고 빈 불릿·빈 슬라이드는 제외 (S3) |
 | GET | `/api/deck/:id` | 생성된 .pptx 다운로드 |
 | POST | `/api/transcribe` | multipart `file`(최대 25MB) → R2 저장 + 백그라운드 전사 → `{recordingId, transcriptStatus: 'processing'}` (폴링으로 완료 확인, 긴 ogg는 1MB 단위 구간별 전사, 재개 가능) |
 | GET | `/api/recordings` | 최근 음성 녹음 목록 (메타데이터 + 상태 ready/pending/processing + 진행 상황) |

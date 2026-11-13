@@ -108,6 +108,11 @@ bash /tmp/people-os-test.sh               # curl 10개 케이스, 3회 반복 �
 | 20 | `GET /api/library` | 문서 1건·규정 7건·리플렉션 1건 |
 | 21 | `GET /api/home` (스모크 후) | counts 문서 1·요약 1·열린 할 일 0·리플렉션 1, 최근 문서·리플렉션 반환 |
 | 22 | 요약 액션 → `POST /api/tasks` | 201, 목록에 "회의록 공유" (done: 0) — 프론트의 "할 일로 저장"과 같은 경로 |
+| 23 | `POST /api/deck` outline (S3, 로컬) | 201, `slides: 3`, `outline: true` — 고친 표지 제목·슬라이드 제목·불릿 3개가 slide XML에 그대로 있음, 빈 불릿 빠짐, 불릿 없는 슬라이드 제외, 제목 없는 슬라이드 "내용"으로, slide XML 3장 파싱 OK |
+| 24 | `POST /api/deck` outline 빈 slides (S3) | 400 `outline is empty: add at least one bullet` |
+| 25 | `POST /api/deck` summary/actions (S3 회귀) | 201, `slides: 3`, `outline: false` — 기존 경로 그대로 동작, 기존 문구 전부 slide XML에 있음 |
+
+S3 주의: PowerPoint에서 직접 열리는지는 로컬에서 확인할 수 없어 부모의 Chrome 확인에서 확인할 것.
 
 ### 테스트 중 발견해 수정한 버그 1건 (재검증 완료)
 
