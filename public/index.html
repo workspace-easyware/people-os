@@ -93,7 +93,7 @@ button.iconbtn:hover{color:#c0392b}
   <div class="hero">
     <h1>일잇 People OS</h1>
     <p class="sub">HR·코칭 인텔리전스 플랫폼 — Cloudflare Workers판 프로토타입</p>
-    <p class="small">데모 흐름: 홈 대시보드 → 음성 파일 업로드·전사 → 요약 → 액션 할 일로 저장 → PPTX 초안 다운로드 → “연차 3일 쓸 수 있어?” 질문 → 코칭 리플렉션 → FlowDesk 노트로 보내기. <span id="health" class="badge">health 확인 중…</span></p>
+    <p class="small">데모 흐름: 홈 대시보드 → 음성 파일 업로드·전사 → 요약 → 액션 할 일로 저장 → PPTX 초안 다운로드 → “연차 3일 쓸 수 있어?” 질문 → 코칭 리플렉션. <span id="health" class="badge">health 확인 중…</span></p>
   </div>
 
   <section id="tab-home" class="active">
@@ -177,9 +177,8 @@ button.iconbtn:hover{color:#c0392b}
       <h2>6. 라이브러리</h2>
       <div class="btnrow">
         <button class="primary" id="refreshLib">새로고침</button>
-        <a class="btn" href="https://flowdesk-personal-c7a4.hr-jhkang.chatgpt.site/" target="_blank" rel="noopener">FlowDesk에서 열기 ↗</a>
       </div>
-      <p class="small">요약·액션·리플렉션 결과는 FlowDesk 개인 작업 공간의 노트로 이어서 정리할 수 있습니다.</p>
+      <p class="small">업로드한 문서와 요약·액션 결과가 이곳에 모입니다. 요약은 복사하고, 액션은 할 일로 저장할 수 있습니다.</p>
       <div id="libResult"></div>
     </div>
   </section>
@@ -190,8 +189,10 @@ button.iconbtn:hover{color:#c0392b}
 <script>
 let docId = null, sessionId = null, lastSummaryText = '', lastSummary = [], lastActions = [], lastDocTitle = '';
 const $ = (id) => document.getElementById(id);
-const FLOWDESK_URL = 'https://flowdesk-personal-c7a4.hr-jhkang.chatgpt.site/';
-function switchTab(name) {
+const TABS = ['home','upload','ask','coaching','tasks','library'];
+function switchTab(name, fromHash) {
+  if (!TABS.includes(name)) name = 'home';
+  if (!fromHash && location.hash !== '#' + name) location.hash = name;
   document.querySelectorAll('.tabs button').forEach(x => x.classList.remove('nav-active'));
   document.querySelectorAll('section').forEach(x => x.classList.remove('active'));
   document.querySelector(`.tabs button[data-tab="${name}"]`).classList.add('nav-active');
@@ -229,13 +230,14 @@ async function retryRecording(id) {
   loadRecordings();
 }
 document.querySelectorAll('.tabs button').forEach(b => b.onclick = () => switchTab(b.dataset.tab));
+window.addEventListener('hashchange', () => switchTab(location.hash.slice(1), true));
 async function api(path, opts) {
   const r = await fetch(path, { headers: { 'content-type': 'application/json' }, ...opts });
   return r.json();
 }
 function copySummary() {
   const text = lastSummaryText || '요약 결과가 없습니다.';
-  if (navigator.clipboard) navigator.clipboard.writeText(text).then(() => alert('요약을 복사했습니다. FlowDesk 노트에 붙여넣으세요.'));
+  if (navigator.clipboard) navigator.clipboard.writeText(text).then(() => alert('요약을 복사했습니다.'));
   else alert(text);
 }
 function esc(s) { return String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); }
@@ -335,7 +337,7 @@ try { if (localStorage.getItem('people-os-sidebar-collapsed') === '1') { $('side
 fetch('/api/health', { method: 'POST' }).then(r => r.json()).then(j => {
   $('health').textContent = j.ok ? 'health OK · ' + Object.entries(j.bindings).filter(([,v])=>v).map(([k])=>k).join(', ') : 'health 실패';
 }).catch(() => $('health').textContent = 'health 실패');
-loadHome();
+switchTab(location.hash.slice(1), true);
 $('loadSample').onclick = async () => {
   const j = await api('/api/seed');
   $('docTitle').value = '11월 팀 회의 전사본 (샘플)';
@@ -372,7 +374,7 @@ $('summarizeBtn').onclick = async () => {
   const j = await api('/api/documents/' + docId + '/summarize', { method: 'POST' });
   lastSummary = j.summary || []; lastActions = j.actions || [];
   lastSummaryText = '요약\n' + j.summary.map(s => '- ' + s).join('\n') + '\n\n액션\n' + j.actions.map(s => '- ' + s).join('\n');
-  $('docResult').innerHTML = `<div class="card"><b>요약</b> <span class="badge">엔진: ${j.engine}</span><ul>${j.summary.map(s => `<li>${esc(s)}</li>`).join('')}</ul><b>액션</b><ul>${j.actions.map(s => `<li>${esc(s)}</li>`).join('')}</ul><div class="btnrow"><button class="secondary" onclick="saveActionsAsTasks()">할 일로 저장</button><button class="primary" onclick="downloadDeck()">PPTX 초안 다운로드</button><button class="secondary" onclick="copySummary()">요약 복사</button><a class="btn" href="${FLOWDESK_URL}" target="_blank" rel="noopener">FlowDesk에서 열기 ↗</a></div><div id="deckResult"></div><p class="small">FlowDesk는 별도 개인 작업 공간(로그인 필요)이라, 요약은 복사해서 노트로 붙여넣는 흐름입니다.</p></div>`;
+  $('docResult').innerHTML = `<div class="card"><b>요약</b> <span class="badge">엔진: ${j.engine}</span><ul>${j.summary.map(s => `<li>${esc(s)}</li>`).join('')}</ul><b>액션</b><ul>${j.actions.map(s => `<li>${esc(s)}</li>`).join('')}</ul><div class="btnrow"><button class="secondary" onclick="saveActionsAsTasks()">할 일로 저장</button><button class="primary" onclick="downloadDeck()">PPTX 초안 다운로드</button><button class="secondary" onclick="copySummary()">요약 복사</button><button class="secondary" onclick="switchTab(\'library\')">라이브러리에서 보기</button></div><div id="deckResult"></div></div>`;
 };
 $('askBtn').onclick = async () => {
   const j = await api('/api/ask', { method: 'POST', body: JSON.stringify({ question: $('question').value, sessionId }) });
