@@ -1,4 +1,4 @@
-# 일잇 People OS — 로컬 MVP용 wrangler 설정. 배포하지 않음 (wrangler deploy 금지).
+# 일잇 People OS — wrangler 설정. 배포는 ~/workspace/custom-connectors/custom.cloudflare/bin/cf-wrangler.py deploy 로 (저장된 API 토큰 주입).
 name = "people-os"
 main = "src/index.ts"
 compatibility_date = "2025-07-18"

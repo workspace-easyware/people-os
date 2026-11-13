@@ -59,7 +59,7 @@ bash /tmp/people-os-test.sh               # curl 10개 케이스, 3회 반복 �
 ## 아직 검증하지 않은 것
 
 - Workers AI / Vectorize 실동작 (클라우드 배포 후에만 가능 — 로그인·배포 승인 필요)
-- 실제 음성 파일 업로드, PPTX 바이너리 생성, Hyperdrive 실연결, Cron, Turnstile (Phase 4/5)
+- 실제 음성 파일 업로드, Hyperdrive 실연결, Cron, Turnstile (Phase 4/5)
 - 프론트 브라우저 클릭 테스트 (curl로 HTML 서빙까지만 확인, 브라우저 조작은 미수행)
 
 ## 라이브 검증 (2026-11-13, 배포 후, 사용자 Chrome 경유)
@@ -80,6 +80,50 @@ bash /tmp/people-os-test.sh               # curl 10개 케이스, 3회 반복 �
 2. llama-3.1-8b-instruct도 Workers AI 바인딩에서는 폐기 (5028, infire-llama-3.1-8b-instruct) — REST API에서는 되지만 바인딩에서는 안 됨.
 3. Vectorize 인덱스가 비어 있었고 검색 쿼리가 0벡터였음 → /api/seed-vectors로 규정 7건 임베딩·upsert, 질문 임베딩 후 검색으로 변경.
 4. AI 응답 파싱: 바인딩은 {response: "..."}를 반환하고 JSON 답이 ``` 펜스로 감싸져 옴 → responseText/extractJson 헬퍼로 처리.
+
+## Stage 1 — 작업 공간 + PPTX 덱 (2026-11-13)
+
+검증일: 2026-11-13 / Node v24.22.1 / wrangler 3.114.17 / pptxgenjs 4.0.1 / TypeScript strict 통과 (`npx tsc --noEmit` → TSC_OK).
+`npx wrangler dev --local --port 8787` + `bash /tmp/people-os-stage1-test.sh` (22개 케이스).
+
+| # | 테스트 | 결과 |
+|---|---|---|
+| 1 | `GET /` 프론트 | 200, 홈·할 일 탭 존재, `tab-home`이 기본 활성 |
+| 2 | `POST /api/health` | ok:true, 바인딩 d1/kv/r2/ai/durable_objects true (vectorize는 로컬 미지원으로 false — 기존과 동일) |
+| 3 | `GET /api/home` (빈 DB) | counts 전부 0, 목록 빈 배열 |
+| 4 | `POST /api/tasks` | 201, id `task_...`, source 저장됨 |
+| 5 | `POST /api/tasks` 빈 title | 400 `title is required` |
+| 6 | `GET /api/tasks` | 생성한 1건 반환 (done: 0) |
+| 7–8 | `PATCH /api/tasks/:id` 토글 2회 | done true → false |
+| 9 | `PATCH` 없는 id | 404 `task not found` |
+| 10–11 | `DELETE` → 다시 `DELETE` | 200 → 404 |
+| 12 | `POST /api/deck` (summary 2 + actions 2) | 201, `slides: 3`, `bytes: 63768`, `url: /api/deck/deck_...` |
+| 13 | `GET /api/deck/:id` | 200, `Content-Type: application/vnd...presentationml.presentation`, `Content-Disposition: attachment`, 유효한 ZIP, 슬라이드 3장, 표지에 제목·"PEOPLE OS", 요약 슬라이드에 불릿, 액션 슬라이드에 액션 문구 확인 |
+| 14 | `GET /api/deck/bad-id` | 404 `deck not found` |
+| 15 | `POST /api/deck` 빈 body | 400 `summary, actions or bullets is required` |
+| 16 | `POST /api/deck` bullets만 | 201, `slides: 2` (표지 + 내용) |
+| 17 | 스모크: 업로드 + 요약 | 201 / 200, `engine: local-extractive` (로컬 폴백, 기존과 동일) |
+| 18 | 스모크: ask “연차 3일 쓸 수 있어?” | 200, 근거 1위 연차휴가, `local-template` / `d1-text` / `durable-objects` (로컬 폴백) |
+| 19 | 스모크: 코칭 리플렉션 | 200, 패턴 2개·다음 질문 3개, `engine: local-rule` (로컬 폴백) |
+| 20 | `GET /api/library` | 문서 1건·규정 7건·리플렉션 1건 |
+| 21 | `GET /api/home` (스모크 후) | counts 문서 1·요약 1·열린 할 일 0·리플렉션 1, 최근 문서·리플렉션 반환 |
+| 22 | 요약 액션 → `POST /api/tasks` | 201, 목록에 "회의록 공유" (done: 0) — 프론트의 "할 일로 저장"과 같은 경로 |
+
+### 테스트 중 발견해 수정한 버그 1건 (재검증 완료)
+
+**한글 파일명으로 Content-Disposition을 만들면 브라우저에서 TypeError** — Miniflare 로그에 `Invalid header name or value ... must not contain any Unicode code points greater than 0xFF` ERROR가 찍혔다. Miniflare는 200을 반환했지만 실제 브라우저 Fetch 명세에서는 예외다. → `filename`은 ASCII 폴백(`11_.pptx`), 한글 제목은 RFC 5987 `filename*=UTF-8''...`로 변경. 재검증: 헤더 ASCII만 포함, 파일 63,768바이트·슬라이드 3장·유효한 ZIP 그대로 다운로드됨.
+
+### 배포 (2026-11-13)
+
+- `cf-wrangler.py deploy` → https://people-os.workspace-easyware.workers.dev, Version ID `7161dbd8-9aa4-4155-a88a-0a0beb9c480d`.
+- 배포 직후 `d1 migrations list`에서 `0002_workspace.sql`이 미적용으로 보여 `d1 migrations apply people-os-db --remote`로 별도 적용 (✅, 3개 명령 실행). 참고: 배포가 마이그레이션을 자동 적용하지 않았고, 런타임 `ensureSchema()`가 테이블을 만들어주긴 하지만 마이그레이션 기록을 위해 명시 적용함.
+- 라이브 확인은 이 VM에서 workers.dev에 닿지 않아 수행하지 않음 — 사용자 Chrome으로 확인할 것 (홈 대시보드, 할 일 체크, PPTX 다운로드, 요약/질문/코칭 엔진 유지).
+
+### 아직 검증하지 않은 것 (Stage 1)
+
+- 라이브 Workers AI/Vectorize 경로에서의 덱 생성 (로컬은 폴백이지만 덱 생성 자체는 AI와 무관 — pptxgenjs만으로 동작하므로 클라우드에서도 동일하게 동작할 것으로 예상, 배포 후 Chrome 확인 필요)
+- 프론트 브라우저 클릭 테스트 (홈·할 일 체크박스·PPTX 버튼 — curl로 HTML·API까지만 확인, 브라우저 조작은 미수행, 배포 후 사용자 Chrome으로 확인 예정)
+- PowerPoint 실파일 열기 확인 (ZIP 구조·슬라이드 XML 텍스트까지만 검증, PowerPoint 앱에서 여는 것은 미수행)
 
 ## 프론트 리스타일 + FlowDesk 연결 (2026-11-13)
 - people-insight의 CSS 디자인 토큰(남색 #123863, 배경 #f5f8fc, 포인트 #2d7dde, 카드 radius 16px, Pretendard/Inter)을 public/index.html에 적용. Mantine 라이브러리가 아니라 Mantine처럼 보이게 짠 커스텀 CSS다.

@@ -41,15 +41,35 @@ a.btn:hover{background:#1f6bc4}
 pre{white-space:pre-wrap;background:#f5f8fc;border:1px solid var(--line);padding:10px;border-radius:10px}
 .badge{display:inline-block;background:#eaf2fd;border:1px solid #cfe3fa;color:var(--color-primary);padding:2px 8px;border-radius:999px;font-size:12px;font-weight:600}
 .btnrow{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+/* Stage 1 작업 공간: 현황 숫자 카드, 할 일 행, 라이브러리 카드 */
+.stats{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin:var(--space-4) 0}
+.stat{background:var(--color-surface);border:1px solid var(--line);border-radius:var(--radius);padding:var(--space-4);box-shadow:var(--shadow)}
+.stat b{display:block;font-size:28px;color:var(--color-primary);line-height:1.1}
+.stat span{color:var(--color-muted);font-size:var(--text-sm)}
+.taskrow{display:flex;gap:10px;align-items:center;padding:9px 0;border-bottom:1px solid var(--line)}
+.taskrow:last-child{border-bottom:0}
+.taskrow input[type=checkbox]{width:18px;height:18px;accent-color:var(--color-primary);flex:none}
+.taskrow .t-title{flex:1}
+.taskrow.done .t-title{text-decoration:line-through;color:var(--color-muted)}
+.taskrow .t-src{color:var(--color-muted);font-size:var(--text-sm)}
+button.iconbtn{background:transparent;border:0;color:var(--color-muted);font-size:18px;padding:2px 6px;line-height:1}
+button.iconbtn:hover{color:#c0392b}
+.libgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:12px}
+.libcard{background:var(--color-surface);border:1px solid var(--line);border-radius:var(--radius);padding:var(--space-4);box-shadow:var(--shadow)}
+.libcard h3{margin:0 0 6px;font-size:var(--text-base)}
+.libcard p{margin:0 0 6px;color:var(--color-muted);font-size:var(--text-sm)}
+.libcard .meta{color:var(--color-muted);font-size:12px}
 </style>
 </head>
 <body>
 <header class="topbar">
   <button class="logo" type="button"><b>일</b><span>일잇 <i>People OS</i></span></button>
   <nav class="tabs">
-    <button class="nav-active" data-tab="upload">업로드·요약</button>
+    <button class="nav-active" data-tab="home">홈</button>
+    <button data-tab="upload">업로드·요약</button>
     <button data-tab="ask">질문 (HR 에이전트)</button>
     <button data-tab="coaching">코칭 리플렉션</button>
+    <button data-tab="tasks">할 일</button>
     <button data-tab="library">라이브러리</button>
   </nav>
 </header>
@@ -57,10 +77,28 @@ pre{white-space:pre-wrap;background:#f5f8fc;border:1px solid var(--line);padding
   <div class="hero">
     <h1>일잇 People OS</h1>
     <p class="sub">HR·코칭 인텔리전스 플랫폼 — Cloudflare Workers판 프로토타입</p>
-    <p class="small">데모 흐름: 샘플 전사본 붙여넣기 → 요약 → “연차 3일 쓸 수 있어?” 질문 → 근거付き 답변 → 코칭 리플렉션 → FlowDesk 노트로 보내기. <span id="health" class="badge">health 확인 중…</span></p>
+    <p class="small">데모 흐름: 홈 대시보드 → 샘플 전사본 붙여넣기 → 요약 → 액션 할 일로 저장 → PPTX 초안 다운로드 → “연차 3일 쓸 수 있어?” 질문 → 코칭 리플렉션 → FlowDesk 노트로 보내기. <span id="health" class="badge">health 확인 중…</span></p>
   </div>
 
-  <section id="tab-upload" class="active">
+  <section id="tab-home" class="active">
+    <div class="stats" id="homeStats"></div>
+    <div class="card">
+      <h2>최근 문서</h2>
+      <div id="homeDocs"></div>
+      <div class="btnrow"><button class="secondary" onclick="switchTab('upload')">새 문서 업로드 →</button></div>
+    </div>
+    <div class="card">
+      <h2>열린 할 일</h2>
+      <div id="homeTasks"></div>
+      <div class="btnrow"><button class="secondary" onclick="switchTab('tasks')">할 일 전체 보기 →</button></div>
+    </div>
+    <div class="card">
+      <h2>최근 리플렉션</h2>
+      <div id="homeRefl"></div>
+    </div>
+  </section>
+
+  <section id="tab-upload">
     <div class="card">
       <h2>1. 문서 업로드</h2>
       <p><button class="secondary" id="loadSample">샘플 전사본 불러오기</button></p>
@@ -95,9 +133,21 @@ pre{white-space:pre-wrap;background:#f5f8fc;border:1px solid var(--line);padding
     </div>
   </section>
 
+  <section id="tab-tasks">
+    <div class="card">
+      <h2>5. 할 일</h2>
+      <div class="btnrow">
+        <input type="text" id="newTaskTitle" placeholder="할 일을 입력하세요" style="flex:1" />
+        <button class="primary" id="addTaskBtn">추가</button>
+      </div>
+      <div id="taskList"></div>
+      <p class="small">요약 결과의 액션은 “할 일로 저장” 버튼으로 한 번에 옮길 수 있습니다.</p>
+    </div>
+  </section>
+
   <section id="tab-library">
     <div class="card">
-      <h2>4. 라이브러리</h2>
+      <h2>6. 라이브러리</h2>
       <div class="btnrow">
         <button class="primary" id="refreshLib">새로고침</button>
         <a class="btn" href="https://flowdesk-personal-c7a4.hr-jhkang.chatgpt.site/" target="_blank" rel="noopener">FlowDesk에서 열기 ↗</a>
@@ -109,14 +159,19 @@ pre{white-space:pre-wrap;background:#f5f8fc;border:1px solid var(--line);padding
 </main>
 
 <script>
-let docId = null, sessionId = null, lastSummaryText = '';
+let docId = null, sessionId = null, lastSummaryText = '', lastSummary = [], lastActions = [], lastDocTitle = '';
 const $ = (id) => document.getElementById(id);
 const FLOWDESK_URL = 'https://flowdesk-personal-c7a4.hr-jhkang.chatgpt.site/';
-document.querySelectorAll('.tabs button').forEach(b => b.onclick = () => {
+function switchTab(name) {
   document.querySelectorAll('.tabs button').forEach(x => x.classList.remove('nav-active'));
   document.querySelectorAll('section').forEach(x => x.classList.remove('active'));
-  b.classList.add('nav-active'); $('tab-' + b.dataset.tab).classList.add('active');
-});
+  document.querySelector(`.tabs button[data-tab="${name}"]`).classList.add('nav-active');
+  $('tab-' + name).classList.add('active');
+  if (name === 'home') loadHome();
+  if (name === 'tasks') loadTasks();
+  if (name === 'library') refreshLib();
+}
+document.querySelectorAll('.tabs button').forEach(b => b.onclick = () => switchTab(b.dataset.tab));
 async function api(path, opts) {
   const r = await fetch(path, { headers: { 'content-type': 'application/json' }, ...opts });
   return r.json();
@@ -126,9 +181,97 @@ function copySummary() {
   if (navigator.clipboard) navigator.clipboard.writeText(text).then(() => alert('요약을 복사했습니다. FlowDesk 노트에 붙여넣으세요.'));
   else alert(text);
 }
+function esc(s) { return String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); }
+function fmtDate(s) { return s ? String(s).slice(0, 10) : ''; }
+function taskRow(t) {
+  return `<div class="taskrow${t.done ? ' done' : ''}"><input type="checkbox" ${t.done ? 'checked' : ''} onchange="toggleTask('${t.id}')" /><span class="t-title">${esc(t.title)}</span>${t.source ? `<span class="t-src">${esc(t.source)}</span>` : ''}<button class="iconbtn" title="삭제" onclick="deleteTask('${t.id}')">×</button></div>`;
+}
+async function loadHome() {
+  const j = await api('/api/home');
+  if (!j.ok) return;
+  const c = j.counts;
+  $('homeStats').innerHTML =
+    `<div class="stat"><b>${c.documents}</b><span>문서</span></div>` +
+    `<div class="stat"><b>${c.summaries}</b><span>요약 완료</span></div>` +
+    `<div class="stat"><b>${c.openTasks}</b><span>열린 할 일</span></div>` +
+    `<div class="stat"><b>${c.reflections}</b><span>리플렉션</span></div>`;
+  $('homeDocs').innerHTML = j.recentDocuments.length
+    ? j.recentDocuments.map(d => `<div class="taskrow"><span class="t-title">${esc(d.title)}</span><span class="badge">${esc(d.kind)}</span><span class="t-src">${fmtDate(d.created_at)}</span></div>`).join('')
+    : '<p class="small">아직 문서가 없습니다. 업로드 탭에서 샘플 전사본을 올려보세요.</p>';
+  $('homeTasks').innerHTML = j.openTasks.length
+    ? j.openTasks.map(taskRow).join('')
+    : '<p class="small">열린 할 일이 없습니다.</p>';
+  $('homeRefl').innerHTML = j.recentReflections.length
+    ? j.recentReflections.map(r => {
+        let pats = [];
+        try { pats = JSON.parse(r.patterns || '[]'); } catch { pats = []; }
+        return `<div class="taskrow"><span class="t-title">${esc(pats[0] || '리플렉션')}</span><span class="t-src">${fmtDate(r.created_at)}</span></div>`;
+      }).join('')
+    : '<p class="small">아직 리플렉션이 없습니다.</p>';
+}
+async function loadTasks() {
+  const j = await api('/api/tasks');
+  if (!j.ok) return;
+  $('taskList').innerHTML = j.tasks.length
+    ? j.tasks.map(taskRow).join('')
+    : '<p class="small">할 일이 없습니다. 위 입력란이나 요약 결과에서 추가하세요.</p>';
+}
+async function addTask() {
+  const title = $('newTaskTitle').value.trim();
+  if (!title) return;
+  await api('/api/tasks', { method: 'POST', body: JSON.stringify({ title }) });
+  $('newTaskTitle').value = '';
+  loadTasks(); loadHome();
+}
+async function toggleTask(id) {
+  await api('/api/tasks/' + id, { method: 'PATCH', body: JSON.stringify({}) });
+  loadTasks(); loadHome();
+}
+async function deleteTask(id) {
+  await api('/api/tasks/' + id, { method: 'DELETE' });
+  loadTasks(); loadHome();
+}
+async function saveActionsAsTasks() {
+  if (!lastActions.length) { alert('저장할 액션이 없습니다.'); return; }
+  let n = 0;
+  for (const a of lastActions) {
+    const j = await api('/api/tasks', { method: 'POST', body: JSON.stringify({ title: a, source: lastDocTitle }) });
+    if (j.ok) n++;
+  }
+  alert(`액션 ${n}건을 할 일로 저장했습니다.`);
+  loadTasks(); loadHome();
+}
+async function downloadDeck() {
+  const box = $('deckResult');
+  if (box) box.innerHTML = '<p class="small">PPTX 초안을 만들고 있습니다…</p>';
+  const j = await api('/api/deck', { method: 'POST', body: JSON.stringify({ title: lastDocTitle || 'People OS 요약', summary: lastSummary, actions: lastActions, source: docId }) });
+  if (j.ok && box) box.innerHTML = `<p><a class="btn" href="${j.url}" download>PPTX 초안 다운로드 (${j.slides}장 · ${(j.bytes / 1024).toFixed(0)}KB)</a></p><p class="small">R2에 저장됨 · ${esc(j.url)}</p>`;
+  else if (box) box.innerHTML = `<p class="small">오류: ${esc(j.error || 'deck 생성 실패')}</p>`;
+}
+async function refreshLib() {
+  const j = await api('/api/library');
+  const docs = j.documents.map(d => {
+    let sum = '';
+    try { const s = JSON.parse(d.summary || '[]'); sum = (s[0] || '').slice(0, 120); } catch { sum = ''; }
+    let actN = 0;
+    try { actN = JSON.parse(d.actions || '[]').length; } catch { actN = 0; }
+    return `<div class="libcard"><h3>${esc(d.title)}</h3><p>${sum ? esc(sum) : '요약 전 문서입니다.'}</p><div class="meta"><span class="badge">${esc(d.kind)}</span> ${fmtDate(d.created_at)}${actN ? ` · 액션 ${actN}개` : ''}</div></div>`;
+  }).join('');
+  const pols = j.policies.map(p => `<div class="libcard"><h3>${esc(p.title)}</h3><p>${esc(p.section)}</p><div class="meta">HR 규정</div></div>`).join('');
+  const refls = j.reflections.map(r => {
+    let pats = [];
+    try { pats = JSON.parse(r.patterns || '[]'); } catch { pats = []; }
+    return `<div class="libcard"><h3>코칭 리플렉션</h3><p>${esc(pats[0] || '')}</p><div class="meta">${fmtDate(r.created_at)}</div></div>`;
+  }).join('');
+  $('libResult').innerHTML =
+    `<h3>문서 ${j.documents.length}건</h3><div class="libgrid">${docs || '<p class="small">문서가 없습니다.</p>'}</div>` +
+    `<h3>규정 ${j.policies.length}건</h3><div class="libgrid">${pols}</div>` +
+    `<h3>리플렉션 ${j.reflections.length}건</h3><div class="libgrid">${refls || '<p class="small">리플렉션이 없습니다.</p>'}</div>`;
+}
 fetch('/api/health', { method: 'POST' }).then(r => r.json()).then(j => {
   $('health').textContent = j.ok ? 'health OK · ' + Object.entries(j.bindings).filter(([,v])=>v).map(([k])=>k).join(', ') : 'health 실패';
 }).catch(() => $('health').textContent = 'health 실패');
+loadHome();
 $('loadSample').onclick = async () => {
   const j = await api('/api/seed');
   $('docTitle').value = '11월 팀 회의 전사본 (샘플)';
@@ -136,20 +279,21 @@ $('loadSample').onclick = async () => {
 };
 $('uploadBtn').onclick = async () => {
   const j = await api('/api/documents', { method: 'POST', body: JSON.stringify({ title: $('docTitle').value, content: $('docContent').value, kind: 'transcript' }) });
-  if (j.ok) { docId = j.id; $('summarizeBtn').disabled = false; $('docResult').innerHTML = `<div class="card">업로드됨 · id <code>${j.id}</code> · R2 저장: ${j.r2Stored ? '예' : '아니오 (D1 폴백)'}</div>`; }
+  if (j.ok) { docId = j.id; lastDocTitle = j.title; $('summarizeBtn').disabled = false; $('docResult').innerHTML = `<div class="card">업로드됨 · id <code>${j.id}</code> · R2 저장: ${j.r2Stored ? '예' : '아니오 (D1 폴백)'}</div>`; }
   else $('docResult').innerHTML = `<div class="card">오류: ${j.error}</div>`;
 };
 $('summarizeBtn').onclick = async () => {
   const j = await api('/api/documents/' + docId + '/summarize', { method: 'POST' });
+  lastSummary = j.summary || []; lastActions = j.actions || [];
   lastSummaryText = '요약\n' + j.summary.map(s => '- ' + s).join('\n') + '\n\n액션\n' + j.actions.map(s => '- ' + s).join('\n');
-  $('docResult').innerHTML = `<div class="card"><b>요약</b> <span class="badge">엔진: ${j.engine}</span><ul>${j.summary.map(s => `<li>${s}</li>`).join('')}</ul><b>액션</b><ul>${j.actions.map(s => `<li>${s}</li>`).join('')}</ul><div class="btnrow"><button class="secondary" onclick="copySummary()">요약 복사</button><a class="btn" href="${FLOWDESK_URL}" target="_blank" rel="noopener">FlowDesk에서 열기 ↗</a></div><p class="small">FlowDesk는 별도 개인 작업 공간(로그인 필요)이라, 요약은 복사해서 노트로 붙여넣는 흐름입니다.</p></div>`;
+  $('docResult').innerHTML = `<div class="card"><b>요약</b> <span class="badge">엔진: ${j.engine}</span><ul>${j.summary.map(s => `<li>${esc(s)}</li>`).join('')}</ul><b>액션</b><ul>${j.actions.map(s => `<li>${esc(s)}</li>`).join('')}</ul><div class="btnrow"><button class="secondary" onclick="saveActionsAsTasks()">할 일로 저장</button><button class="primary" onclick="downloadDeck()">PPTX 초안 다운로드</button><button class="secondary" onclick="copySummary()">요약 복사</button><a class="btn" href="${FLOWDESK_URL}" target="_blank" rel="noopener">FlowDesk에서 열기 ↗</a></div><div id="deckResult"></div><p class="small">FlowDesk는 별도 개인 작업 공간(로그인 필요)이라, 요약은 복사해서 노트로 붙여넣는 흐름입니다.</p></div>`;
 };
 $('askBtn').onclick = async () => {
   const j = await api('/api/ask', { method: 'POST', body: JSON.stringify({ question: $('question').value, sessionId }) });
   if (j.ok) {
     sessionId = j.sessionId;
-    $('askResult').innerHTML = `<div class="card"><b>답변</b> <span class="badge">엔진: ${j.engine} · 검색: ${j.searchEngine} · 세션: ${j.sessionVia}${j.cached ? ' · 캐시됨' : ''}</span><p>${j.answer}</p><b>근거</b><ul>${j.sources.map(s => `<li>${s.title} (${s.section}) — ${s.snippet}</li>`).join('')}</ul></div>`;
-  } else $('askResult').innerHTML = `<div class="card">오류: ${j.error}</div>`;
+    $('askResult').innerHTML = `<div class="card"><b>답변</b> <span class="badge">엔진: ${j.engine} · 검색: ${j.searchEngine} · 세션: ${j.sessionVia}${j.cached ? ' · 캐시됨' : ''}</span><p>${esc(j.answer)}</p><b>근거</b><ul>${j.sources.map(s => `<li>${esc(s.title)} (${esc(s.section)}) — ${esc(s.snippet)}</li>`).join('')}</ul></div>`;
+  } else $('askResult').innerHTML = `<div class="card">오류: ${esc(j.error)}</div>`;
 };
 $('loadCoaching').onclick = async () => {
   const j = await api('/api/seed');
@@ -157,12 +301,12 @@ $('loadCoaching').onclick = async () => {
 };
 $('reflectBtn').onclick = async () => {
   const j = await api('/api/coaching/reflect', { method: 'POST', body: JSON.stringify({ transcript: $('coachingText').value, sessionId }) });
-  $('coachingResult').innerHTML = `<div class="card"><b>핵심 질문</b> <span class="badge">엔진: ${j.engine}</span><ul>${j.questions.map(s => `<li>${s}</li>`).join('')}</ul><b>패턴</b><ul>${j.patterns.map(s => `<li>${s}</li>`).join('')}</ul><b>다음 세션 질문</b><ul>${j.next_questions.map(s => `<li>${s}</li>`).join('')}</ul></div>`;
+  $('coachingResult').innerHTML = `<div class="card"><b>핵심 질문</b> <span class="badge">엔진: ${j.engine}</span><ul>${j.questions.map(s => `<li>${esc(s)}</li>`).join('')}</ul><b>패턴</b><ul>${j.patterns.map(s => `<li>${esc(s)}</li>`).join('')}</ul><b>다음 세션 질문</b><ul>${j.next_questions.map(s => `<li>${esc(s)}</li>`).join('')}</ul></div>`;
+  loadHome();
 };
-$('refreshLib').onclick = async () => {
-  const j = await api('/api/library');
-  $('libResult').innerHTML = `<div class="card"><b>문서 ${j.documents.length}건</b><pre>${JSON.stringify(j.documents, null, 2)}</pre><b>규정 ${j.policies.length}건</b><pre>${JSON.stringify(j.policies, null, 2)}</pre><b>리플렉션 ${j.reflections.length}건</b><pre>${JSON.stringify(j.reflections, null, 2)}</pre></div>`;
-};
+$('addTaskBtn').onclick = addTask;
+$('newTaskTitle').addEventListener('keydown', (e) => { if (e.key === 'Enter') addTask(); });
+$('refreshLib').onclick = refreshLib;
 </script>
 </body>
 </html>

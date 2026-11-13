@@ -11,8 +11,8 @@
 flowchart TB
     User["사용자<br/>HR 실무자 · 코치<br/>브라우저"] -->|HTTPS| Worker["Workers (Hono)<br/>src/index.ts<br/>API + 프론트 서빙"]
 
-    Worker --> R2["R2<br/>음성·PDF·PPTX 원본"]
-    Worker --> D1["D1 (SQLite)<br/>문서·규정·세션<br/>리플렉션·캐시"]
+    Worker --> R2["R2<br/>음성·PDF·PPTX 원본<br/>덱 decks/*.pptx"]
+    Worker --> D1["D1 (SQLite)<br/>문서·규정·세션<br/>리플렉션·캐시<br/>할 일·덱 메타"]
     Worker --> KV["KV<br/>질문 캐시"]
     Worker --> DO["Durable Objects<br/>AgentSession<br/>대화 기억"]
     Worker --> AI["Workers AI<br/>요약·답변·리플렉션"]
@@ -42,8 +42,12 @@ flowchart TB
    KV 캐시 확인 (`ask:{sessionId}:{question}`) → 없으면 Vectorize 검색 시도 → 로컬에선 D1 텍스트 검색 폴백 → 근거 문서(연차휴가 등) + 답변 생성 → Durable Objects 세션에 대화 저장 → KV에 캐시.
 4. **코칭** — `POST /api/coaching/reflect` {transcript, sessionId}
    Workers AI 분석 시도 → 로컬에선 `local-rule`로 폴백. 핵심 질문·패턴·다음 질문 → D1 저장.
-5. **조회** — `GET /api/library`, `GET /api/seed`
-   문서·규정 7건·리플렉션 목록 반환.
+5. **할 일** — `POST /api/tasks` {title, source} / `PATCH /api/tasks/:id` / `DELETE /api/tasks/:id`
+   요약 액션을 D1 `tasks`에 저장하고 체크·삭제. 홈 대시보드에 열린 할 일 미리보기.
+6. **PPTX 초안** — `POST /api/deck` {title, summary, actions}
+   pptxgenjs로 새 덱 생성(표지 + 요약 슬라이드 + 액션 슬라이드, people-insight 팔레트) → R2 `decks/<id>.pptx` 저장 + D1 `decks` 메타 저장 → `GET /api/deck/:id`로 다운로드.
+7. **조회** — `GET /api/library`, `GET /api/seed`, `GET /api/home`
+   문서·규정 7건·리플렉션 목록 반환. 홈은 현황 숫자(문서·요약·열린 할 일·리플렉션) + 최근 문서·할 일·리플렉션.
 
 ## Cloudflare 기능 매핑 (공모전 필수 조건)
 
@@ -54,7 +58,7 @@ flowchart TB
 |---|---|---|---|
 | Workers | 구현됨 | Hono API + 프론트 서빙 | — |
 | D1 | 구현됨 | 문서·규정·세션·리플렉션·캐시 테이블 | Miniflare 로컬 D1 |
-| R2 | 구현됨 | 원본 파일 저장 (`r2Stored: true` 확인) | Miniflare 로컬 R2 |
+| R2 | 구현됨 | 원본 파일 저장 (`r2Stored: true` 확인) + 덱 `decks/<id>.pptx` | Miniflare 로컬 R2 |
 | KV | 구현됨 | 질문 캐시, 세션별 키 | D1 cache 테이블 |
 | Durable Objects | 구현됨 | AgentSession 대화 기억 | D1 sessions 테이블 |
 | Workers AI | 코드 있음, 로컬 폴백 | 요약·답변·리플렉션 생성 | local-extractive / local-template / local-rule |
@@ -66,7 +70,7 @@ flowchart TB
 | Turnstile | 설계만 | 가입·업로드 스팸 방지 | 폼 자리만 |
 | Workers Static Assets | 구현됨 | `public/index.html` 서빙 | — |
 
-## 데이터 모델 (migrations/0001_init.sql)
+## 데이터 모델 (migrations/0001_init.sql, 0002_workspace.sql)
 
 - `documents(id, title, kind, content, r2_key, created_at)`
 - `policies(id, title, section, content)` — 시드 7건
@@ -74,6 +78,26 @@ flowchart TB
 - `sessions(id, data, updated_at)` — DO 폴백
 - `reflections(id, session_id, transcript, result, created_at)`
 - `tickets(id, title, body, status, created_at)` — 에이전트 티켓 초안용
+- `tasks(id, title, source, done, created_at, done_at)` — Stage 1 작업 공간 (0002)
+- `decks(id, title, r2_key, bytes, slides, created_at)` — Stage 1 PPTX 덱 메타 (0002)
+
+## Stage 1 — 작업 공간 + PPTX 덱 (2026-11-13, 구현됨)
+
+사용자 피드백("화면이 밋밋하고 검색창만 보인다")을 해소하는 작업 공간 + 파이프라인 마지막 단계 PPTX 초안.
+
+- **홈 대시보드** (`GET /api/home`, 첫 탭): 현황 숫자 4개(문서·요약 완료·열린 할 일·리플렉션) + 최근 문서 5건 + 열린 할 일 5건 + 최근 리플렉션 3건.
+- **할 일** (`/api/tasks` CRUD, D1 `tasks`): 요약 액션을 "할 일로 저장" 버튼으로 옮기고 체크·삭제. FlowDesk의 노트·작업 모델을 참고하되, 별도 Site가 아니라 D1에 직접 저장한다.
+- **라이브러리 카드화**: JSON 덤프 대신 문서·규정·리플렉션 카드 목록(제목·요약 발췌·날짜·종류).
+- **PPTX 초안** (`POST /api/deck` → `GET /api/deck/:id`): easy-slides 방식 — pptxgenjs로 새 덱을 처음부터 생성. 표지(남색 #123863) + 요약 슬라이드 + 액션 슬라이드, Malgun Gothic, 16:9. R2 `decks/<id>.pptx`에 저장하고 D1 `decks`에 메타 저장. 다운로드 시 `Content-Disposition`은 한글 제목을 RFC 5987 `filename*`로 싣고 `filename`은 ASCII 폴백 (브라우저 Fetch 명세상 한글 filename은 TypeError).
+- 참고한 코드: easy-slides `site/` (pptxgenjs 신규 생성, 템플릿·workspace API, drizzle 스키마), FlowDesk Cloud `src/core/slides-export.mjs` (pptxgenjs 호출 패턴, `officeText` XML 금지 문자 제거, Malgun Gothic/`ko-KR`), `cloud/storage.mjs` (R2 저장·다운로드 패턴).
+
+## Stage 2 — 덱 편집기 (계획만, 미구현)
+
+Stage 1은 "새 덱 생성"까지만 한다. 다음 단계는 FlowDesk 방식의 **기존 덱 제자리 편집**이다.
+
+- 생성된 덱을 브라우저에서 열어 텍스트·위치를 고치고 다시 저장: jszip으로 .pptx 패키지를 왕복하며 원본 서식을 유지하는 FlowDesk `pptx-package.mjs` / `pptx-parts.mjs` / `pptx-preview.mjs` 패턴을 Worker + 프론트에 이식.
+- R2 버전 관리: FlowDesk Cloud `cloud/storage.mjs`처럼 현본 + 직전본을 유지하고, 저장 충돌 시 거부(동시 편집 보호).
+- 범위 주의: FlowDesk 편집기는 클라이언트 중심의 큰 코드베이스라 통째로 가져오지 않고, 텍스트·도형 수정에 필요한 최소 부분만 이식한다. 공모전 마감(11/27) 안에 Stage 2를 못 끝내면 Stage 1 생성 + 다운로드만으로 제출한다.
 
 ## 로컬 vs 클라우드 차이 (솔직한 기록)
 
@@ -88,4 +112,5 @@ flowchart TB
 - `enterprise-ops-agent`의 ADK ReAct → `/api/ask` 라우터·근거 표시
 - ChatGPT Sites(Plaud Transcribe Studio, Paperdoc, easy-slides, People Signal 등) → 입력·출력 모듈의 화면·흐름 참고. 단, 이 제출물은 Sites 자체가 아니라 Workers 위에 새로 만든 프로토타입이다.
 - FlowDesk Cloud(개인 작업 공간 Site, https://flowdesk-personal-c7a4.hr-jhkang.chatgpt.site/) → 요약·액션·리플렉션 결과의 저장처. FlowDesk는 별도 비공개 Site라 Worker 안에 직접 넣을 수 없어, 데모 화면의 "FlowDesk에서 열기" 링크 + "요약 복사" 버튼으로 연결한다 (MVP 범위 내 구현됨). 클라우드 자료는 로그인한 계정의 공간에 저장되고 PC와 자동 동기화되지 않는다.
+- 코드 참고 (Stage 1): `workspace-easyware/flowdesk-cloud` (PPTX 내보내기·R2 저장 패턴, `workspace-easyware/easy-slides` (pptxgenjs 신규 덱 생성·템플릿·workspace API). 두 접근법 중 Stage 1은 easy-slides식 생성, Stage 2는 FlowDesk식 제자리 편집으로 나눴다 — 위 Stage 1/2 참조.
 - 화면 스타일: `people-insight`의 CSS 디자인 토큰(남색 #123863, 배경 #f5f8fc, 포인트 #2d7dde, 카드 radius 16px, Pretendard/Inter)을 `public/index.html`에 그대로 적용했다. Mantine 라이브러리가 아니라 Mantine처럼 보이게 짠 커스텀 CSS다.

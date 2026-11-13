@@ -7,11 +7,13 @@ HR 실무자·코치를 위한 AI 인텔리전스 플랫폼: 회의 전사본·�
 
 ## 데모 흐름 (3분 영상용)
 
-1. 샘플 전사본 붙여넣기 → 업로드 (R2 저장)
-2. 요약하기 → 3줄 요약 + 액션 아이템
-3. “연차 3일 쓸 수 있어?” → 근거 문서(연차휴가 규정)와 함께 답변
-4. 코칭 전사본 → 핵심 질문·패턴·다음 세션 질문 3개
-5. 요약 복사 → FlowDesk 개인 작업 공간 노트로 보내기 ("FlowDesk에서 열기" 버튼, https://flowdesk-personal-c7a4.hr-jhkang.chatgpt.site/)
+1. 홈 대시보드 — 현황 숫자 + 최근 문서·할 일 확인
+2. 샘플 전사본 붙여넣기 → 업로드 (R2 저장)
+3. 요약하기 → 3줄 요약 + 액션 아이템
+4. 액션 “할 일로 저장” + “PPTX 초안 다운로드” (표지+요약+액션, R2 저장)
+5. “연차 3일 쓸 수 있어?” → 근거 문서(연차휴가 규정)와 함께 답변
+6. 코칭 전사본 → 핵심 질문·패턴·다음 세션 질문 3개
+7. 요약 복사 → FlowDesk 개인 작업 공간 노트로 보내기 ("FlowDesk에서 열기" 버튼, https://flowdesk-personal-c7a4.hr-jhkang.chatgpt.site/)
 
 ## 로컬 실행
 
@@ -31,6 +33,10 @@ npx wrangler dev --local
 | 메소드 | 경로 | 설명 |
 |---|---|---|
 | POST/GET | `/api/health` | 상태 + 바인딩 확인 (규정 시드도 여기서 초기화) |
+| GET | `/api/home` | 홈 대시보드: 현황 숫자 + 최근 문서·할 일·리플렉션 |
+| GET/POST/PATCH/DELETE | `/api/tasks`, `/api/tasks/:id` | 할 일 체크리스트 (생성·토글·삭제) |
+| POST | `/api/deck` | `{title, summary, actions}` → pptxgenjs 덱 생성, R2 저장, `{url}` 반환 |
+| GET | `/api/deck/:id` | 생성된 .pptx 다운로드 |
 | POST | `/api/documents` | `{title, content, kind}` 업로드 → R2 + D1 |
 | POST | `/api/documents/:id/summarize` | Workers AI 요약, 실패 시 로컬 추출식 요약 |
 | POST | `/api/ask` | `{question, sessionId?}` RAG 답변 + 근거 + 세션 기억 |
@@ -43,10 +49,10 @@ npx wrangler dev --local
 ## 아키텍처
 
 ```
-브라우저 (public/index.html, 탭 4개)
+브라우저 (public/index.html, 탭 6개: 홈·업로드·질문·코칭·할 일·라이브러리)
   → Workers (Hono, src/index.ts)
-    → D1 (문서·규정·세션·리플렉션·캐시)
-    → R2 (원본 파일)
+    → D1 (문서·규정·세션·리플렉션·캐시·할 일·덱 메타)
+    → R2 (원본 파일 + 덱 decks/*.pptx)
     → KV (질문 캐시, 실패 시 D1 cache 테이블)
     → Vectorize (RAG — 로컬에서 쿼리 실패 시 D1 텍스트 검색 폴백)
     → Workers AI (요약·답변·리플렉션 — 로컬에서 실패 시 로컬 템플릿/규칙 폴백)
@@ -61,10 +67,10 @@ npx wrangler dev --local
 | Workers | API + 프론트 서빙 | 구현됨 |
 | Workers AI | 요약·답변·리플렉션 생성 | 시도 후 로컬 폴백 (아래 참조) |
 | Vectorize | RAG 임베딩 검색 | 시도 후 D1 텍스트 검색 폴백 |
-| D1 | 문서·규정·세션·리플렉션·캐시 | 구현됨 (마이그레이션 `migrations/0001_init.sql`) |
+| D1 | 문서·규정·세션·리플렉션·캐시·할 일·덱 메타 | 구현됨 (마이그레이션 `migrations/0001_init.sql`, `0002_workspace.sql`) |
 | KV | `/api/ask` 캐시 | 시도 후 D1 폴백 |
 | Durable Objects | 에이전트 세션 기억 | 시도 후 D1 폴백 |
-| R2 | 업로드 원본 저장 | 구현됨 (Miniflare 로컬) |
+| R2 | 업로드 원본 저장 + 덱 `decks/*.pptx` | 구현됨 (Miniflare 로컬) |
 | Hyperdrive | 기존 HR Postgres 연결 | 스텁/설계만 (모의 데이터) |
 | Queues + Workflows | 전사→요약→추출→임베딩 파이프라인 | 직접 호출 + 큐 스텁 |
 | AI Gateway | 모델 라우팅·폴백 | 설계만 |
@@ -90,12 +96,12 @@ npx wrangler dev --local
 ```
 people-os/
   wrangler.toml        바인딩: D1, KV, R2, Vectorize, AI, Durable Objects, Assets
-  src/index.ts         Hono API + 폴백 로직
+  src/index.ts         Hono API + 폴백 로직 + 작업 공간·덱 API (pptxgenjs)
   src/lib.ts           로컬 요약·검색·리플렉션 + 시드 로더
   src/agent-session.ts Durable Object (세션 기억)
-  migrations/0001_init.sql
+  migrations/0001_init.sql, 0002_workspace.sql
   seed/seed-data.json  샘플 전사본 + 규정 7건 + 코칭 전사본
-  public/index.html    탭 4개 SPA
+  public/index.html    탭 6개 SPA (홈·업로드·질문·코칭·할 일·라이브러리)
 ```
 
 ## 제출물
@@ -107,6 +113,7 @@ people-os/
 
 ## 아직 없는 것 (Phase 4/5)
 
-- 실제 음성 전사 (Whisper 연동), 실제 PPTX 바이너리 생성, Hyperdrive 실연결, Cron 다이제스트, Turnstile 실연동
+- 실제 음성 전사 (Whisper 연동), Hyperdrive 실연결, Cron 다이제스트, Turnstile 실연동
+- 덱 편집기 (Stage 2): 생성된 PPTX를 브라우저에서 고쳐 저장하는 FlowDesk식 제자리 편집 + R2 버전 관리 — ARCHITECTURE.md 참조
 - 3분 데모 영상 녹화본, 공모전 Google Form 제출
 - 배포 (사용자 승인 후 `wrangler deploy`로 데모 URL 확보)

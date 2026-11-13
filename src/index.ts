@@ -1,4 +1,5 @@
 import { Hono } from "hono";
+import PptxGenJS from "pptxgenjs";
 import { AgentSession } from "./agent-session";
 import { coachingTranscript, localReflect, localSearch, localSummarize, policies, sampleTranscript, uid } from "./lib";
 
@@ -40,6 +41,56 @@ function extractJson(text: string): Record<string, unknown> {
   return JSON.parse(cleaned.slice(start, end + 1)) as Record<string, unknown>;
 }
 
+const PPTX_MIME = "application/vnd.openxmlformats-officedocument.presentationml.presentation";
+
+// FlowDesk slides-export.mjs의 officeText와 동일: XML 1.0에서 금지된 문자 제거.
+// 요약·액션 텍스트를 그대로 PPTX에 넣으면 깨질 수 있어 먼저 거른다.
+function officeText(value: string): string {
+  return value.replace(/[^\u0009\u000A\u000D\u0020-\uD7FF\uE000-\uFFFD\u{10000}-\u{10FFFF}]/gu, "");
+}
+
+type DeckSection = { heading: string; items: string[] };
+
+// Stage 1 덱 생성 — easy-slides 방식: pptxgenjs로 새 덱을 처음부터 만든다.
+// 표지(남색) + 섹션별 내용 슬라이드. people-insight 팔레트(#123863/#2d7dde/#14233a).
+// Stage 2(보류): FlowDesk식 기존 덱 제자리 편집(jszip 왕복) + R2 버전 관리 — ARCHITECTURE.md 참조.
+async function buildDeck(title: string, sections: DeckSection[]): Promise<{ bytes: Uint8Array; slides: number }> {
+  const pptx = new PptxGenJS();
+  pptx.defineLayout({ name: "PEOPLE_OS_16_9", width: 13.33, height: 7.5 });
+  pptx.layout = "PEOPLE_OS_16_9";
+  pptx.author = "일잇 People OS";
+  pptx.title = officeText(title);
+  pptx.subject = officeText(title);
+  pptx.theme = { headFontFace: "Malgun Gothic", bodyFontFace: "Malgun Gothic" };
+
+  // 표지
+  const cover = pptx.addSlide();
+  cover.background = { color: "123863" };
+  cover.addShape("rect", { x: 0.6, y: 0.55, w: 0.9, h: 0.08, fill: { color: "2D7DDE" }, line: { color: "2D7DDE", width: 0 } });
+  cover.addText("일잇 PEOPLE OS", { x: 0.6, y: 0.85, w: 8, h: 0.4, fontSize: 14, color: "BFD3EA", bold: true, fontFace: "Malgun Gothic" });
+  cover.addText(officeText(title), { x: 0.6, y: 1.5, w: 12.1, h: 2.4, fontSize: 40, color: "FFFFFF", bold: true, fontFace: "Malgun Gothic", valign: "top" });
+  cover.addText("회의 요약 초안 · Cloudflare Workers", { x: 0.6, y: 4.1, w: 9, h: 0.5, fontSize: 16, color: "BFD3EA", fontFace: "Malgun Gothic" });
+  cover.addText(new Date().toISOString().slice(0, 10), { x: 0.6, y: 6.8, w: 4, h: 0.4, fontSize: 12, color: "8FA8C4", fontFace: "Malgun Gothic" });
+
+  let slides = 1;
+  for (const sec of sections) {
+    if (!sec.items.length) continue;
+    const s = pptx.addSlide();
+    s.background = { color: "FFFFFF" };
+    s.addShape("rect", { x: 0.6, y: 0.5, w: 0.5, h: 0.09, fill: { color: "2D7DDE" }, line: { color: "2D7DDE", width: 0 } });
+    s.addText(officeText(sec.heading), { x: 0.6, y: 0.75, w: 12.1, h: 0.7, fontSize: 28, color: "123863", bold: true, fontFace: "Malgun Gothic" });
+    s.addText(
+      sec.items.map((it) => ({ text: officeText(it), options: { bullet: { indent: 18 }, paraSpaceAfter: 10, fontSize: 18, color: "14233A", fontFace: "Malgun Gothic" } })),
+      { x: 0.6, y: 1.7, w: 12.1, h: 5.1, valign: "top" }
+    );
+    s.addText("일잇 People OS", { x: 0.6, y: 7.0, w: 4, h: 0.3, fontSize: 11, color: "718096", fontFace: "Malgun Gothic" });
+    slides++;
+  }
+  const out = await pptx.write({ outputType: "uint8array" });
+  const bytes = out instanceof Uint8Array ? out : new Uint8Array(out as ArrayBuffer);
+  return { bytes, slides };
+}
+
 async function ensureSchema(db: D1Database) {
   await db.exec(`
     CREATE TABLE IF NOT EXISTS documents (id TEXT PRIMARY KEY, title TEXT NOT NULL, kind TEXT NOT NULL DEFAULT 'transcript', content TEXT NOT NULL, summary TEXT, actions TEXT, r2_key TEXT, created_at TEXT NOT NULL DEFAULT (datetime('now')));
@@ -48,6 +99,8 @@ async function ensureSchema(db: D1Database) {
     CREATE TABLE IF NOT EXISTS sessions (id TEXT PRIMARY KEY, history TEXT NOT NULL DEFAULT '[]', updated_at TEXT NOT NULL DEFAULT (datetime('now')));
     CREATE TABLE IF NOT EXISTS reflections (id TEXT PRIMARY KEY, session_id TEXT, transcript TEXT NOT NULL, questions TEXT, patterns TEXT, next_questions TEXT, created_at TEXT NOT NULL DEFAULT (datetime('now')));
     CREATE TABLE IF NOT EXISTS tickets (id TEXT PRIMARY KEY, title TEXT NOT NULL, body TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'draft', created_at TEXT NOT NULL DEFAULT (datetime('now')));
+    CREATE TABLE IF NOT EXISTS tasks (id TEXT PRIMARY KEY, title TEXT NOT NULL, source TEXT, done INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL DEFAULT (datetime('now')), done_at TEXT);
+    CREATE TABLE IF NOT EXISTS decks (id TEXT PRIMARY KEY, title TEXT NOT NULL, r2_key TEXT NOT NULL, bytes INTEGER NOT NULL DEFAULT 0, slides INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL DEFAULT (datetime('now')));
   `);
 }
 
@@ -277,6 +330,94 @@ app.post("/api/coaching/reflect", async (c) => {
   await c.env.DB.prepare("INSERT INTO reflections (id, session_id, transcript, questions, patterns, next_questions) VALUES (?, ?, ?, ?, ?, ?)")
     .bind(id, body.sessionId || null, transcript, JSON.stringify(out.questions), JSON.stringify(out.patterns), JSON.stringify(out.next_questions)).run();
   return c.json({ ok: true, id, ...out, engine });
+});
+
+// ---- home (작업 공간 대시보드) ----
+app.get("/api/home", async (c) => {
+  await ensureSeeded(c.env.DB);
+  const count = async (sql: string) => (await c.env.DB.prepare(sql).first<{ n: number }>())?.n ?? 0;
+  const documents = await count("SELECT COUNT(*) AS n FROM documents");
+  const summaries = await count("SELECT COUNT(*) AS n FROM documents WHERE summary IS NOT NULL AND summary != ''");
+  const openTasks = await count("SELECT COUNT(*) AS n FROM tasks WHERE done = 0");
+  const reflections = await count("SELECT COUNT(*) AS n FROM reflections");
+  const recentDocuments = (await c.env.DB.prepare("SELECT id, title, kind, created_at FROM documents ORDER BY created_at DESC LIMIT 5").all()).results || [];
+  const tasks = (await c.env.DB.prepare("SELECT id, title, source, created_at FROM tasks WHERE done = 0 ORDER BY created_at DESC LIMIT 5").all()).results || [];
+  const recentReflections = (await c.env.DB.prepare("SELECT id, patterns, created_at FROM reflections ORDER BY created_at DESC LIMIT 3").all()).results || [];
+  return c.json({ ok: true, counts: { documents, summaries, openTasks, reflections }, recentDocuments, openTasks: tasks, recentReflections });
+});
+
+// ---- tasks (할 일 체크리스트) ----
+app.get("/api/tasks", async (c) => {
+  await ensureSeeded(c.env.DB);
+  const rows = await c.env.DB.prepare("SELECT id, title, source, done, created_at, done_at FROM tasks ORDER BY done ASC, created_at DESC").all();
+  return c.json({ ok: true, tasks: rows.results || [] });
+});
+
+app.post("/api/tasks", async (c) => {
+  await ensureSeeded(c.env.DB);
+  const body = await c.req.json().catch(() => ({})) as { title?: string; source?: string };
+  if (!body.title || body.title.trim().length < 1) return c.json({ ok: false, error: "title is required" }, 400);
+  const id = uid("task");
+  await c.env.DB.prepare("INSERT INTO tasks (id, title, source) VALUES (?, ?, ?)").bind(id, body.title.trim().slice(0, 200), body.source || null).run();
+  return c.json({ ok: true, id, title: body.title.trim().slice(0, 200), source: body.source || null }, 201);
+});
+
+app.patch("/api/tasks/:id", async (c) => {
+  await ensureSeeded(c.env.DB);
+  const id = c.req.param("id");
+  const body = await c.req.json().catch(() => ({})) as { done?: boolean };
+  const row = await c.env.DB.prepare("SELECT done FROM tasks WHERE id = ?").bind(id).first<{ done: number }>();
+  if (!row) return c.json({ ok: false, error: "task not found" }, 404);
+  const done = typeof body.done === "boolean" ? (body.done ? 1 : 0) : (row.done ? 0 : 1);
+  await c.env.DB.prepare("UPDATE tasks SET done = ?, done_at = ? WHERE id = ?").bind(done, done ? new Date().toISOString() : null, id).run();
+  return c.json({ ok: true, id, done: done === 1 });
+});
+
+app.delete("/api/tasks/:id", async (c) => {
+  await ensureSeeded(c.env.DB);
+  const id = c.req.param("id");
+  const res = await c.env.DB.prepare("DELETE FROM tasks WHERE id = ?").bind(id).run();
+  if ((res.meta.changes ?? 0) === 0) return c.json({ ok: false, error: "task not found" }, 404);
+  return c.json({ ok: true, id });
+});
+
+// ---- deck (PPTX 초안, easy-slides식 신규 생성) ----
+app.post("/api/deck", async (c) => {
+  await ensureSeeded(c.env.DB);
+  const body = await c.req.json().catch(() => ({})) as { title?: string; summary?: string[]; actions?: string[]; bullets?: string[]; source?: string };
+  const title = (body.title || "People OS 요약").slice(0, 120);
+  const sections: DeckSection[] = [];
+  if (Array.isArray(body.summary) && body.summary.length) sections.push({ heading: "요약", items: body.summary.slice(0, 6).map(String) });
+  if (Array.isArray(body.actions) && body.actions.length) sections.push({ heading: "액션", items: body.actions.slice(0, 8).map(String) });
+  if (!sections.length && Array.isArray(body.bullets) && body.bullets.length) sections.push({ heading: "내용", items: body.bullets.slice(0, 10).map(String) });
+  if (!sections.length) return c.json({ ok: false, error: "summary, actions or bullets is required" }, 400);
+  const { bytes, slides } = await buildDeck(title, sections);
+  const id = uid("deck");
+  const r2Key = `decks/${id}.pptx`;
+  await c.env.FILES.put(r2Key, bytes, { httpMetadata: { contentType: PPTX_MIME } });
+  await c.env.DB.prepare("INSERT INTO decks (id, title, r2_key, bytes, slides) VALUES (?, ?, ?, ?, ?)").bind(id, title, r2Key, bytes.length, slides).run();
+  return c.json({ ok: true, id, title, url: `/api/deck/${id}`, bytes: bytes.length, slides, source: body.source || null }, 201);
+});
+
+app.get("/api/deck/:id", async (c) => {
+  await ensureSeeded(c.env.DB);
+  const id = c.req.param("id");
+  const row = await c.env.DB.prepare("SELECT id, title, r2_key, bytes FROM decks WHERE id = ?").bind(id).first<{ id: string; title: string; r2_key: string; bytes: number }>();
+  if (!row) return c.json({ ok: false, error: "deck not found" }, 404);
+  const obj = await c.env.FILES.get(row.r2_key);
+  if (!obj) return c.json({ ok: false, error: "deck file not found" }, 404);
+  // Content-Disposition의 filename은 ASCII만 허용된다 (Fetch 명세).
+  // 한글 제목은 RFC 5987 filename*에 UTF-8 인코딩으로 싣고, filename은 ASCII 폴백.
+  const safe = row.title.replace(/[^\w.-]+/g, "_").slice(0, 60) || "deck";
+  const encoded = encodeURIComponent(`${row.title}.pptx`);
+  return new Response(obj.body, {
+    headers: {
+      "Content-Type": PPTX_MIME,
+      "Content-Length": String(row.bytes),
+      "Content-Disposition": `attachment; filename="${safe}.pptx"; filename*=UTF-8''${encoded}`,
+      "Cache-Control": "private, no-store",
+    },
+  });
 });
 
 // ---- library ----
