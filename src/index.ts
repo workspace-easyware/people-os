@@ -15,6 +15,9 @@ type Env = {
   AI: Ai;
   AGENT_SESSION: DurableObjectNamespace;
   ASSETS: Fetcher;
+  // S1 Queues 파이프라인: 전사 완료 이벤트를 보내는 producer 바인딩.
+  // 큐는 배포 전에 만들어야 한다 (wrangler.toml [[queues]] 참조).
+  PIPELINE: Queue<PipelineMessage>;
   // 운영용 경로(/api/debug-ai, /api/seed-vectors) 보호용 시크릿.
   // 코드·wrangler.toml에 넣지 않고 `wrangler secret put ADMIN_SECRET` /
   // Cloudflare 대시보드에서만 설정한다. 미설정 시 운영 경로는 항상 거부된다.
@@ -75,6 +78,25 @@ const VECTOR_INDEX_NAME = "people-os-index-m3";
 const VECTOR_SEED_KEY = "vector_seeded:bge-m3:people-os-index-m3";
 const VECTOR_SEED_ERROR_KEY = "vector_seed_error:bge-m3:people-os-index-m3";
 const EMBED_DIMS = 1024;
+
+// S1 Queues 파이프라인: 전사 완료 이벤트 → 요약 → 색인.
+// 메시지 형식: 소비자가 docId로 D1을 다시 읽으므로 메시지에는 식별자만 싣는다.
+// 큐는 at-least-once 전달이라 소비자는 멱등해야 한다 — 요약은 UPDATE로 덮어쓰고
+// 색인은 chunks DELETE 후 재삽입 + Vectorize upsert라 다시 돌려도 같은 결과가 나온다.
+type PipelineMessage = {
+  type: "transcript-pipeline";
+  version: 1;
+  recordingId: string;
+  docId: string;
+  title: string;
+  enqueuedAt: string;
+};
+const PIPELINE_QUEUE_NAME = "people-os-pipeline";
+// 파이프라인 단계 (recordings.pipeline_stage): queued → transcribing →
+// queued(전사 완료, 요약 대기) → summarizing → indexing → done / failed.
+// failed는 재시도(max_retries) 후에도 안 된 상태 — 전사본은 D1/R2에 그대로 있고
+// POST /api/recordings/:id/pipeline-retry로 다시 큐에 넣는다.
+type PipelineStage = "queued" | "transcribing" | "summarizing" | "indexing" | "done" | "failed";
 
 // 운영용 경로 보호: /api/debug-ai, /api/seed-vectors는 X-Admin-Secret 헤더가
 // ADMIN_SECRET 환경값과 일치할 때만 허용한다. 시크릿이 설정돼 있지 않으면
@@ -181,6 +203,25 @@ async function transcribeAudio(env: Env, bytes: Uint8Array): Promise<{ ok: true;
   }
 }
 
+// S1 파이프라인 단계 기록: failed가 아니면 에러를 비운다.
+async function setPipelineStage(env: Env, recordingId: string, stage: PipelineStage, error?: string | null): Promise<void> {
+  await env.DB.prepare("UPDATE recordings SET pipeline_stage = ?, pipeline_error = ? WHERE id = ?")
+    .bind(stage, stage === "failed" ? (error ?? "pipeline failed") : null, recordingId).run();
+}
+
+// S1: 전사 완료 이벤트를 큐에 보낸다. 소비자가 요약 → 색인을 처리한다.
+async function enqueuePipeline(env: Env, recordingId: string, docId: string, title: string): Promise<void> {
+  const msg: PipelineMessage = {
+    type: "transcript-pipeline",
+    version: 1,
+    recordingId,
+    docId,
+    title,
+    enqueuedAt: new Date().toISOString(),
+  };
+  await env.PIPELINE.send(msg);
+}
+
 // R2 오디오를 구간 단위로 전사해 recordings 행을 ready/pending으로 만든다.
 // 진행 위치(done_chunks)와 완료분 텍스트(partial)를 행에 남겨, 여러 호출에
 // 나눠 이어갈 수 있다. 배경: waitUntil 백그라운드 작업이 약 2분 뒤에 조용히
@@ -200,10 +241,14 @@ async function advanceRecording(env: Env, recordingId: string, opts: { maxSegmen
   const lockUntil = now + 180_000;
   const lockRes = await env.DB.prepare("UPDATE recordings SET lock_until = ? WHERE id = ? AND (lock_until IS NULL OR lock_until < ?)").bind(lockUntil, recordingId, now).run();
   if ((((lockRes as unknown as { meta?: { changes?: number } }).meta?.changes ?? 0) !== 1)) return { status: "processing", locked: true };
+  // S1: 구간 전사가 실제로 시작되면 단계를 transcribing으로 남긴다.
+  await setPipelineStage(env, recordingId, "transcribing").catch(() => {});
   try {
     const obj = await env.FILES.get(row.object_key);
     if (!obj) {
       await env.DB.prepare("UPDATE recordings SET transcript_status = 'pending', progress = '실패: R2에서 오디오를 찾을 수 없습니다' WHERE id = ?").bind(recordingId).run();
+      // 전사가 시작도 못 했으니 파이프라인 단계도 대기로 되돌린다.
+      await setPipelineStage(env, recordingId, "queued").catch(() => {});
       return { status: "pending" };
     }
     const bytes = new Uint8Array(await obj.arrayBuffer());
@@ -232,6 +277,8 @@ async function advanceRecording(env: Env, recordingId: string, opts: { maxSegmen
       const realText = partial.replace(/\[구간 \d+ 전사 실패[^\]]*\]/g, "").trim();
       if (!realText) {
         await env.DB.prepare("UPDATE recordings SET transcript_status = 'pending', progress = '실패: Whisper가 텍스트를 못 뽑았습니다' WHERE id = ?").bind(recordingId).run();
+        // 전사본이 비어 전사가 실패했으니 파이프라인 단계도 대기로 되돌린다.
+        await setPipelineStage(env, recordingId, "queued").catch(() => {});
         return { status: "pending" };
       }
       const docId = uid("doc");
@@ -239,6 +286,15 @@ async function advanceRecording(env: Env, recordingId: string, opts: { maxSegmen
         .bind(docId, row.title.replace(/\.[^.]+$/, ""), partial, row.object_key).run();
       await env.DB.prepare("UPDATE recordings SET transcript = ?, transcript_status = 'ready', doc_id = ?, progress = NULL WHERE id = ?")
         .bind(partial, docId, recordingId).run();
+      // S1: 전사 완료 → 요약·색인은 큐 소비자에게 넘긴다. enqueue에 실패해도
+      // 전사본 자체는 ready로 남기고 파이프라인만 failed로 표시한다
+      // (재시도는 POST /api/recordings/:id/pipeline-retry).
+      try {
+        await enqueuePipeline(env, recordingId, docId, row.title);
+        await setPipelineStage(env, recordingId, "queued");
+      } catch (e) {
+        await setPipelineStage(env, recordingId, "failed", `enqueue failed: ${e instanceof Error ? e.message : String(e)}`).catch(() => {});
+      }
       return { status: "ready" };
     }
     return { status: "processing" };
@@ -325,7 +381,7 @@ async function ensureSchema(db: D1Database) {
     CREATE TABLE IF NOT EXISTS tickets (id TEXT PRIMARY KEY, title TEXT NOT NULL, body TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'draft', created_at TEXT NOT NULL DEFAULT (datetime('now')));
     CREATE TABLE IF NOT EXISTS tasks (id TEXT PRIMARY KEY, title TEXT NOT NULL, source TEXT, done INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL DEFAULT (datetime('now')), done_at TEXT);
     CREATE TABLE IF NOT EXISTS decks (id TEXT PRIMARY KEY, title TEXT NOT NULL, r2_key TEXT NOT NULL, bytes INTEGER NOT NULL DEFAULT 0, slides INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL DEFAULT (datetime('now')));
-    CREATE TABLE IF NOT EXISTS recordings (id TEXT PRIMARY KEY, title TEXT NOT NULL, provider TEXT NOT NULL DEFAULT 'workers-ai', model TEXT NOT NULL DEFAULT '@cf/openai/whisper', object_key TEXT NOT NULL, mime_type TEXT NOT NULL DEFAULT 'application/octet-stream', size INTEGER NOT NULL DEFAULT 0, transcript TEXT, transcript_status TEXT NOT NULL DEFAULT 'pending', doc_id TEXT, progress TEXT, partial TEXT DEFAULT '', done_chunks INTEGER DEFAULT 0, lock_until INTEGER, created_at TEXT NOT NULL DEFAULT (datetime('now')));
+    CREATE TABLE IF NOT EXISTS recordings (id TEXT PRIMARY KEY, title TEXT NOT NULL, provider TEXT NOT NULL DEFAULT 'workers-ai', model TEXT NOT NULL DEFAULT '@cf/openai/whisper', object_key TEXT NOT NULL, mime_type TEXT NOT NULL DEFAULT 'application/octet-stream', size INTEGER NOT NULL DEFAULT 0, transcript TEXT, transcript_status TEXT NOT NULL DEFAULT 'pending', doc_id TEXT, progress TEXT, partial TEXT DEFAULT '', done_chunks INTEGER DEFAULT 0, lock_until INTEGER, pipeline_stage TEXT NOT NULL DEFAULT 'queued', pipeline_error TEXT, created_at TEXT NOT NULL DEFAULT (datetime('now')));
     CREATE TABLE IF NOT EXISTS chunks (id TEXT PRIMARY KEY, doc_id TEXT NOT NULL, article TEXT NOT NULL, text TEXT NOT NULL, ord INTEGER NOT NULL);
     CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL, updated_at TEXT NOT NULL DEFAULT (datetime('now')));
     CREATE TABLE IF NOT EXISTS ask_events (id TEXT PRIMARY KEY, session_id TEXT, question TEXT NOT NULL, answer TEXT NOT NULL DEFAULT '', source_ids TEXT NOT NULL DEFAULT '[]', grounded INTEGER NOT NULL DEFAULT 0, engine TEXT NOT NULL DEFAULT '', search_engine TEXT NOT NULL DEFAULT '', timings_json TEXT NOT NULL DEFAULT '{}', feedback TEXT, feedback_comment TEXT, feedback_at TEXT, created_at TEXT NOT NULL DEFAULT (datetime('now')));
@@ -413,17 +469,19 @@ app.post("/api/documents", async (c) => {
   return c.json({ ok: true, id, title, r2Stored, fallback: !r2Stored ? "d1-only" : null }, 201);
 });
 
-app.post("/api/documents/:id/summarize", async (c) => {
-  await ensureSeeded(c.env.DB);
-  const id = c.req.param("id");
-  const doc = await c.env.DB.prepare("SELECT * FROM documents WHERE id = ?").bind(id).first<{ id: string; title: string; content: string }>();
-  if (!doc) return c.json({ ok: false, error: "document not found" }, 404);
+// 문서 요약 공용 함수 — POST /api/documents/:id/summarize와 S1 큐 소비자가 함께 쓴다.
+// Workers AI 시도 → 실패 시 추출식 폴백(localSummarize). D1에 저장까지 한다.
+// 멱등: 다시 돌려도 같은 행을 덮어쓴다.
+async function summarizeDocument(env: Env, docId: string): Promise<{ summary: string[]; actions: string[]; engine: string }> {
+  const doc = await env.DB.prepare("SELECT id, title, content FROM documents WHERE id = ?").bind(docId)
+    .first<{ id: string; title: string; content: string }>();
+  if (!doc) throw new Error("document not found");
   let engine = "local-extractive";
   let summary: string[] = [];
   let actions: string[] = [];
   // 1) Workers AI 시도 (클라우드에서 동작, 로컬에서는 실패할 수 있음)
   try {
-    const out = await c.env.AI.run(LLM_MODEL, {
+    const out = await env.AI.run(LLM_MODEL, {
       messages: [
         { role: "system", content: "다음 회의 전사본을 한국어로 3줄 요약하고 액션 아이템을 뽑아라. JSON으로만 답하라: {\"summary\":[\"...\"],\"actions\":[\"...\"]}" },
         { role: "user", content: doc.content.slice(0, 4000) },
@@ -442,9 +500,18 @@ app.post("/api/documents/:id/summarize", async (c) => {
     actions = fb.actions;
     engine = "local-extractive";
   }
-  await c.env.DB.prepare("UPDATE documents SET summary = ?, actions = ? WHERE id = ?")
-    .bind(JSON.stringify(summary), JSON.stringify(actions), id).run();
-  return c.json({ ok: true, id, title: doc.title, summary, actions, engine });
+  await env.DB.prepare("UPDATE documents SET summary = ?, actions = ? WHERE id = ?")
+    .bind(JSON.stringify(summary), JSON.stringify(actions), docId).run();
+  return { summary, actions, engine };
+}
+
+app.post("/api/documents/:id/summarize", async (c) => {
+  await ensureSeeded(c.env.DB);
+  const id = c.req.param("id");
+  const doc = await c.env.DB.prepare("SELECT id, title FROM documents WHERE id = ?").bind(id).first<{ id: string; title: string }>();
+  if (!doc) return c.json({ ok: false, error: "document not found" }, 404);
+  const r = await summarizeDocument(c.env, id);
+  return c.json({ ok: true, id, title: doc.title, summary: r.summary, actions: r.actions, engine: r.engine });
 });
 
 // ---- transcribe (음성 전사 입력, Plaud transcribe/route.ts 형태의 Cloudflare판) ----
@@ -489,13 +556,13 @@ app.post("/api/transcribe", async (c) => {
 // 최근 음성 녹음 목록 (전사본 내용은 안 돌려준다 — 목록은 메타데이터만)
 app.get("/api/recordings", async (c) => {
   await ensureSeeded(c.env.DB);
-  const rows = await c.env.DB.prepare("SELECT id, title, provider, model, mime_type, size, transcript_status, progress, doc_id, created_at FROM recordings ORDER BY created_at DESC LIMIT 20").all();
+  const rows = await c.env.DB.prepare("SELECT id, title, provider, model, mime_type, size, transcript_status, progress, pipeline_stage, pipeline_error, doc_id, created_at FROM recordings ORDER BY created_at DESC LIMIT 20").all();
   return c.json({ ok: true, recordings: rows.results || [] });
 });
 
 app.get("/api/recordings/:id", async (c) => {
   await ensureSeeded(c.env.DB);
-  const row = await c.env.DB.prepare("SELECT id, title, provider, model, object_key, mime_type, size, transcript, transcript_status, progress, doc_id, created_at FROM recordings WHERE id = ?").bind(c.req.param("id"))
+  const row = await c.env.DB.prepare("SELECT id, title, provider, model, object_key, mime_type, size, transcript, transcript_status, progress, pipeline_stage, pipeline_error, doc_id, created_at FROM recordings WHERE id = ?").bind(c.req.param("id"))
     .first<{ id: string; title: string; provider: string; model: string; object_key: string; mime_type: string; size: number; transcript: string | null; transcript_status: string; progress: string | null; doc_id: string | null; created_at: string }>();
   if (!row) return c.json({ ok: false, error: "recording not found" }, 404);
   return c.json({ ok: true, recording: row });
@@ -510,7 +577,7 @@ app.post("/api/recordings/:id/advance", async (c) => {
   // advanceRecording이 던져도 행을 돌려준다: 500 HTML이 가면 프론트
   // r.json()이 터져 폴링 루프가 죽는다.
   await advanceRecording(c.env, c.req.param("id"), { maxSegments: 1, maxMs: 120_000 }).catch(() => {});
-  const row = await c.env.DB.prepare("SELECT id, title, provider, model, object_key, mime_type, size, transcript, transcript_status, progress, doc_id, created_at FROM recordings WHERE id = ?").bind(c.req.param("id"))
+  const row = await c.env.DB.prepare("SELECT id, title, provider, model, object_key, mime_type, size, transcript, transcript_status, progress, pipeline_stage, pipeline_error, doc_id, created_at FROM recordings WHERE id = ?").bind(c.req.param("id"))
     .first<{ id: string; title: string; provider: string; model: string; object_key: string; mime_type: string; size: number; transcript: string | null; transcript_status: string; progress: string | null; doc_id: string | null; created_at: string }>();
   if (!row) return c.json({ ok: false, error: "recording not found" }, 404);
   return c.json({ ok: true, recording: row });
@@ -539,6 +606,31 @@ app.post("/api/recordings/:id/retry", async (c) => {
   await c.env.DB.prepare("UPDATE recordings SET transcript_status = 'processing', progress = NULL WHERE id = ?").bind(row.id).run();
   c.executionCtx.waitUntil(advanceRecording(c.env, row.id, { maxSegments: 2, maxMs: 60_000 }));
   return c.json({ ok: true, recordingId: row.id, transcriptStatus: "processing" });
+});
+
+// S1: 실패한 파이프라인을 다시 큐에 넣는다. 전사가 끝나지 않았거나
+// 이미 완료된 파이프라인은 건드리지 않는다. DLQ로 간 메시지도 여기서 복구한다.
+app.post("/api/recordings/:id/pipeline-retry", async (c) => {
+  await ensureSeeded(c.env.DB);
+  const row = await c.env.DB.prepare("SELECT id, title, doc_id, transcript_status, pipeline_stage FROM recordings WHERE id = ?").bind(c.req.param("id"))
+    .first<{ id: string; title: string; doc_id: string | null; transcript_status: string; pipeline_stage: string | null }>();
+  if (!row) return c.json({ ok: false, error: "recording not found" }, 404);
+  if (row.transcript_status !== "ready" || !row.doc_id) {
+    return c.json({ ok: false, error: "transcription is not ready yet" }, 409);
+  }
+  if (row.pipeline_stage === "done") {
+    return c.json({ ok: true, recordingId: row.id, pipelineStage: "done", note: "already done" });
+  }
+  if (row.pipeline_stage !== "failed") {
+    return c.json({ ok: true, recordingId: row.id, pipelineStage: row.pipeline_stage, note: "pipeline already in progress" });
+  }
+  try {
+    await enqueuePipeline(c.env, row.id, row.doc_id, row.title);
+    await setPipelineStage(c.env, row.id, "queued");
+    return c.json({ ok: true, recordingId: row.id, pipelineStage: "queued" });
+  } catch (e) {
+    return c.json({ ok: false, error: `enqueue failed: ${e instanceof Error ? e.message : String(e)}` }, 502);
+  }
 });
 
 type Source = { id: string; title: string; section: string; snippet: string; score: number; kind?: "policy" | "tacit"; author?: string; publishedAt?: string };
@@ -1337,9 +1429,54 @@ app.all("*", async (c) => {
   return c.html("<h1>People OS</h1><p>Frontend asset not found. Run wrangler dev with public/ present.</p>", 404);
 });
 
+// S1 큐 소비자: 전사 완료 메시지 1건 → 요약 → 색인.
+// - 이미 done이면 중복 전달이므로 건너뛴다.
+// - 문서가 없으면 재시도해도 소용없으니 failed로 남기고 ack한다 (throw 안 함).
+// - 요약·색인 실패는 throw해 큐가 재시도하게 한다. max_retries를 넘기면
+//   DLQ로 가고 행은 failed + 마지막 에러로 남는다 (전사본은 D1/R2에 그대로).
+// - 요약·색인은 멱등이라 중복 전달·재시도해도 같은 결과가 나온다.
+async function processPipelineMessage(env: Env, msg: PipelineMessage): Promise<void> {
+  if (!msg || msg.type !== "transcript-pipeline" || !msg.recordingId || !msg.docId) return;
+  const rec = await env.DB.prepare("SELECT id, title, doc_id, transcript_status, pipeline_stage FROM recordings WHERE id = ?").bind(msg.recordingId)
+    .first<{ id: string; title: string; doc_id: string | null; transcript_status: string; pipeline_stage: string | null }>();
+  if (!rec || !rec.doc_id) {
+    if (rec) await setPipelineStage(env, rec.id, "failed", "pipeline: transcript document not found").catch(() => {});
+    return;
+  }
+  if (rec.pipeline_stage === "done") return;
+  try {
+    await setPipelineStage(env, rec.id, "summarizing");
+    await summarizeDocument(env, rec.doc_id);
+    await setPipelineStage(env, rec.id, "indexing");
+    const doc = await env.DB.prepare("SELECT title, content FROM documents WHERE id = ?").bind(rec.doc_id)
+      .first<{ title: string; content: string }>();
+    if (!doc) throw new Error("document not found");
+    const indexed = await indexDocument(env, { id: rec.doc_id, title: doc.title, markdown: doc.content });
+    if (indexed.indexError) throw new Error(`index failed: ${indexed.indexError}`);
+    await setPipelineStage(env, rec.id, "done");
+  } catch (e) {
+    await setPipelineStage(env, rec.id, "failed", e instanceof Error ? e.message : String(e)).catch(() => {});
+    throw e;
+  }
+}
+
 export default {
   fetch: app.fetch,
   async scheduled(event: ScheduledEvent, env: Env, ctx: ExecutionContext) {
     ctx.waitUntil(generateDigest(env, new Date(event.scheduledTime)));
+  },
+  // S1 큐 소비자: 메시지마다 ack/retry를 직접 정한다. 한 건이 실패해도
+  // 같은 배치의 다른 메시지는 정상 처리한다. throw 대신 msg.retry()를 써서
+  // 재시도 횟수를 넘기면 플랫폼이 DLQ로 옮기게 한다.
+  async queue(batch: MessageBatch<PipelineMessage>, env: Env) {
+    for (const msg of batch.messages) {
+      try {
+        await processPipelineMessage(env, msg.body);
+        msg.ack();
+      } catch (e) {
+        console.log(`[pipeline] message ${msg.id} failed (attempt ${msg.attempts}):`, e instanceof Error ? e.message : String(e));
+        msg.retry();
+      }
+    }
   },
 };
