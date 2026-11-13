@@ -33,6 +33,51 @@ export function policies(): Policy[] {
   return seed.policies as Policy[];
 }
 
+/**
+ * Markdown 문서(암묵지 답)를 근거 chunk로 나눈다 (C5-b).
+ * - 1차: `제\d+조` 마커 기준 분할 (정책 청킹과 동일).
+ * - 2차: 긴 조각은 문단 단위로 다시 나눈다 (800자 상한). 문단 하나가
+ *   800자를 넘으면 문장 단위로 나눈다.
+ * - article 라벨: 마커 뒤 첫 문장, 없으면 첫 줄(제목 부호 제거, 30자 상한),
+ *   그것도 없으면 문서 제목. 암묵지 답은 보통 조문 마커가 없어 첫 줄이 라벨이 된다.
+ */
+export function splitMarkdownIntoChunks(doc: { id: string; title: string; body: string }): Chunk[] {
+  const parts = doc.body.split(/(?=제\d+조)/).map((s) => s.trim()).filter((s) => s.length > 0);
+  const chunks: Chunk[] = [];
+  let ord = 0;
+  const articleOf = (text: string): string => {
+    const m = text.match(/^제\d+조\s*([^.。\n]{0,30})/);
+    if (m) return m[0].trim();
+    // 첫 줄이 본문 상단 메타("작성자: …", "원 질문: …")면 건너뛰고
+    // 첫 내용 줄을 라벨로 쓴다 (출처 표시가 메타 줄이 되지 않게).
+    const first = text.split("\n").map((l) => l.trim()).filter((l) => l.length > 0 && !/^(작성자:|원 질문:)/.test(l))[0] || "";
+    const clean = first.replace(/^#+\s*/, "");
+    return clean.slice(0, 30) || doc.title;
+  };
+  for (const part of parts) {
+    const paras = part.split(/\n\s*\n/).map((s) => s.trim()).filter((s) => s.length > 0);
+    let buf = "";
+    const flush = () => {
+      if (!buf) return;
+      chunks.push({ id: `${doc.id}-chunk-${ord}`, doc_id: doc.id, article: articleOf(buf), text: buf, ord });
+      ord++;
+      buf = "";
+    };
+    for (const p of paras) {
+      // 문단 하나가 상한을 넘으면 문장 단위로 쪼개서 채운다.
+      const pieces = p.length > 800 ? p.split(/(?<=[.?!])\s+|\n+/).map((s) => s.trim()).filter((s) => s.length > 0) : [p];
+      for (const piece of pieces) {
+        if (buf && buf.length + piece.length + 2 > 800) flush();
+        buf = buf ? buf + "\n\n" + piece : piece;
+      }
+    }
+    flush();
+  }
+  return chunks.length
+    ? chunks
+    : [{ id: `${doc.id}-chunk-0`, doc_id: doc.id, article: doc.title, text: doc.body.slice(0, 2000), ord: 0 }];
+}
+
 export function sampleTranscript(): string {
   return seed.sample_transcript;
 }

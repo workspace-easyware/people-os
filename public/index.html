@@ -434,8 +434,48 @@ async function downloadDeck() {
   if (j.ok && box) box.innerHTML = `<p><a class="btn" href="${j.url}" download>PPTX 초안 다운로드 (${j.slides}장 · ${(j.bytes / 1024).toFixed(0)}KB)</a></p><p class="small">R2에 저장됨 · ${esc(j.url)}</p>`;
   else if (box) box.innerHTML = `<p class="small">오류: ${esc(j.error || 'deck 생성 실패')}</p>`;
 }
+function fmtMs(ms) {
+  try { return new Date(Number(ms)).toISOString().slice(0, 10); } catch { return ''; }
+}
+// 지식 공백 큐 (C5-b): 근거 없는 질문·👎 피드백 질문 카드. open이면 답 작성 폼,
+// answered/resolved면 게시된 암묵지 문서 제목과 상태를 보여준다.
+function gapsSection(gaps) {
+  if (!gaps.length) return '<h3>답변 대기 질문</h3><p class="empty">답변 대기 중인 질문이 없습니다. 근거 없는 질문이 들어오면 여기에 쌓입니다.</p>';
+  const openN = gaps.filter(g => g.status === 'open').length;
+  const cards = gaps.map(gap => {
+    const srcBadge = gap.source === 'downvote' ? '<span class="badge">👎 피드백</span>' : '<span class="badge warn">근거 없음</span>';
+    const meta = `<div class="meta">${srcBadge} ${fmtMs(gap.asked_at)} · ${gap.count}회 질문됨</div>`;
+    if (gap.status === 'open') {
+      return `<div class="libcard"><h3>${esc(gap.question)}</h3><p class="small">담당자가 답을 달면 같은 질문에 암묵지 출처로 답변합니다.</p>${meta}<textarea id="gap-answer-${gap.id}" placeholder="이유와 예외 조건을 포함해 주세요" style="min-height:90px;margin-top:8px"></textarea><div class="btnrow"><input type="text" id="gap-author-${gap.id}" value="인사팀" style="width:140px" /><button class="primary" onclick="publishGap('${gap.id}')">게시하기</button></div><div id="gap-result-${gap.id}"></div></div>`;
+    }
+    const badge = gap.status === 'resolved' ? '<span class="badge ok">해결됨 ✓</span>' : '<span class="badge">답변 게시됨</span>';
+    const note = gap.status === 'resolved' ? '같은 질문에 암묵지 출처로 답변합니다.' : '검증 중 — 근거가 잡히면 해결됨으로 바뀝니다.';
+    return `<div class="libcard"><h3>${esc(gap.question)}</h3>${meta}<p>${badge} ${esc(gap.doc_title || '')}</p><p class="small">${note}</p></div>`;
+  }).join('');
+  return `<h3>답변 대기 질문 ${openN}건</h3><div class="libgrid">${cards}</div>`;
+}
+async function publishGap(id) {
+  const ans = $('gap-answer-' + id).value.trim();
+  const author = $('gap-author-' + id).value.trim() || '인사팀';
+  const box = $('gap-result-' + id);
+  if (ans.length < 3) { box.innerHTML = '<p class="err">답변을 입력해 주세요.</p>'; return; }
+  box.innerHTML = '<p class="loading">게시하고 있습니다…</p>';
+  const j = await api('/api/gaps/' + id + '/publish', { method: 'POST', body: JSON.stringify({ answer: ans, author }) });
+  if (!j.ok) { box.innerHTML = `<p class="err">게시 실패: ${esc(j.error || '')}</p>`; return; }
+  const idxErr = j.indexed && j.indexed.indexError ? ` <span class="err">색인 실패: ${esc(j.indexed.indexError)}</span>` : '';
+  box.innerHTML = j.status === 'resolved'
+    ? '<p class="small">게시됨 · 검증 완료 — 같은 질문에 암묵지 출처로 답변됩니다.</p>'
+    : `<p class="small">게시됨 · 검증: 근거가 아직 잡히지 않아 대기 상태로 돌아갔습니다.${idxErr}</p>`;
+  refreshLib(); loadHome();
+}
 async function refreshLib() {
   const j = await api('/api/library');
+  // 답변 대기 질문 섹션 (C5-b) — 기존 문서·규정·리플렉션 렌더링은 그대로 두고 앞에 붙인다.
+  let gapsHtml = '';
+  try {
+    const g = await api('/api/gaps');
+    if (g.ok) gapsHtml = gapsSection(g.gaps || []);
+  } catch { gapsHtml = ''; }
   const docs = j.documents.map(d => {
     let sum = '';
     try { const s = JSON.parse(d.summary || '[]'); sum = (s[0] || '').slice(0, 120); } catch { sum = ''; }
@@ -450,6 +490,7 @@ async function refreshLib() {
     return `<div class="libcard"><h3>코칭 리플렉션</h3><p>${esc(pats[0] || '')}</p><div class="meta">${fmtDate(r.created_at)}</div></div>`;
   }).join('');
   $('libResult').innerHTML =
+    gapsHtml +
     `<h3>문서 ${j.documents.length}건</h3><div class="libgrid">${docs || '<p class="empty">문서가 없습니다.</p>'}</div>` +
     `<h3>규정 ${j.policies.length}건</h3><div class="libgrid">${pols}</div>` +
     `<h3>리플렉션 ${j.reflections.length}건</h3><div class="libgrid">${refls || '<p class="empty">리플렉션이 없습니다.</p>'}</div>`;
@@ -536,7 +577,13 @@ function renderAsk(j) {
   sessionId = j.sessionId;
   lastAnswer = j.answer; lastQuestion = j.question;
   const fb = j.eventId ? `<div class="btnrow"><button class="secondary" onclick="sendFeedback('${j.eventId}','up',this)">👍 도움이 됐어요</button><button class="secondary" onclick="sendFeedback('${j.eventId}','down',this)">👎 아쉬워요</button><button class="secondary" onclick="copyAnswer()">답변 복사</button><button class="secondary" onclick="regenAnswer()">다시 생성</button></div><div id="fbMsg" class="small"></div>` : '';
-  $('askResult').innerHTML = `<div class="card"><b>답변</b> <span class="badge">엔진: ${j.engine} · 검색: ${j.searchEngine} · 세션: ${j.sessionVia}${j.cached ? ' · 캐시됨' : ''}</span><p>${esc(j.answer)}</p><b>근거</b><ul>${j.sources.map(s => `<li>${esc(s.title)} (${esc(s.section)}) — ${esc(s.snippet)}${typeof s.score === 'number' && s.score <= 1 ? ` · <span class="sim">유사도 ${s.score.toFixed(2)}</span>` : ''}</li>`).join('')}</ul>${fb}${timingsPanel(j.timings)}</div>`;
+  // 근거 없음이면 공백 큐 기록 안내를, 암묵지 근거면 출처 배지를 단다 (C5-b).
+  const gapNote = j.grounded === false ? '<p class="small">이 질문은 답변 대기 목록에 기록됐습니다. 라이브러리 탭에서 담당자가 답을 달 수 있습니다.</p>' : '';
+  const srcList = j.sources.map(s => {
+    const tacit = s.kind === 'tacit' ? ` <span class="badge">사내 암묵지 · ${esc(s.author || '인사팀')} · ${esc(s.publishedAt || '')}</span>` : '';
+    return `<li>${esc(s.title)} (${esc(s.section)})${tacit} — ${esc(s.snippet)}${typeof s.score === 'number' && s.score <= 1 ? ` · <span class="sim">유사도 ${s.score.toFixed(2)}</span>` : ''}</li>`;
+  }).join('');
+  $('askResult').innerHTML = `<div class="card"><b>답변</b> <span class="badge">엔진: ${j.engine} · 검색: ${j.searchEngine} · 세션: ${j.sessionVia}${j.cached ? ' · 캐시됨' : ''}</span><p>${esc(j.answer)}</p>${gapNote}<b>근거</b><ul>${srcList}</ul>${fb}${timingsPanel(j.timings)}</div>`;
 }
 async function sendFeedback(eventId, rating, btn) {
   const row = btn.closest('.btnrow');

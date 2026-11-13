@@ -2,7 +2,7 @@ import { Hono } from "hono";
 import PptxGenJS from "pptxgenjs";
 import { AgentSession } from "./agent-session";
 import { splitOggOpus } from "./ogg";
-import { coachingTranscript, localReflect, localSearchChunks, localSummarize, policies, questionTokens, sampleTranscript, splitPolicyIntoChunks, uid } from "./lib";
+import { coachingTranscript, localReflect, localSearchChunks, localSummarize, policies, questionTokens, sampleTranscript, splitMarkdownIntoChunks, splitPolicyIntoChunks, uid } from "./lib";
 import { generateDigest, getLatestDigest } from "./digest";
 
 export { AgentSession };
@@ -111,20 +111,27 @@ async function verifyTurnstile(env: Env, token: string | undefined, ip: string |
   }
 }
 
-// KV 레이트 리밋 (C7): 클라이언트(IP 우선, 없으면 세션) 기준 분당
-// ASK_RATE_LIMIT_PER_MINUTE회. KV 실패 시 fail-open (차단하지 않음) —
-// 로컬 Miniflare KV가 없어도 질문이 막히지 않게 한다.
+// KV 레이트 리밋 (C7): 세션 기준 60초 슬라이딩 윈도우에
+// ASK_RATE_LIMIT_PER_MINUTE회. 고정 분(캘린더 분) 윈도우는 경계를 넘기면
+// 카운터가 리셋돼 21번째가 안 걸릴 수 있어 슬라이딩으로 바꿨다 (C5-b 검증).
+// KV 실패 시 fail-open (차단하지 않음) — 로컬 Miniflare KV가 없어도
+// 질문이 막히지 않게 한다.
 async function checkAskRateLimit(env: Env, clientKey: string): Promise<{ allowed: boolean; remaining: number; resetInSec: number }> {
-  const window = Math.floor(Date.now() / 60_000);
-  const key = `rl:ask:${clientKey}:${window}`;
-  const resetInSec = 60 - (Math.floor(Date.now() / 1000) % 60);
+  const key = `rl:ask:${clientKey}`;
+  const now = Date.now();
   try {
-    const cur = parseInt((await env.CACHE.get(key)) || "0", 10) || 0;
-    if (cur >= ASK_RATE_LIMIT_PER_MINUTE) return { allowed: false, remaining: 0, resetInSec };
-    await env.CACHE.put(key, String(cur + 1), { expirationTtl: 120 });
-    return { allowed: true, remaining: ASK_RATE_LIMIT_PER_MINUTE - cur - 1, resetInSec };
+    const raw = await env.CACHE.get(key);
+    const stamps: number[] = raw ? (JSON.parse(raw) as number[]).filter((t) => now - t < 60_000) : [];
+    if (stamps.length >= ASK_RATE_LIMIT_PER_MINUTE) {
+      const oldest = Math.min(...stamps);
+      const resetInSec = Math.max(1, Math.ceil((60_000 - (now - oldest)) / 1000));
+      return { allowed: false, remaining: 0, resetInSec };
+    }
+    stamps.push(now);
+    await env.CACHE.put(key, JSON.stringify(stamps), { expirationTtl: 120 });
+    return { allowed: true, remaining: ASK_RATE_LIMIT_PER_MINUTE - stamps.length, resetInSec: 60 };
   } catch {
-    return { allowed: true, remaining: ASK_RATE_LIMIT_PER_MINUTE, resetInSec };
+    return { allowed: true, remaining: ASK_RATE_LIMIT_PER_MINUTE, resetInSec: 60 };
   }
 }
 
@@ -310,7 +317,7 @@ async function buildDeck(title: string, sections: DeckSection[]): Promise<{ byte
 
 async function ensureSchema(db: D1Database) {
   await db.exec(`
-    CREATE TABLE IF NOT EXISTS documents (id TEXT PRIMARY KEY, title TEXT NOT NULL, kind TEXT NOT NULL DEFAULT 'transcript', content TEXT NOT NULL, summary TEXT, actions TEXT, r2_key TEXT, created_at TEXT NOT NULL DEFAULT (datetime('now')));
+    CREATE TABLE IF NOT EXISTS documents (id TEXT PRIMARY KEY, title TEXT NOT NULL, kind TEXT NOT NULL DEFAULT 'transcript', content TEXT NOT NULL, summary TEXT, actions TEXT, r2_key TEXT, author TEXT, created_at TEXT NOT NULL DEFAULT (datetime('now')));
     CREATE TABLE IF NOT EXISTS policies (id TEXT PRIMARY KEY, title TEXT NOT NULL, section TEXT NOT NULL, body TEXT NOT NULL);
     CREATE TABLE IF NOT EXISTS cache (key TEXT PRIMARY KEY, value TEXT NOT NULL, created_at TEXT NOT NULL DEFAULT (datetime('now')));
     CREATE TABLE IF NOT EXISTS sessions (id TEXT PRIMARY KEY, history TEXT NOT NULL DEFAULT '[]', updated_at TEXT NOT NULL DEFAULT (datetime('now')));
@@ -322,6 +329,7 @@ async function ensureSchema(db: D1Database) {
     CREATE TABLE IF NOT EXISTS chunks (id TEXT PRIMARY KEY, doc_id TEXT NOT NULL, article TEXT NOT NULL, text TEXT NOT NULL, ord INTEGER NOT NULL);
     CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL, updated_at TEXT NOT NULL DEFAULT (datetime('now')));
     CREATE TABLE IF NOT EXISTS ask_events (id TEXT PRIMARY KEY, session_id TEXT, question TEXT NOT NULL, answer TEXT NOT NULL DEFAULT '', source_ids TEXT NOT NULL DEFAULT '[]', grounded INTEGER NOT NULL DEFAULT 0, engine TEXT NOT NULL DEFAULT '', search_engine TEXT NOT NULL DEFAULT '', timings_json TEXT NOT NULL DEFAULT '{}', feedback TEXT, feedback_comment TEXT, feedback_at TEXT, created_at TEXT NOT NULL DEFAULT (datetime('now')));
+    CREATE TABLE IF NOT EXISTS knowledge_gaps (id TEXT PRIMARY KEY, question TEXT NOT NULL, asked_at INTEGER NOT NULL, status TEXT NOT NULL DEFAULT 'open', doc_id TEXT, count INTEGER NOT NULL DEFAULT 1, source TEXT NOT NULL DEFAULT 'no-evidence');
   `);
 }
 
@@ -533,7 +541,7 @@ app.post("/api/recordings/:id/retry", async (c) => {
   return c.json({ ok: true, recordingId: row.id, transcriptStatus: "processing" });
 });
 
-type Source = { id: string; title: string; section: string; snippet: string; score: number };
+type Source = { id: string; title: string; section: string; snippet: string; score: number; kind?: "policy" | "tacit"; author?: string; publishedAt?: string };
 
 // Vectorize 매치를 조문 단위 근거로 바꾼다 (C5).
 // - chunk id(새 색인)면 D1 chunks에서 직접 읽는다.
@@ -551,8 +559,22 @@ async function resolveSources(
     const chunk = await env.DB.prepare("SELECT id, doc_id, article, text FROM chunks WHERE id = ?").bind(m.id)
       .first<{ id: string; doc_id: string; article: string; text: string }>();
     if (chunk) {
+      // 제목·종류: 정책이면 policies에서, 암묵지 문서(kind='tacit')면
+      // documents에서 읽는다. 암묵지는 출처 배지용 author·게시일도 채운다.
       const policy = await env.DB.prepare("SELECT title FROM policies WHERE id = ?").bind(chunk.doc_id).first<{ title: string }>();
-      const src: Source = { id: chunk.id, title: policy?.title ?? chunk.doc_id, section: chunk.article, snippet: chunk.text, score: m.score };
+      let title = policy?.title;
+      let kind: "policy" | "tacit" = "policy";
+      let author: string | undefined;
+      let publishedAt: string | undefined;
+      if (!title) {
+        const doc = await env.DB.prepare("SELECT title, kind, author, created_at FROM documents WHERE id = ?").bind(chunk.doc_id)
+          .first<{ title: string; kind: string; author: string | null; created_at: string }>();
+        if (doc) {
+          title = doc.title;
+          if (doc.kind === "tacit") { kind = "tacit"; author = doc.author || "인사팀"; publishedAt = doc.created_at.slice(0, 10); }
+        }
+      }
+      const src: Source = { id: chunk.id, title: title ?? chunk.doc_id, section: chunk.article, snippet: chunk.text, score: m.score, kind, author, publishedAt };
       const prev = byDoc.get(chunk.doc_id);
       if (!prev || prev.score < m.score) byDoc.set(chunk.doc_id, src);
       continue;
@@ -577,9 +599,9 @@ async function resolveSources(
       continue;
     }
     // 알 수 없는 id — 메타데이터가 있으면 그대로 쓴다.
-    const meta = (m.metadata || {}) as { title?: string; section?: string; snippet?: string };
+    const meta = (m.metadata || {}) as { title?: string; section?: string; snippet?: string; kind?: string };
     if (meta.snippet) {
-      const src: Source = { id: m.id, title: meta.title || m.id, section: meta.section || "", snippet: meta.snippet, score: m.score };
+      const src: Source = { id: m.id, title: meta.title || m.id, section: meta.section || "", snippet: meta.snippet, score: m.score, kind: meta.kind === "tacit" ? "tacit" : "policy" };
       const prev = byDoc.get(m.id);
       if (!prev || prev.score < m.score) byDoc.set(m.id, src);
     }
@@ -658,8 +680,14 @@ async function keywordGate(
     let title = m.id;
     if (chunk) {
       chunks = [chunk];
+      // 제목은 정책이면 policies에서, 암묵지 문서면 documents에서 읽는다.
+      // 제목이 doc_id로 남으면 키워드 겹침 점수(title +3)가 안 먹힌다.
       const p = await env.DB.prepare("SELECT title FROM policies WHERE id = ?").bind(chunk.doc_id).first<{ title: string }>();
-      title = p?.title ?? chunk.doc_id;
+      if (p) title = p.title;
+      else {
+        const d = await env.DB.prepare("SELECT title FROM documents WHERE id = ?").bind(chunk.doc_id).first<{ title: string }>();
+        title = d?.title ?? chunk.doc_id;
+      }
     } else {
       const policy = await env.DB.prepare("SELECT id, title FROM policies WHERE id = ?").bind(m.id).first<{ id: string; title: string }>();
       if (!policy) { kept.push(m); continue; } // 알 수 없는 id — fail-open
@@ -674,6 +702,142 @@ async function keywordGate(
     if (best >= KEYWORD_GATE_MIN) kept.push(m);
   }
   return kept;
+}
+
+// ---- 지식 공백 큐 (C5-b) ----
+// 근거 없는 질문·👎 피드백 질문을 D1 knowledge_gaps에 쌓는다.
+const KNOWLEDGE_EPOCH_KEY = "knowledge_epoch";
+
+// 질문 정규화: trim + 연속 공백 정리. 한글이라 소문자 변환은 하지 않는다.
+function normalizeGapQuestion(q: string): string {
+  return q.trim().replace(/\s+/g, " ");
+}
+
+// 공백 큐 기록: 같은 질문의 open 행이 있으면 count+1·asked_at 갱신,
+// 없으면 새로 삽입한다. D1 실패 시 던지므로 호출부에서 try/catch로 감싼다.
+async function recordGap(env: Env, question: string, source: "no-evidence" | "downvote"): Promise<{ id: string; count: number }> {
+  const q = normalizeGapQuestion(question);
+  const now = Date.now();
+  const row = await env.DB.prepare("SELECT id, count FROM knowledge_gaps WHERE question = ? AND status = 'open'").bind(q).first<{ id: string; count: number }>();
+  if (row) {
+    const next = (row.count || 1) + 1;
+    await env.DB.prepare("UPDATE knowledge_gaps SET count = ?, asked_at = ? WHERE id = ?").bind(next, now, row.id).run();
+    return { id: row.id, count: next };
+  }
+  const id = uid("gap");
+  await env.DB.prepare("INSERT INTO knowledge_gaps (id, question, asked_at, status, doc_id, count, source) VALUES (?, ?, ?, 'open', NULL, 1, ?)")
+    .bind(id, q, now, source).run();
+  return { id, count: 1 };
+}
+
+// 지식 epoch (C5-b 캐시 무효화): 암묵지 게시 때 +1한다. ask 캐시 키에
+// epoch를 넣어, 게시 후에는 게시 전 캐시 답이 나오지 않게 한다.
+// meta 테이블 사용법은 Vectorize lazy 시딩 플래그와 같다.
+async function getKnowledgeEpoch(env: Env): Promise<number> {
+  try {
+    const row = await env.DB.prepare("SELECT value FROM meta WHERE key = ?").bind(KNOWLEDGE_EPOCH_KEY).first<{ value: string }>();
+    return row ? parseInt(row.value, 10) || 0 : 0;
+  } catch { return 0; }
+}
+
+async function bumpKnowledgeEpoch(env: Env): Promise<number> {
+  const next = (await getKnowledgeEpoch(env)) + 1;
+  await env.DB.prepare("INSERT OR REPLACE INTO meta (key, value, updated_at) VALUES (?, ?, datetime('now'))").bind(KNOWLEDGE_EPOCH_KEY, String(next)).run();
+  return next;
+}
+
+// 문서 색인 공용 함수 (C5-b): Markdown 문서를 조문/문단 단위 chunk로 나누고
+// D1 chunks에 저장한 뒤 bge-m3으로 임베딩해 Vectorize에 upsert한다.
+// 정책 시딩(ensureVectorSeeded)과 동일 형식의 메타데이터를 쓴다.
+// AI/Vectorize가 안 되면(로컬 dev) D1 chunk는 남기고 indexError를 돌려준다 —
+// 게시 자체는 망가뜨리지 않고, D1 텍스트 폴백 경로는 그 chunk로 답할 수 있다.
+async function indexDocument(env: Env, doc: { id: string; title: string; markdown: string }): Promise<{ chunks: number; upserted: number; indexError?: string }> {
+  const chunks = splitMarkdownIntoChunks({ id: doc.id, title: doc.title, body: doc.markdown });
+  await env.DB.prepare("DELETE FROM chunks WHERE doc_id = ?").bind(doc.id).run();
+  for (const ch of chunks) {
+    await env.DB.prepare("INSERT OR REPLACE INTO chunks (id, doc_id, article, text, ord) VALUES (?, ?, ?, ?, ?)").bind(ch.id, ch.doc_id, ch.article, ch.text, ch.ord).run();
+  }
+  try {
+    const texts = chunks.map((ch) => `${doc.title} ${ch.article} ${ch.text}`);
+    const emb = await env.AI.run(EMBED_MODEL, { text: texts }) as { data: number[][] | number[] };
+    const data = emb.data;
+    // Workers AI는 텍스트 1개면 data를 평탄한 number[]로, 여러 개면
+    // number[][]로 돌려준다 (ask 핸들러도 같은 정규화를 한다). 1개짜리
+    // 문서를 2차원이라고 가정하면 여기서 shape 오류로 upsert가 안 된다.
+    const rows = Array.isArray(data) && data.length > 0 && Array.isArray(data[0]) ? (data as number[][]) : [data as number[]];
+    if (!Array.isArray(data) || rows.length !== texts.length) throw new Error("unexpected embedding response shape");
+    if (rows[0].length !== EMBED_DIMS) throw new Error(`embedding dims ${rows[0].length} != index dims ${EMBED_DIMS}`);
+    const vectors = chunks.map((ch, i) => ({ id: ch.id, values: rows[i], metadata: { title: doc.title, section: ch.article, snippet: ch.text.slice(0, 220), kind: "tacit" } }));
+    await env.VECTOR.upsert(vectors);
+    return { chunks: chunks.length, upserted: vectors.length };
+  } catch (e) {
+    return { chunks: chunks.length, upserted: 0, indexError: e instanceof Error ? e.message : String(e) };
+  }
+}
+
+// 게시 검증 (C5-b): 같은 질문으로 근거 검색을 다시 돌려 암묵지 문서가
+// 근거로 잡히는지 확인한다. ask 파이프라인과 같은 순서(Vectorize →
+// 키워드 게이트 → resolveSources)로 본다.
+// - Vectorize upsert가 바로 안 보일 수 있어, 근거가 아예 없을 때만
+//   최대 3회(1초 간격) 재시도한다. 다른 근거가 이미 잡히면 중단한다.
+// - Vectorize/AI가 안 되면(로컬 dev) D1 텍스트 검색으로 확인한다 —
+//   로컬 ask 경로도 같은 D1 폴백을 쓰므로 검증과 실제 동작이 일치한다.
+async function verifyTacitEvidence(
+  env: Env,
+  question: string,
+  docId: string,
+  docTitle: string
+): Promise<{ resolved: boolean; sources: Array<{ id: string; title: string; section: string; score: number }> }> {
+  const chunkRows = await env.DB.prepare("SELECT id, doc_id, article, text, ord FROM chunks WHERE doc_id = ? ORDER BY ord").bind(docId)
+    .all<{ id: string; doc_id: string; article: string; text: string; ord: number }>();
+  const chunkIds = (chunkRows.results || []).map((r) => r.id);
+  const isTacit = (sources: Array<{ id: string }>) => sources.some((s) => chunkIds.includes(s.id));
+  const summarize = (sources: Source[]) => sources.map((s) => ({ id: s.id, title: s.title, section: s.section, score: s.score }));
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      await ensureVectorSeeded(env);
+      const emb = await env.AI.run(EMBED_MODEL, { text: [question] }) as { data: number[][] | number[] };
+      const raw = emb.data;
+      const values = new Float32Array(Array.isArray(raw[0]) ? (raw[0] as number[]) : (raw as number[]));
+      const vec = await env.VECTOR.query(values, { topK: 3, returnMetadata: "all" });
+      const matches = (vec.matches || []).filter((m) => (m.score || 0) >= SCORE_FLOOR);
+      const gated = await keywordGate(env, question, matches.map((m) => ({ id: String(m.id), score: m.score || 0, metadata: (m.metadata || {}) as Record<string, unknown> })));
+      const sources = await resolveSources(env, question, gated);
+      if (isTacit(sources)) return { resolved: true, sources: summarize(sources) };
+      if (sources.length > 0) return { resolved: false, sources: summarize(sources) };
+      // Vectorize에 암묵지 벡터가 아직 없으면(게시 직후 upsert 지연·실패)
+      // D1 chunk로 확인한다 — ask 경로의 D1 폴백과 같은 신호다.
+      const found = localSearchChunks(question, (chunkRows.results || []).map((ch) => ({ ...ch, title: docTitle })));
+      if (found.length) return { resolved: true, sources: found.map((f) => ({ id: f.id, title: docTitle, section: f.article, score: f.score })) };
+    } catch {
+      // Vectorize/AI 실패 — D1 텍스트 검색으로 확인한다 (로컬 dev 경로).
+      const found = localSearchChunks(question, (chunkRows.results || []).map((ch) => ({ ...ch, title: docTitle })));
+      if (found.length) return { resolved: true, sources: found.map((f) => ({ id: f.id, title: docTitle, section: f.article, score: f.score })) };
+      return { resolved: false, sources: [] };
+    }
+    await new Promise((r) => setTimeout(r, 1000));
+  }
+  return { resolved: false, sources: [] };
+}
+
+// D1 텍스트 폴백 (C5-b): chunks 전부를 키워드 검색해 근거 Source[]로 바꾼다.
+// minScore 이상만 남긴다 (0이면 localSearch의 score>0 필터만 적용).
+// LEFT JOIN으로 암묵지 chunk(doc_id가 policies에 없음)도 찾고,
+// 암묵지 chunk는 출처 배지용 kind/author/게시일도 함께 싣는다.
+async function d1TextSources(env: Env, question: string, minScore = 0): Promise<Source[]> {
+  const rows = await env.DB.prepare(
+    "SELECT c.id, c.doc_id, c.article, c.text, c.ord, COALESCE(p.title, d.title, c.doc_id) AS title, d.kind AS doc_kind, d.author AS doc_author, d.created_at AS doc_created FROM chunks c LEFT JOIN policies p ON p.id = c.doc_id LEFT JOIN documents d ON d.id = c.doc_id"
+  ).all<{ id: string; doc_id: string; article: string; text: string; ord: number; title: string; doc_kind: string | null; doc_author: string | null; doc_created: string | null }>();
+  const list = rows.results || [];
+  const found = localSearchChunks(question, list);
+  const byId = new Map(list.map((r) => [r.id, r]));
+  return found
+    .filter((f) => f.score >= minScore)
+    .map((f) => {
+      const row = byId.get(f.id);
+      const tacit = row?.doc_kind === "tacit";
+      return { id: f.id, title: f.title, section: f.article, snippet: f.snippet, score: f.score, kind: tacit ? "tacit" : "policy", author: tacit ? (row?.doc_author || "인사팀") : undefined, publishedAt: tacit ? row?.doc_created?.slice(0, 10) : undefined };
+    });
 }
 
 // ---- ask (RAG) ----
@@ -708,7 +872,10 @@ app.post("/api/ask", async (c) => {
   // KV 캐시 조회 (실패 시 D1 cache 테이블 폴백). force면 다시 생성한다.
   // 캐시 키에 sessionId를 포함한다: 후속 질문은 세션 문맥에 따라 답이 달라지므로,
   // 세션과 무관한 키로 캐시하면 다른 세션의 오래된(잘못된) 답을 돌려주게 된다.
-  const cacheKey = `ask:${sessionId}:${question}`;
+  // C5-b: 지식 epoch도 키에 넣는다. 암묵지 게시 때 epoch가 올라가면
+  // 게시 전 캐시 답(근거 없음 경고)이 나오지 않고 새로 계산한다.
+  const knowledgeEpoch = await getKnowledgeEpoch(c.env);
+  const cacheKey = `ask:${sessionId}:${question}:${knowledgeEpoch}`;
   const cacheStart = Date.now();
   if (!body.force) {
     try {
@@ -769,7 +936,7 @@ app.post("/api/ask", async (c) => {
       const gateStart = Date.now();
       const gated = await keywordGate(c.env, searchQuestion, matches.map((m) => ({ id: String(m.id), score: m.score || 0, metadata: (m.metadata || {}) as Record<string, unknown> })));
       if (gated.length === 0) {
-        noEvidence = true; // Vectorize는 찾았으나 키워드 관련성 없음 — D1 폴백도 안 탐
+        noEvidence = true; // Vectorize는 찾았으나 키워드 관련성 없음 — 아래 noEvidence 분기에서 D1으로 한 번 더 본다
       } else {
         searchEngine = "vectorize";
         sources = await resolveSources(c.env, searchQuestion, gated);
@@ -777,19 +944,24 @@ app.post("/api/ask", async (c) => {
       }
       mark("gate", gateStart);
     } else if (all.length > 0) {
-      noEvidence = true; // 하한 이하 — 근거 없음 확정, 폴백 안 탐
+      noEvidence = true; // 하한 이하 — 근거 없음 확정, 아래 noEvidence 분기에서 D1으로 한 번 더 본다
     } else {
       throw new Error("no vectorize matches");
     }
   } catch {
     if (!noEvidence) {
-      const rows = await c.env.DB.prepare(
-        "SELECT c.id, c.doc_id, c.article, c.text, c.ord, p.title FROM chunks c JOIN policies p ON p.id = c.doc_id"
-      ).all<{ id: string; doc_id: string; article: string; text: string; ord: number; title: string }>();
-      const found = localSearchChunks(searchQuestion, rows.results || []);
-      sources = found.map((f) => ({ id: f.id, title: f.title, section: f.article, snippet: f.snippet, score: f.score }));
-      searchEngine = "d1-text";
+      sources = await d1TextSources(c.env, searchQuestion);
+      if (sources.length > 0) searchEngine = "d1-text";
     }
+  }
+  // C5-b: Vectorize에서 쓸 만한 근거를 못 찾았어도(noEvidence) D1 텍스트
+  // 검색으로 한 번 더 본다. 암묵지 문서는 Vectorize upsert가 늦거나 실패해도
+  // D1 chunk에는 있으므로 여기서 잡힌다. 키워드 게이트와 같은 하한(≥2)을
+  // 적용해, 관련 없는 질문이 정책 chunk에서 근거를 얻지는 않게 한다.
+  // (실측: "출산 전후 재택"은 정책 chunk 전원 0점, 암묵지 chunk 27점.)
+  if (sources.length === 0 && noEvidence) {
+    const d1 = await d1TextSources(c.env, searchQuestion, KEYWORD_GATE_MIN);
+    if (d1.length > 0) { sources = d1; searchEngine = "d1-text"; }
   }
   // 근거 없음: LLM을 호출하지 않고 경고로 답한다 (C5, Baryon AX).
   // 연차휴가 규정을 강제 근거로 넣던 폴백은 삭제했다 — 근거가 없는데
@@ -801,6 +973,10 @@ app.post("/api/ask", async (c) => {
     answer = "등록된 규정에서 근거를 찾지 못했습니다. 이 질문에 대한 답은 아직 등록된 규정에 없습니다. 인사팀에 확인해 주세요.";
     engine = "none";
     timings.llm = 0; // 근거 없음 — LLM을 호출하지 않는다
+    // C5-b: 근거 없는 질문은 지식 공백 큐에 쌓는다 (라이브러리에서 담당자가 답한다).
+    // 기록 실패가 질문 응답을 망가뜨리지 않게 try/catch로 감싼다.
+    try { await recordGap(c.env, question, "no-evidence"); }
+    catch (e) { console.log("[gaps] recordGap failed:", e instanceof Error ? e.message : String(e)); }
   } else {
     // 답변 생성: Workers AI 시도 → 실패 시 근거 기반 템플릿 답변
     const llmStart = Date.now();
@@ -863,15 +1039,84 @@ app.post("/api/feedback", async (c) => {
   const body = await c.req.json().catch(() => ({})) as { eventId?: string; rating?: string; comment?: string };
   if (!body.eventId) return c.json({ ok: false, error: "eventId is required" }, 400);
   if (body.rating !== "up" && body.rating !== "down") return c.json({ ok: false, error: "rating must be 'up' or 'down'" }, 400);
-  const row = await c.env.DB.prepare("SELECT id FROM ask_events WHERE id = ?").bind(body.eventId).first<{ id: string }>();
+  const row = await c.env.DB.prepare("SELECT id, question FROM ask_events WHERE id = ?").bind(body.eventId).first<{ id: string; question: string }>();
   if (!row) return c.json({ ok: false, error: "event not found" }, 404);
   await c.env.DB.prepare("UPDATE ask_events SET feedback = ?, feedback_comment = ?, feedback_at = datetime('now') WHERE id = ?")
     .bind(body.rating, (body.comment || "").slice(0, 500) || null, body.eventId).run();
+  // C5-b: 👎는 지식 공백 큐에 올린다 (같은 질문의 open 행이 있으면 count만 증가).
+  if (body.rating === "down") {
+    try { await recordGap(c.env, row.question, "downvote"); }
+    catch (e) { console.log("[gaps] recordGap(downvote) failed:", e instanceof Error ? e.message : String(e)); }
+  }
   return c.json({
     ok: true,
     eventId: body.eventId,
     rating: body.rating,
-    note: body.rating === "down" ? "이 질문은 답변 보완 대상으로 기록되었습니다 (C5-b 지식 공백 큐 연결 예정)." : null,
+    note: body.rating === "down" ? "이 질문은 답변 보완 대상으로 기록되었습니다 (지식 공백 큐에 올렸습니다)." : null,
+  });
+});
+
+// ---- 지식 공백 큐 (C5-b) ----
+// 근거 없는 질문·👎 피드백 질문 목록. 최신순. answered/resolved에는
+// 게시된 암묵지 문서 제목을 함께 돌려준다 (프론트 링크용).
+app.get("/api/gaps", async (c) => {
+  await ensureSeeded(c.env.DB);
+  const rows = await c.env.DB.prepare(
+    "SELECT g.id, g.question, g.asked_at, g.status, g.doc_id, g.count, g.source, d.title AS doc_title FROM knowledge_gaps g LEFT JOIN documents d ON d.id = g.doc_id ORDER BY g.asked_at DESC LIMIT 50"
+  ).all<{ id: string; question: string; asked_at: number; status: string; doc_id: string | null; count: number; source: string; doc_title: string | null }>();
+  return c.json({ ok: true, gaps: rows.results || [] });
+});
+
+// 암묵지 게시 (C5-b): 담당자가 쓴 답을 Markdown 문서(kind='tacit')로
+// R2에 저장하고 일반 문서와 같은 색인 경로(청킹 → bge-m3 → Vectorize)로
+// 넣는다. 게시와 동시에 지식 epoch를 올려 옛 캐시 답을 무효화하고,
+// 같은 질문을 다시 실행해 근거가 잡히면 resolved, 아니면 open으로 되돌린다.
+app.post("/api/gaps/:id/publish", async (c) => {
+  await ensureSeeded(c.env.DB);
+  const id = c.req.param("id");
+  const gap = await c.env.DB.prepare("SELECT id, question, status, doc_id FROM knowledge_gaps WHERE id = ?").bind(id)
+    .first<{ id: string; question: string; status: string; doc_id: string | null }>();
+  if (!gap) return c.json({ ok: false, error: "gap not found" }, 404);
+  const body = await c.req.json().catch(() => ({})) as { answer?: string; author?: string };
+  if (!body.answer || body.answer.trim().length < 3) return c.json({ ok: false, error: "answer is required" }, 400);
+  const author = (body.author || "인사팀").trim().slice(0, 40) || "인사팀";
+  const today = new Date().toISOString().slice(0, 10);
+  const title = gap.question.replace(/[?？]+$/, "").trim().slice(0, 60) || gap.question.slice(0, 60);
+  // 본문 상단에 작성자·작성일·원 질문 메타를 포함한다 (계획서 C5-b 명세).
+  const content = `작성자: ${author} · 작성일: ${today}\n원 질문: ${gap.question}\n\n${body.answer.trim()}`;
+  // 기존 게시 문서가 있으면 같은 문서에 덮어쓴다 (버전 분산 방지).
+  let docId = gap.doc_id;
+  const existing = docId
+    ? await c.env.DB.prepare("SELECT id, r2_key FROM documents WHERE id = ?").bind(docId).first<{ id: string; r2_key: string | null }>()
+    : null;
+  if (existing) {
+    docId = existing.id;
+    const r2Key = existing.r2_key || `documents/${docId}.md`;
+    let r2Ok = true;
+    try { await c.env.FILES.put(r2Key, content); } catch { r2Ok = false; }
+    await c.env.DB.prepare("UPDATE documents SET title = ?, content = ?, author = ?, r2_key = ? WHERE id = ?")
+      .bind(title, content, author, r2Ok ? r2Key : null, docId).run();
+  } else {
+    docId = uid("doc");
+    const r2Key = `documents/${docId}.md`;
+    let r2Stored = false;
+    try { await c.env.FILES.put(r2Key, content); r2Stored = true; } catch { r2Stored = false; }
+    await c.env.DB.prepare("INSERT INTO documents (id, title, kind, content, summary, actions, r2_key, author) VALUES (?, ?, 'tacit', ?, NULL, NULL, ?, ?)")
+      .bind(docId, title, content, r2Stored ? r2Key : null, author).run();
+  }
+  // 색인 (D1 chunks 저장 + Vectorize upsert). AI가 안 되면 D1 chunk만 남긴다.
+  const indexed = await indexDocument(c.env, { id: docId, title, markdown: content });
+  // 캐시 무효화: epoch를 올려 게시 전 캐시 답이 나오지 않게 한다.
+  const epoch = await bumpKnowledgeEpoch(c.env);
+  await c.env.DB.prepare("UPDATE knowledge_gaps SET status = 'answered', doc_id = ? WHERE id = ?").bind(docId, id).run();
+  // 검증: 같은 질문을 다시 실행해 암묵지가 근거로 잡히는지 확인한다.
+  const verification = await verifyTacitEvidence(c.env, gap.question, docId, title);
+  const status = verification.resolved ? "resolved" : "open";
+  await c.env.DB.prepare("UPDATE knowledge_gaps SET status = ? WHERE id = ?").bind(status, id).run();
+  return c.json({
+    ok: true, gapId: id, status, docId, docTitle: title, author, publishedAt: today,
+    epoch, indexed: { chunks: indexed.chunks, upserted: indexed.upserted, indexError: indexed.indexError ?? null },
+    verification: { resolved: verification.resolved, sources: verification.sources },
   });
 });
 
