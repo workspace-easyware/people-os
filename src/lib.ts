@@ -114,6 +114,14 @@ export function localSummarize(text: string): { summary: string[]; actions: stri
 // "정산해요"→"정산"처럼 토큰 끝의 조사·어미를 떼어 본문과 겹치게 한다.
 // 2자 미만으로 줄면 떼지 않는다 ("휴가"의 "가"는 떼지 않음).
 // 긴 접미사부터 시도한다 ("에서"를 "에"보다 먼저 떼야 "출장에서"→"출장"이 된다).
+/** RAG 풀: 공용(HR 규정·회사 문서·사내 암묵지) vs 개인(회의·강의 전사본 등 개인 자료). */
+export type RagPool = "shared" | "personal";
+/** 문서 종류 → RAG 풀. 전사본(회의·강의)은 개인용 풀, 규정·암묵지는 공용 풀. */
+export function poolForKind(kind: string | undefined | null): RagPool {
+  return kind === "transcript" ? "personal" : "shared";
+}
+export const RAG_POOL_LABEL: Record<RagPool, string> = { shared: "공용", personal: "개인" };
+
 const TOKEN_SUFFIXES = ["입니다", "이에요", "에서", "으로", "부터", "까지", "하면", "해요", "돼요", "나요", "에는", "에게", "하고", "이고", "는", "은", "이", "가", "을", "를", "에", "와", "과", "의", "도", "만", "로", "해", "돼", "되"];
 // 내용어가 아닌 토큰은 겹침 신호에서 뺀다 (본문에 흔해 오탐을 만든다).
 const TOKEN_STOPWORDS = new Set(["에서", "으로", "부터", "까지", "하는", "있는", "없는", "것", "수", "어떻게", "왜", "언제", "무엇", "어디", "있나요", "없나요", "있어", "없어", "인가요", "인가", "뭐예요", "뭐에요", "해요", "돼요"]);

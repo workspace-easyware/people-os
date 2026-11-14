@@ -789,8 +789,9 @@ function renderAsk(j) {
   // 근거 없음이면 공백 큐 기록 안내를, 암묵지 근거면 출처 배지를 단다 (C5-b).
   const gapNote = j.grounded === false ? '<p class="small">답변 대기 목록에 기록됐습니다.</p>' : '';
   const srcList = j.sources.map(s => {
+    const poolBadge = ` <span class="badge">${s.pool === 'personal' ? '개인' : '공용'}</span>`;
     const tacit = s.kind === 'tacit' ? ` <span class="badge">사내 암묵지 · ${esc(s.author || '인사팀')} · ${esc(s.publishedAt || '')}</span>` : '';
-    return `<li>${esc(s.title)} (${esc(s.section)})${tacit} — ${esc(s.snippet)}${typeof s.score === 'number' && s.score <= 1 ? ` · <span class="sim">유사도 ${s.score.toFixed(2)}</span>` : ''}</li>`;
+    return `<li>${esc(s.title)} (${esc(s.section)})${poolBadge}${tacit} — ${esc(s.snippet)}${typeof s.score === 'number' && s.score <= 1 ? ` · <span class="sim">유사도 ${s.score.toFixed(2)}</span>` : ''}</li>`;
   }).join('');
   $('askResult').innerHTML = `<div class="card"><b>답변</b> <span class="badge">엔진: ${j.engine} · 검색: ${j.searchEngine} · 세션: ${j.sessionVia}${j.cached ? ' · 캐시됨' : ''}</span><p>${esc(j.answer)}</p>${gapNote}<b>근거</b><ul>${srcList}</ul>${fb}${timingsPanel(j.timings)}</div>`;
 }

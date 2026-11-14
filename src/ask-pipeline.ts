@@ -9,7 +9,8 @@
 // 근거 검색 helper(resolveSources, keywordGate, ensureVectorSeeded,
 // d1TextSources)와 공백 큐·epoch helper도 index.ts에서 그대로 옮겼다.
 // index.ts의 다른 경로(health, 게시 검증, 피드백 등)는 여기서 import한다.
-import { localSearchChunks, questionTokens, uid } from "./lib";
+import { localSearchChunks, poolForKind, questionTokens, RAG_POOL_LABEL, uid } from "./lib";
+import type { RagPool } from "./lib";
 import { aiGatewayOptions, aiGatewayOptionsWithMeta } from "./ai-gateway";
 import type { AskTrace, RetrievalCandidate, TraceSink, TraceSpan } from "./obs/types";
 // S4 M6-β: 활성 system 프롬프트는 M4 prompts.ts가 D1 prompt_versions에서 읽는다
@@ -83,7 +84,7 @@ export function responseText(out: unknown): string {
   return JSON.stringify(res ?? out);
 }
 
-export type Source = { id: string; title: string; section: string; snippet: string; score: number; kind?: "policy" | "tacit"; author?: string; publishedAt?: string };
+export type Source = { id: string; title: string; section: string; snippet: string; score: number; kind?: "policy" | "tacit" | "transcript"; pool: RagPool; author?: string; publishedAt?: string };
 
 type Match = { id: string; score: number; metadata?: Record<string, unknown> };
 
@@ -111,7 +112,8 @@ export async function resolveSources(
       // documents에서 읽는다. 암묵지는 출처 배지용 author·게시일도 채운다.
       const policy = await env.DB.prepare("SELECT title FROM policies WHERE id = ?").bind(chunk.doc_id).first<{ title: string }>();
       let title = policy?.title;
-      let kind: "policy" | "tacit" = "policy";
+      let kind: "policy" | "tacit" | "transcript" = "policy";
+      let pool: RagPool = "shared";
       let author: string | undefined;
       let publishedAt: string | undefined;
       if (!title) {
@@ -120,9 +122,11 @@ export async function resolveSources(
         if (doc) {
           title = doc.title;
           if (doc.kind === "tacit") { kind = "tacit"; author = doc.author || "인사팀"; publishedAt = doc.created_at.slice(0, 10); }
+          else if (doc.kind === "transcript") { kind = "transcript"; }
+          pool = poolForKind(doc.kind);
         }
       }
-      const src: Source = { id: chunk.id, title: title ?? chunk.doc_id, section: chunk.article, snippet: chunk.text, score: m.score, kind, author, publishedAt };
+      const src: Source = { id: chunk.id, title: title ?? chunk.doc_id, section: chunk.article, snippet: chunk.text, score: m.score, kind, pool, author, publishedAt };
       produced.set(m.id, src);
       const prev = byDoc.get(chunk.doc_id);
       if (!prev || prev.score < m.score) byDoc.set(chunk.doc_id, src);
@@ -137,12 +141,12 @@ export async function resolveSources(
       if (list.length) {
         const scored = localSearchChunks(question, list.map((ch) => ({ ...ch, title: policy.title })));
         const best = scored.length ? scored[0] : { ...list[0], score: 0, snippet: list[0].text };
-        const src: Source = { id: best.id, title: policy.title, section: best.article, snippet: best.text, score: m.score };
+        const src: Source = { id: best.id, title: policy.title, section: best.article, snippet: best.text, score: m.score, kind: "policy", pool: "shared" };
         produced.set(m.id, src);
         const prev = byDoc.get(policy.id);
         if (!prev || prev.score < m.score) byDoc.set(policy.id, src);
       } else {
-        const src: Source = { id: policy.id, title: policy.title, section: policy.section, snippet: policy.body.slice(0, 220), score: m.score };
+        const src: Source = { id: policy.id, title: policy.title, section: policy.section, snippet: policy.body.slice(0, 220), score: m.score, kind: "policy", pool: "shared" };
         produced.set(m.id, src);
         const prev = byDoc.get(policy.id);
         if (!prev || prev.score < m.score) byDoc.set(policy.id, src);
@@ -152,7 +156,9 @@ export async function resolveSources(
     // 알 수 없는 id — 메타데이터가 있으면 그대로 쓴다.
     const meta = (m.metadata || {}) as { title?: string; section?: string; snippet?: string; kind?: string };
     if (meta.snippet) {
-      const src: Source = { id: m.id, title: meta.title || m.id, section: meta.section || "", snippet: meta.snippet, score: m.score, kind: meta.kind === "tacit" ? "tacit" : "policy" };
+      const metaKind = meta.kind;
+      const kind: "policy" | "tacit" | "transcript" = metaKind === "tacit" ? "tacit" : metaKind === "transcript" ? "transcript" : "policy";
+      const src: Source = { id: m.id, title: meta.title || m.id, section: meta.section || "", snippet: meta.snippet, score: m.score, kind, pool: poolForKind(metaKind) };
       produced.set(m.id, src);
       const prev = byDoc.get(m.id);
       if (!prev || prev.score < m.score) byDoc.set(m.id, src);
@@ -316,8 +322,10 @@ export async function d1TextSources(env: AskEnv, question: string, minScore = 0)
     .filter((f) => f.score >= minScore)
     .map((f) => {
       const row = byId.get(f.id);
-      const tacit = row?.doc_kind === "tacit";
-      return { id: f.id, title: f.title, section: f.article, snippet: f.snippet, score: f.score, kind: tacit ? "tacit" : "policy", author: tacit ? (row?.doc_author || "인사팀") : undefined, publishedAt: tacit ? row?.doc_created?.slice(0, 10) : undefined };
+      const docKind = row?.doc_kind;
+      const tacit = docKind === "tacit";
+      const kind: "policy" | "tacit" | "transcript" = tacit ? "tacit" : docKind === "transcript" ? "transcript" : "policy";
+      return { id: f.id, title: f.title, section: f.article, snippet: f.snippet, score: f.score, kind, pool: poolForKind(docKind), author: tacit ? (row?.doc_author || "인사팀") : undefined, publishedAt: tacit ? row?.doc_created?.slice(0, 10) : undefined };
     });
 }
 
@@ -633,7 +641,7 @@ export async function runAsk(env: AskEnv, input: AskInput, opts: AskOptions = {}
     const llmStart = Date.now();
     let llmError: string | undefined;
     try {
-      const context = sources.map((s) => `[${s.title} › ${s.section}] ${s.snippet}`).join("\n");
+      const context = sources.map((s) => `[${RAG_POOL_LABEL[s.pool]} › ${s.title} › ${s.section}] ${s.snippet}`).join("\n");
       promptMessages = [
         { role: "system", content: prompt.body },
         { role: "user", content: `질문: ${question}\n근거:\n${context}` },
@@ -691,7 +699,7 @@ export async function runAsk(env: AskEnv, input: AskInput, opts: AskOptions = {}
     ...(gapId ? { gapId } : {}),
     engine, searchEngine, promptVersion, model: grounded ? LLM_MODEL : "",
     knowledgeEpoch, timings: { ...timings }, spans, retrieval,
-    sources: sources.map((s) => ({ id: s.id, title: s.title, section: s.section, score: s.score, ...(s.kind ? { kind: s.kind } : {}) })),
+    sources: sources.map((s) => ({ id: s.id, title: s.title, section: s.section, score: s.score, pool: s.pool, ...(s.kind ? { kind: s.kind } : {}) })),
     ...(promptMessages ? { prompt: { messages: promptMessages } } : {}),
     ...(rawResponse !== undefined ? { rawResponse } : {}),
     ...(usage ? { usage } : {}),

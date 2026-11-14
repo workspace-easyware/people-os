@@ -3,7 +3,7 @@ import type { Context } from "hono";
 import PptxGenJS from "pptxgenjs";
 import { AgentSession } from "./agent-session";
 import { splitOggOpus } from "./ogg";
-import { coachingTranscript, localReflect, localSearchChunks, localSummarize, policies, sampleTranscript, splitMarkdownIntoChunks, splitPolicyIntoChunks, uid } from "./lib";
+import { coachingTranscript, localReflect, localSearchChunks, localSummarize, policies, poolForKind, sampleTranscript, splitMarkdownIntoChunks, splitPolicyIntoChunks, uid } from "./lib";
 import { AI_GATEWAY_ID, aiGatewayOptions } from "./ai-gateway";
 import { decodePlainText, detectDocumentFormat, extractHwpxText } from "./parse";
 import { generateDigest, getLatestDigest } from "./digest";
@@ -796,7 +796,7 @@ async function indexDocument(env: Env, doc: { id: string; title: string; markdow
     // Vectorize 메타데이터 kind는 문서의 실제 종류를 쓴다 (C5 Phase 3:
     // 파일 업로드 문서가 'tacit'으로 오표시되지 않게. D1 documents.kind가
     // 출처 배지의 기준이고, 여기는 알 수 없는 id 폴백 경로에서만 쓰인다).
-    const vectors = chunks.map((ch, i) => ({ id: ch.id, values: rows[i], metadata: { title: doc.title, section: ch.article, snippet: ch.text.slice(0, 220), kind: doc.kind ?? "tacit" } }));
+    const vectors = chunks.map((ch, i) => ({ id: ch.id, values: rows[i], metadata: { title: doc.title, section: ch.article, snippet: ch.text.slice(0, 220), kind: doc.kind ?? "tacit", pool: poolForKind(doc.kind) } }));
     await env.VECTOR.upsert(vectors);
     return { chunks: chunks.length, upserted: vectors.length };
   } catch (e) {

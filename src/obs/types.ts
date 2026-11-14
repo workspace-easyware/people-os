@@ -42,7 +42,7 @@ export type AskTrace = {
   timings: Record<string, number>;
   spans: TraceSpan[];
   retrieval: RetrievalCandidate[];
-  sources: Array<{ id: string; title: string; section: string; score: number; kind?: string }>;
+  sources: Array<{ id: string; title: string; section: string; score: number; pool?: "shared" | "personal"; kind?: string }>;
   prompt?: { messages: Array<{ role: string; content: string }> };
   rawResponse?: unknown;
   usage?: { promptTokens?: number; completionTokens?: number };
