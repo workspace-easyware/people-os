@@ -6,8 +6,9 @@ import type { Context } from "hono";
 import type { EvalItem, ExpectedSource, ExpectedVerdict, ObsEnv } from "./types";
 import { obsSchemaNotReadyBody, obsSchemaReady, intToBool, newId, parseJson } from "./db";
 import { PromoteError, promoteTraceToItem, seedGoldenDataset } from "./seed-golden";
-// 관리자 검사(X-Admin-Secret ↔ ADMIN_SECRET, 상수 시간, 미설정이면 거부)는 index.ts의 것을 쓴다 (M6-β).
-import { adminAllowed } from "../index";
+// 관리자 검사 — 이중 게이트 (hr_admin 세션 또는 X-Admin-Secret). auth.ts isAdminRequest를 쓴다.
+// index.ts의 adminAllowed(시크릿 전용)는 읽기 전용 경로가 그대로 쓴다.
+import { isAdminRequest } from "../auth";
 
 // PII 마스킹 (계획서 B.1 — 주민번호·휴대전화·이메일·계좌). M2의 mask.ts가 확정되면 그쪽으로 교체.
 function maskPii(s: string | null): string | null {
@@ -155,8 +156,10 @@ datasetsApp.use("*", async (c, next) => {
   await next();
 });
 
-function requireAdmin(c: Context<{ Bindings: ObsEnv }>): Response | null {
-  if (!adminAllowed(c.env, c.req.header("x-admin-secret"))) return c.json({ ok: false, error: "unauthorized" }, 401);
+async function requireAdmin(c: Context<{ Bindings: ObsEnv }>): Promise<Response | null> {
+  if (!(await isAdminRequest(c.env, c.req.header("cookie"), c.req.header("x-admin-secret")))) {
+    return c.json({ ok: false, error: "unauthorized" }, 401);
+  }
   return null;
 }
 
@@ -192,7 +195,7 @@ datasetsApp.get("/datasets", async (c) => {
 
 // POST /datasets — 생성(관리자)
 datasetsApp.post("/datasets", async (c) => {
-  const denied = requireAdmin(c);
+  const denied = await requireAdmin(c);
   if (denied) return denied;
   const b = (await readJson(c)) as Record<string, unknown> | null;
   const name = typeof b?.name === "string" ? b.name.trim() : "";
@@ -209,7 +212,7 @@ datasetsApp.post("/datasets", async (c) => {
 
 // POST /datasets/seed — 골든 시드(멱등, 관리자). :id 라우트보다 먼저 선언.
 datasetsApp.post("/datasets/seed", async (c) => {
-  const denied = requireAdmin(c);
+  const denied = await requireAdmin(c);
   if (denied) return denied;
   try {
     const r = await seedGoldenDataset(c.env);
@@ -253,7 +256,7 @@ async function activeDuplicate(db: D1Database, datasetId: string, question: stri
 
 // POST /datasets/:id/items — 항목 추가(관리자). dataset version +1.
 datasetsApp.post("/datasets/:id/items", async (c) => {
-  const denied = requireAdmin(c);
+  const denied = await requireAdmin(c);
   if (denied) return denied;
   const datasetId = c.req.param("id");
   const ds = await c.env.DB.prepare("SELECT id FROM eval_datasets WHERE id = ?").bind(datasetId).first();
@@ -286,7 +289,7 @@ datasetsApp.post("/datasets/:id/items", async (c) => {
 
 // PATCH /datasets/:id/items/:itemId — 부분 수정(active 토글 포함, 관리자). 수정 시 dataset version +1.
 datasetsApp.patch("/datasets/:id/items/:itemId", async (c) => {
-  const denied = requireAdmin(c);
+  const denied = await requireAdmin(c);
   if (denied) return denied;
   const datasetId = c.req.param("id");
   const itemId = c.req.param("itemId");
@@ -331,7 +334,7 @@ datasetsApp.patch("/datasets/:id/items/:itemId", async (c) => {
 
 // POST /traces/:id/promote — 트레이스 → 골든 항목(관리자). 이미 활성 항목이면 409 + 기존 id.
 datasetsApp.post("/traces/:id/promote", async (c) => {
-  const denied = requireAdmin(c);
+  const denied = await requireAdmin(c);
   if (denied) return denied;
   const b = (await readJson(c)) as Record<string, unknown> | null;
   if (!b || typeof b !== "object") return c.json({ ok: false, error: "JSON body required" }, 400);

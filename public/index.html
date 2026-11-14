@@ -14,9 +14,64 @@
   .obs-subtabs button{background:none;border:0;border-bottom:2px solid transparent;border-radius:0;padding:8px 12px;margin-bottom:-1px;color:var(--obs-muted,#71717a);cursor:pointer;font:inherit}
   .obs-subtabs button[aria-selected="true"]{color:var(--obs-text,#18181b);border-bottom-color:var(--color-accent,#2d7dde);font-weight:var(--weight-medium,500)}
   .obs-subtabs button:focus-visible{outline:2px solid var(--color-accent,#2d7dde);outline-offset:2px}
+  /* 로그인 (2026-11-15): 전체 화면 오버레이 + 사용자 관리 표. 기존 토큰만 쓴다. */
+  #authOverlay{position:fixed;inset:0;z-index:50;display:none;align-items:center;justify-content:center;background:var(--color-bg,#f6f6f7);padding:16px}
+  #authOverlay.show{display:flex}
+  .auth-box{width:100%;max-width:380px;background:#fff;border:1px solid var(--line,#e4e4e7);border-radius:8px;padding:24px}
+  .auth-box h2{font-size:20px;margin:0 0 4px}
+  .auth-box p.muted{color:var(--color-muted,#71717a);font-size:13px;margin:0 0 16px}
+  .auth-box label{display:block;font-size:13px;font-weight:500;margin:12px 0 4px}
+  .auth-box input{width:100%;height:32px;padding:0 10px;border:1px solid var(--color-line-strong,#d4d4d8);border-radius:6px;font:inherit;box-sizing:border-box}
+  .auth-box .primary{width:100%;height:34px;margin-top:18px;border:0;border-radius:6px;background:var(--color-primary,#123863);color:#fff;font-weight:600;cursor:pointer}
+  .auth-box .primary:disabled{opacity:.6;cursor:default}
+  .auth-box .err{color:#b91c1c;font-size:13px;margin-top:12px;min-height:18px}
+  .auth-box .ok{color:#166534;font-size:13px;margin-top:12px;min-height:18px;word-break:break-all}
+  .user-chip{display:flex;align-items:center;gap:8px;padding:10px 8px;border-top:1px solid var(--line,#e4e4e7);font-size:13px}
+  .user-chip .who{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .user-chip .who b{display:block;font-size:13px}
+  .user-chip .who span{color:var(--color-muted,#71717a);font-size:12px}
+  .user-chip button{border:1px solid var(--line,#e4e4e7);background:#fff;border-radius:6px;padding:4px 8px;font-size:12px;cursor:pointer;flex:none}
+  .admin-table{width:100%;border-collapse:collapse;font-size:13px}
+  .admin-table th,.admin-table td{border-bottom:1px solid var(--line,#e4e4e7);padding:8px 6px;text-align:left;vertical-align:top}
+  .admin-table th{color:var(--color-muted,#71717a);font-weight:500}
+  .admin-table .rowbtns{display:flex;gap:4px;flex-wrap:wrap}
+  .admin-table .rowbtns button{border:1px solid var(--line,#e4e4e7);background:#fff;border-radius:6px;padding:3px 7px;font-size:12px;cursor:pointer}
+  .admin-form{display:flex;gap:8px;flex-wrap:wrap;align-items:end;margin:12px 0}
+  .admin-form label{font-size:13px;font-weight:500}
+  .admin-form input,.admin-form select{height:32px;padding:0 8px;border:1px solid var(--color-line-strong,#d4d4d8);border-radius:6px;font:inherit}
+  .admin-form .primary{height:32px;border:0;border-radius:6px;background:var(--color-primary,#123863);color:#fff;font-weight:600;padding:0 14px;cursor:pointer}
 </style>
 </head>
 <body>
+<!-- 로그인 (2026-11-15): 로그인 안 된 상태면 이 오버레이만 보인다. 설정 링크(#setup=토큰)면 비밀번호 설정 폼을 보인다. -->
+<div id="authOverlay">
+  <div class="auth-box" id="loginBox">
+    <h2>일잇 People OS</h2>
+    <p class="muted">등록된 이메일과 비밀번호로 로그인합니다.</p>
+    <form id="loginForm">
+      <label for="loginEmail">이메일</label>
+      <input id="loginEmail" type="email" autocomplete="username" required />
+      <label for="loginPassword">비밀번호</label>
+      <input id="loginPassword" type="password" autocomplete="current-password" required />
+      <div class="err" id="loginErr"></div>
+      <button class="primary" type="submit" id="loginBtn">로그인</button>
+    </form>
+    <p class="muted" style="margin-top:14px">처음 접속하거나 비밀번호를 잊으셨다면 HR 관리자에게 설정 링크를 요청하세요.</p>
+  </div>
+  <div class="auth-box" id="setupBox" style="display:none">
+    <h2>내 비밀번호 설정</h2>
+    <p class="muted">받은 설정 링크는 한 번만 사용할 수 있습니다. 12~128자의 비밀번호를 사용하세요.</p>
+    <form id="setupForm">
+      <label for="setupPassword">비밀번호</label>
+      <input id="setupPassword" type="password" autocomplete="new-password" minlength="12" maxlength="128" required />
+      <label for="setupConfirm">비밀번호 확인</label>
+      <input id="setupConfirm" type="password" autocomplete="new-password" minlength="12" maxlength="128" required />
+      <div class="err" id="setupErr"></div>
+      <div class="ok" id="setupOk"></div>
+      <button class="primary" type="submit" id="setupBtn">비밀번호 설정하고 시작</button>
+    </form>
+  </div>
+</div>
 <div class="shell">
 <aside class="sidebar" id="sidebar">
   <div class="side-head"><button class="logo" type="button" onclick="switchTab('home')"><b>일</b><span>일잇 <i>People OS</i></span></button></div>
@@ -28,9 +83,14 @@
     <button data-tab="tasks"><span class="nav-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 11 12 14 22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg></span><span class="nav-label">할 일</span></button>
     <button data-tab="library"><span class="nav-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/></svg></span><span class="nav-label">라이브러리</span></button>
     <button data-tab="obs"><span class="nav-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg></span><span class="nav-label">관측 · 평가</span></button>
+    <button data-tab="admin"><span class="nav-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg></span><span class="nav-label">사용자 관리</span></button>
     <button data-tab="about"><span class="nav-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg></span><span class="nav-label">소개</span></button>
   </nav>
   <button class="collapse-btn" id="collapseBtn" type="button" onclick="toggleSidebar()">« 접기</button>
+  <div class="user-chip" id="userChip" style="display:none">
+    <div class="who"><b id="userChipName"></b><span id="userChipMeta"></span></div>
+    <button type="button" onclick="doLogout()">로그아웃</button>
+  </div>
 </aside>
 <div class="content">
 <main>
@@ -151,6 +211,31 @@
     </div>
   </section>
 
+  <!-- 사용자 관리 (2026-11-15, HR admin 전용). 계정 목록·생성·설정 링크 발급·역할/상태 변경. -->
+  <section id="tab-admin">
+    <div class="card">
+      <h2>사용자 관리</h2>
+      <p class="muted">HR 관리자만 볼 수 있습니다. 계정을 만들면 설정 링크가 나오고, 받은 사람이 링크에서 비밀번호를 정하면 계정이 활성화됩니다.</p>
+      <form class="admin-form" id="adminCreateForm">
+        <span><label for="adminNewEmail">이메일</label><br><input id="adminNewEmail" type="email" required style="width:220px" /></span>
+        <span><label for="adminNewName">이름</label><br><input id="adminNewName" type="text" required style="width:120px" /></span>
+        <span><label for="adminNewRole">역할</label><br><select id="adminNewRole"><option value="user">일반 사용자</option><option value="hr_admin">HR 관리자</option></select></span>
+        <button class="primary" type="submit">계정 만들기</button>
+      </form>
+      <div class="ok" id="adminCreateMsg" style="color:#166534;font-size:13px;min-height:18px;word-break:break-all"></div>
+      <div id="adminUsers"><p class="loading">사용자 목록을 불러오는 중입니다…</p></div>
+    </div>
+    <div class="card">
+      <h2>내 비밀번호 변경</h2>
+      <form class="admin-form" id="changePwForm">
+        <span><label for="pwCurrent">현재 비밀번호</label><br><input id="pwCurrent" type="password" autocomplete="current-password" required /></span>
+        <span><label for="pwNew">새 비밀번호 (12~128자)</label><br><input id="pwNew" type="password" autocomplete="new-password" minlength="12" maxlength="128" required /></span>
+        <button class="primary" type="submit">변경</button>
+      </form>
+      <div class="ok" id="pwMsg" style="font-size:13px;min-height:18px"></div>
+    </div>
+  </section>
+
   <section id="tab-about">
     <div class="about-hero">
       <h2>회의에서 코칭까지,<br>한 곳에서.</h2>
@@ -210,7 +295,10 @@
 let docId = null, sessionId = null, lastSummaryText = '', lastSummary = [], lastActions = [], lastDocTitle = '';
 let lastAnswer = '', lastQuestion = '', turnstileToken = null, turnstileWidgetId = null;
 const $ = (id) => document.getElementById(id);
-const TABS = ['home','upload','ask','coaching','tasks','library','obs','about'];
+const TABS = ['home','upload','ask','coaching','tasks','library','obs','admin','about'];
+// 로그인 (2026-11-15): 현재 사용자. null이면 미로그인. 역할이 'user'면 obs·admin 탭을 숨긴다.
+let currentUser = null;
+const ADMIN_TABS = ['obs', 'admin'];
 // S4: 해시는 '<최상위 탭>' 또는 'obs/<하위 경로>' (최상위 탭 = 첫 세그먼트).
 function switchTab(name, fromHash) {
   name = String(name || '');
@@ -218,6 +306,8 @@ function switchTab(name, fromHash) {
   let sub = slash >= 0 ? name.slice(slash + 1) : '';
   name = slash >= 0 ? name.slice(0, slash) : name;
   if (!TABS.includes(name)) { name = 'home'; sub = ''; }
+  // 로그인: 일반 사용자는 HR admin 탭(obs·admin)에 못 들어간다.
+  if (currentUser && currentUser.role !== 'hr_admin' && ADMIN_TABS.includes(name)) { name = 'home'; sub = ''; }
   if (name !== 'obs') sub = '';
   else if (!sub) sub = 'traces';
   const full = name === 'obs' ? 'obs/' + sub : name;
@@ -233,6 +323,7 @@ function switchTab(name, fromHash) {
   if (name === 'upload') loadRecordings();
   if (name === 'tasks') loadTasks();
   if (name === 'library') refreshLib();
+  if (name === 'admin') loadAdminUsers();
   if (name === 'obs') renderObs(sub); else unmountObs();
 }
 // ---- S4 관측 · 평가 하위 탭 라우터 (public/obs/*.js의 mount 계약) ----
@@ -436,6 +527,153 @@ async function api(path, opts) {
   const r = await fetch(path, { headers: { 'content-type': 'application/json' }, ...opts });
   return r.json();
 }
+// ---- 로그인 (2026-11-15) ----
+function applyRole() {
+  const isAdmin = currentUser && currentUser.role === 'hr_admin';
+  document.querySelectorAll('.tabs button[data-tab="obs"], .tabs button[data-tab="admin"]').forEach(b => {
+    b.style.display = isAdmin ? '' : 'none';
+  });
+  const chip = $('userChip');
+  if (currentUser) {
+    $('userChipName').textContent = currentUser.name;
+    $('userChipMeta').textContent = currentUser.email + (isAdmin ? ' · HR 관리자' : ' · 일반 사용자');
+    chip.style.display = 'flex';
+  } else {
+    chip.style.display = 'none';
+  }
+}
+function showAuthOverlay(kind) {
+  $('authOverlay').classList.add('show');
+  $('loginBox').style.display = kind === 'setup' ? 'none' : '';
+  $('setupBox').style.display = kind === 'setup' ? '' : 'none';
+}
+function hideAuthOverlay() { $('authOverlay').classList.remove('show'); }
+async function checkAuth() {
+  // 설정 링크(#setup=토큰)가 있으면 비밀번호 설정 화면을 먼저 보인다.
+  const hash = location.hash.slice(1);
+  if (hash.startsWith('setup=')) { showAuthOverlay('setup'); return; }
+  let me = null;
+  try { me = await api('/api/auth/me'); } catch (e) { me = null; }
+  if (me && me.ok && me.user) {
+    currentUser = me.user;
+    hideAuthOverlay();
+    applyRole();
+    switchTab(location.hash.slice(1), true);
+  } else {
+    currentUser = null;
+    applyRole();
+    showAuthOverlay('login');
+  }
+}
+async function doLogin(e) {
+  e.preventDefault();
+  $('loginErr').textContent = '';
+  $('loginBtn').disabled = true;
+  try {
+    const j = await api('/api/auth/login', { method: 'POST', body: JSON.stringify({ email: $('loginEmail').value, password: $('loginPassword').value }) });
+    if (!j.ok) throw new Error(j.error || '로그인에 실패했습니다.');
+    currentUser = j.user;
+    $('loginPassword').value = '';
+    hideAuthOverlay();
+    applyRole();
+    switchTab('home');
+  } catch (err) {
+    $('loginErr').textContent = err.message;
+  } finally {
+    $('loginBtn').disabled = false;
+  }
+}
+async function doLogout() {
+  try { await api('/api/auth/logout', { method: 'POST' }); } catch (e) {}
+  currentUser = null;
+  applyRole();
+  unmountObs();
+  showAuthOverlay('login');
+}
+async function doSetup(e) {
+  e.preventDefault();
+  $('setupErr').textContent = ''; $('setupOk').textContent = '';
+  const pw = $('setupPassword').value, cf = $('setupConfirm').value;
+  if (pw !== cf) { $('setupErr').textContent = '입력한 비밀번호가 일치하지 않습니다.'; return; }
+  $('setupBtn').disabled = true;
+  try {
+    const token = new URLSearchParams(location.hash.slice(1)).get('setup') || '';
+    const j = await api('/api/auth/set-password', { method: 'POST', body: JSON.stringify({ token, password: pw }) });
+    if (!j.ok) throw new Error(j.error || '비밀번호 설정에 실패했습니다.');
+    currentUser = j.user;
+    $('setupOk').textContent = '비밀번호를 설정했습니다. 잠시 후 홈으로 이동합니다.';
+    history.replaceState(null, '', location.pathname);
+    setTimeout(() => { hideAuthOverlay(); applyRole(); switchTab('home'); }, 800);
+  } catch (err) {
+    $('setupErr').textContent = err.message;
+  } finally {
+    $('setupBtn').disabled = false;
+  }
+}
+function roleLabel(r) { return r === 'hr_admin' ? 'HR 관리자' : '일반 사용자'; }
+function statusLabel(s) { return s === 'active' ? '활성' : s === 'pending' ? '설정 대기' : '비활성'; }
+async function loadAdminUsers() {
+  const box = $('adminUsers');
+  const j = await api('/api/admin/users');
+  if (!j.ok) { box.innerHTML = '<p class="err">사용자 목록을 불러오지 못했습니다. ' + esc(j.error || '') + '</p>'; return; }
+  if (!j.users.length) { box.innerHTML = '<p class="empty">등록된 사용자가 없습니다.</p>'; return; }
+  box.innerHTML = '<table class="admin-table"><thead><tr><th>이메일</th><th>이름</th><th>역할</th><th>상태</th><th>동작</th></tr></thead><tbody>' +
+    j.users.map(u => `<tr><td>${esc(u.email)}</td><td>${esc(u.name)}</td><td>${roleLabel(u.role)}</td><td>${statusLabel(u.status)}</td>` +
+      `<td><div class="rowbtns">` +
+      (u.status !== 'inactive' ? `<button type="button" onclick="issueUserLink('${u.id}')">설정 링크</button>` : '') +
+      (u.status !== 'inactive' ? `<button type="button" onclick="resetUser('${u.id}')">초기화</button>` : '') +
+      (u.role === 'hr_admin'
+        ? `<button type="button" onclick="setUserRole('${u.id}','user')">일반으로</button>`
+        : `<button type="button" onclick="setUserRole('${u.id}','hr_admin')">관리자로</button>`) +
+      (u.status === 'inactive'
+        ? `<button type="button" onclick="setUserStatus('${u.id}','active')">활성화</button>`
+        : `<button type="button" onclick="setUserStatus('${u.id}','inactive')">비활성화</button>`) +
+      `</div></td></tr>`).join('') + '</tbody></table>';
+}
+async function createAdminUser(e) {
+  e.preventDefault();
+  $('adminCreateMsg').textContent = '';
+  const j = await api('/api/admin/users', { method: 'POST', body: JSON.stringify({ email: $('adminNewEmail').value, name: $('adminNewName').value, role: $('adminNewRole').value }) });
+  if (!j.ok) { $('adminCreateMsg').textContent = '계정을 만들지 못했습니다. ' + (j.error || ''); return; }
+  $('adminCreateMsg').textContent = '계정을 만들었습니다. 이 설정 링크를 ' + j.user.email + '님께 전달하세요 (1회용, 24시간): ' + location.origin + j.setupPath;
+  $('adminNewEmail').value = ''; $('adminNewName').value = '';
+  loadAdminUsers();
+}
+async function issueUserLink(id) {
+  const j = await api('/api/auth/issue-link', { method: 'POST', body: JSON.stringify({ userId: id }) });
+  if (!j.ok) { alert('설정 링크를 발급하지 못했습니다. ' + (j.error || '')); return; }
+  prompt('설정 링크 (1회용, 24시간) — 복사해서 전달하세요:', location.origin + j.setupPath);
+}
+async function resetUser(id) {
+  if (!confirm('이 계정의 비밀번호를 초기화하고 새 설정 링크를 발급할까요? 기존 세션은 모두 로그아웃됩니다.')) return;
+  const j = await api('/api/admin/users/' + id + '/reset', { method: 'POST' });
+  if (!j.ok) { alert('초기화하지 못했습니다. ' + (j.error || '')); return; }
+  prompt('새 설정 링크 (1회용, 24시간) — 복사해서 전달하세요:', location.origin + j.setupPath);
+  loadAdminUsers();
+}
+async function setUserRole(id, role) {
+  const j = await api('/api/admin/users/' + id, { method: 'PATCH', body: JSON.stringify({ role }) });
+  if (!j.ok) { alert('역할을 바꾸지 못했습니다. ' + (j.error || '')); return; }
+  loadAdminUsers();
+}
+async function setUserStatus(id, status) {
+  const j = await api('/api/admin/users/' + id, { method: 'PATCH', body: JSON.stringify({ status }) });
+  if (!j.ok) { alert('상태를 바꾸지 못했습니다. ' + (j.error || '')); return; }
+  loadAdminUsers();
+}
+async function changeMyPassword(e) {
+  e.preventDefault();
+  $('pwMsg').textContent = '';
+  const j = await api('/api/auth/change-password', { method: 'POST', body: JSON.stringify({ currentPassword: $('pwCurrent').value, newPassword: $('pwNew').value }) });
+  if (!j.ok) { $('pwMsg').textContent = '변경하지 못했습니다. ' + (j.error || ''); $('pwMsg').style.color = '#b91c1c'; return; }
+  $('pwMsg').textContent = '비밀번호를 변경했습니다.';
+  $('pwMsg').style.color = '#166534';
+  $('pwCurrent').value = ''; $('pwNew').value = '';
+}
+$('loginForm').addEventListener('submit', doLogin);
+$('setupForm').addEventListener('submit', doSetup);
+$('adminCreateForm').addEventListener('submit', createAdminUser);
+$('changePwForm').addEventListener('submit', changeMyPassword);
 function copySummary() {
   const text = lastSummaryText || '요약 결과가 없습니다.';
   if (navigator.clipboard) navigator.clipboard.writeText(text).then(() => alert('요약을 복사했습니다.'));
@@ -688,7 +926,9 @@ try { if (localStorage.getItem('people-os-sidebar-collapsed') === '1') { $('side
 fetch('/api/health', { method: 'POST' }).then(r => r.json()).then(j => {
   $('health').textContent = j.ok ? 'health OK · ' + Object.entries(j.bindings).filter(([,v])=>v).map(([k])=>k).join(', ') : 'health 실패';
 }).catch(() => $('health').textContent = 'health 실패');
-switchTab(location.hash.slice(1), true);
+// 로그인 (2026-11-15): 먼저 인증 상태를 확인한다. 미로그인이면 로그인 화면,
+// 설정 링크(#setup=)면 비밀번호 설정 화면, 로그인 상태면 역할에 맞게 탭을 연다.
+checkAuth();
 $('loadSample').onclick = async () => {
   const j = await api('/api/seed');
   $('docTitle').value = '11월 팀 회의 전사본 (샘플)';

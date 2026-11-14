@@ -15,6 +15,7 @@ import { summarizeEventCost, syncGatewayCosts } from "./costs";
 import { clampLimit, decodeCursor, obsSchemaNotReadyBody, obsSchemaReady, paginate, parseJson } from "./db";
 import { maskDeep, maskPII } from "./mask";
 import { readTraceBlob, recordScore, RETRIEVAL_OUTCOMES } from "./trace";
+import { isAdminRequest } from "../auth";
 import type { ObsEnv } from "./types";
 
 type Env = { Bindings: ObsEnv };
@@ -25,15 +26,8 @@ export const tracesApp = new Hono<Env>();
 const HUMAN_SCORE_DAILY_LIMIT = 200;
 const RISK_VERDICTS = ["ungrounded", "off_topic"];
 
-// 운영용 경로 보호 — index.ts adminAllowed()와 같은 규칙(fail-closed, 상수 시간 비교).
-// index.ts 함수는 export돼 있지 않아 같은 로직을 둔다. M6-β가 미들웨어로 통합할 수 있다.
-export function obsAdminAllowed(env: Pick<ObsEnv, "ADMIN_SECRET">, given: string | undefined | null): boolean {
-  const secret = env.ADMIN_SECRET;
-  if (!secret || !given || secret.length !== given.length) return false;
-  let diff = 0;
-  for (let i = 0; i < secret.length; i++) diff |= secret.charCodeAt(i) ^ given.charCodeAt(i);
-  return diff === 0;
-}
+// 관리자 검사는 auth.ts isAdminRequest(이중 게이트: hr_admin 세션 또는 X-Admin-Secret)로 한다.
+// 구 obsAdminAllowed(시크릿 전용)는 제거했다 — 호출부는 아래 isAdminRequest를 쓴다.
 
 // obs 스키마 가드: 이 하위 앱의 모든 경로에만 적용 (앱 전체는 죽이지 않는다).
 tracesApp.use("*", async (c, next) => {
@@ -159,7 +153,7 @@ tracesApp.get("/traces/:id", async (c) => {
   const id = c.req.param("id");
   const ev = await c.env.DB.prepare("SELECT * FROM ask_events WHERE id = ?").bind(id).first<EventRow>();
   if (!ev) return c.json({ ok: false, error: "trace not found" }, 404);
-  const isAdmin = obsAdminAllowed(c.env, c.req.header("x-admin-secret"));
+  const isAdmin = await isAdminRequest(c.env, c.req.header("cookie"), c.req.header("x-admin-secret"));
   const unmask = isAdmin && c.req.query("unmask") === "1";
   const m = <T>(v: T): T => (unmask ? v : maskDeep(v));
 
@@ -262,7 +256,7 @@ tracesApp.post("/traces/:id/scores", async (c) => {
 });
 
 tracesApp.post("/costs/sync", async (c) => {
-  if (!obsAdminAllowed(c.env, c.req.header("x-admin-secret"))) return c.json({ ok: false, error: "unauthorized" }, 401);
+  if (!(await isAdminRequest(c.env, c.req.header("cookie"), c.req.header("x-admin-secret")))) return c.json({ ok: false, error: "unauthorized" }, 401);
   const body = (await c.req.json().catch(() => ({}))) as { since?: string; until?: string };
   const res = await syncGatewayCosts(c.env, { since: body.since, until: body.until });
   if (!res.ok) return c.json(res, res.status === 503 ? 503 : res.error.endsWith("not set") ? 400 : 502);

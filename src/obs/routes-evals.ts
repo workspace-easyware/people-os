@@ -8,8 +8,9 @@ import type { AskEnv } from "../ask-pipeline";
 import { clampLimit, decodeCursor, obsSchemaNotReadyBody, obsSchemaReady, paginate } from "./db";
 import { applyGapAction, appliedItemIds, listGaps, openGapCount } from "./gaps";
 import {
-  LOCK_TTL_MS, MANUAL_RUNS_PER_DAY, RUN_COST_CAP_USD, adminSecretOk, dailyCount, kstDate, loadGuardConfig, readLock, TRACE_JUDGE_PER_DAY,
+  LOCK_TTL_MS, MANUAL_RUNS_PER_DAY, RUN_COST_CAP_USD, dailyCount, kstDate, loadGuardConfig, readLock, TRACE_JUDGE_PER_DAY,
 } from "./guards";
+import { isAdminRequest } from "../auth";
 import { activatePrompt, createPromptDraft, getActivePrompt, getPromptById, listPrompts } from "./prompts";
 import { DEFAULT_DATASET_ID, abortRun, getRunDetail, getTrend, judgeTrace, listRuns, mapRun, startRun } from "./runner";
 import type { ObsEnv } from "./types";
@@ -19,7 +20,8 @@ type C = Context<{ Bindings: Bindings }>;
 
 export const evalsApp = new Hono<{ Bindings: Bindings }>();
 
-const isAdmin = (c: C) => adminSecretOk(c.env.ADMIN_SECRET, c.req.header("x-admin-secret"));
+// 관리자 검사 — 이중 게이트 (hr_admin 세션 또는 X-Admin-Secret). auth.ts isAdminRequest.
+const isAdmin = (c: C) => isAdminRequest(c.env, c.req.header("cookie"), c.req.header("x-admin-secret"));
 
 function fail(c: C, status: number, error: string, extra: Record<string, unknown> = {}) {
   return c.json({ ok: false, error, ...extra }, status as 400);
@@ -75,7 +77,7 @@ evalsApp.get("/evals/runs/:id", async (c) => {
 });
 
 evalsApp.post("/evals/runs/:id/abort", async (c) => {
-  if (!isAdmin(c)) return fail(c, 403, "admin only");
+  if (!(await isAdmin(c))) return fail(c, 403, "admin only");
   const r = await abortRun(c.env, c.req.param("id"));
   if (!r.ok) return fail(c, 409, r.error || "cannot abort");
   return c.json({ ok: true, status: r.status });
@@ -144,7 +146,7 @@ evalsApp.post("/prompts", async (c) => {
 });
 
 evalsApp.post("/prompts/:id/activate", async (c) => {
-  if (!isAdmin(c)) return fail(c, 403, "admin only");
+  if (!(await isAdmin(c))) return fail(c, 403, "admin only");
   const r = await activatePrompt(c.env, c.req.param("id"));
   if (!r.ok) return fail(c, r.status, r.error);
   return c.json({ ok: true, prompt: r.prompt, retired: r.retired });

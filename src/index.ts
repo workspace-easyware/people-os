@@ -21,6 +21,11 @@ import { createTraceSink, mirrorFeedbackScore } from "./obs/trace";
 import { processEvalItem, runScheduledEval, sampleJudgeUserTraces } from "./obs/runner";
 import { syncGatewayCosts } from "./obs/costs";
 import type { EvalItemMessage } from "./obs/types";
+// 로그인 (2026-11-15): 인증 API + adminAllowed(이중 게이트용 상수 시간 비교).
+import { authApp } from "./auth-routes";
+import { adminAllowed } from "./auth";
+
+export { adminAllowed };
 
 export { AgentSession };
 
@@ -51,6 +56,11 @@ type Env = {
   // 미설정이면 동기화가 안내 오류를 내고 비용은 토큰 기반 추정으로만 보인다.
   CF_ACCOUNT_ID?: string;
   AIG_LOGS_TOKEN?: string;
+  // 로그인 (2026-11-15): PASSWORD_PEPPER는 비밀번호 해시용, BOOTSTRAP_SECRET은
+  // 최초 HR admin 생성용. 둘 다 `wrangler secret put` / 대시보드에서만 설정한다.
+  // 미설정 시 비밀번호 연산·부트스트랩은 거부된다 (fail-closed).
+  PASSWORD_PEPPER?: string;
+  BOOTSTRAP_SECRET?: string;
 };
 
 const app = new Hono<{ Bindings: Env }>();
@@ -109,16 +119,9 @@ type PipelineStage = "queued" | "transcribing" | "summarizing" | "indexing" | "d
 
 // 운영용 경로 보호: /api/debug-ai, /api/seed-vectors는 X-Admin-Secret 헤더가
 // ADMIN_SECRET 환경값과 일치할 때만 허용한다. 시크릿이 설정돼 있지 않으면
-// 항상 거부한다 (fail-closed). 시크릿은 코드에 넣지 않고 wrangler secret /
-// Cloudflare 대시보드에서만 설정한다.
+// 항상 거부한다 (fail-closed). adminAllowed 본체는 src/auth.ts에 있다
+// (obs 하위 앱·로그인 이중 게이트와 같은 상수 시간 비교를 쓴다).
 // S4: obs 하위 앱(routes-datasets)도 이 함수를 import한다.
-export function adminAllowed(env: Pick<Env, "ADMIN_SECRET">, given: string | undefined): boolean {
-  const secret = env.ADMIN_SECRET;
-  if (!secret || !given || secret.length !== given.length) return false;
-  let diff = 0;
-  for (let i = 0; i < secret.length; i++) diff |= secret.charCodeAt(i) ^ given.charCodeAt(i);
-  return diff === 0;
-}
 
 // Turnstile 토큰 검증 (C7). 시크릿이 설정돼 있지 않으면 검증을 건너뛰고
 // 로그만 남긴다 (데모 진행용 fail-open — 키를 설정하면 검증이 켜진다).
@@ -1195,6 +1198,11 @@ app.get("/api/digest", async (c) => {
   if (!digest) return c.json({ ok: true, digest: null, message: "아직 생성된 다이제스트가 없습니다. 매일 07:00에 생성됩니다." });
   return c.json({ ok: true, digest });
 });
+
+// ---- 로그인 (2026-11-15, /api/bootstrap · /api/auth/* · /api/admin/users) ----
+// 하위 앱 경로는 마운트 지점 기준 상대다. 관리자 경로는 hr_admin 세션 또는
+// X-Admin-Secret 이중 게이트로 막는다 (auth.ts isAdminRequest).
+app.route("/api", authApp);
 
 // ---- S4 관측·평가 (/api/obs/*) ----
 // 하위 앱 경로는 마운트 지점 기준 상대다 (§8). 세 앱 모두 스키마 가드(503)를 갖고 있고,
