@@ -35,3 +35,40 @@ export function aiGatewayOptions(opts?: { skipCache?: boolean; tag?: string }): 
   if (opts?.tag) gateway.tags = [opts.tag];
   return { gateway };
 }
+
+// ---- S4 M2 추가 (기존 aiGatewayOptions 시그니처·동작은 그대로) ----
+// GatewayOptions.metadata: @cloudflare/workers-types 4.20260702.1의
+// `GatewayOptions.metadata?: Record<string, number|string|boolean|null|bigint>`로
+// 바인딩이 받는다는 것을 확인했다 (notes/S4-M2-findings.md §1). 게이트웨이 로그의
+// metadata 필드로 돌아오므로 비용 동기화가 eventId로 대조한다.
+// 동시 요청에서 env.AI.aiGatewayLogId가 덮어써질 수 있어(§7.3 위험) 이 경로가 기본이다.
+export type GatewayMetadata = Record<string, number | string | boolean | null>;
+
+export function aiGatewayOptionsWithMeta(opts?: { skipCache?: boolean; tag?: string; metadata?: GatewayMetadata }): {
+  gateway: { id: string; skipCache: boolean; tags?: string[]; metadata?: GatewayMetadata };
+} {
+  const base = aiGatewayOptions({ skipCache: opts?.skipCache, tag: opts?.tag });
+  const meta = opts?.metadata;
+  if (!meta || Object.keys(meta).length === 0) return base;
+  // AI Gateway는 메타데이터 항목 수를 제한한다(문서상 5개) — 앞에서 5개만 싣는다.
+  const trimmed: GatewayMetadata = {};
+  for (const [k, v] of Object.entries(meta).slice(0, 5)) trimmed[k] = v;
+  return { gateway: { ...base.gateway, metadata: trimmed } };
+}
+
+// env.AI.aiGatewayLogId: workers-types의 `abstract class Ai { aiGatewayLogId: string | null }`.
+// 게이트웨이를 거친 마지막 run() 뒤에 채워진다. 바인딩이 없거나 값이 없으면 null.
+export function readAiGatewayLogId(ai: unknown): string | null {
+  try {
+    const id = (ai as { aiGatewayLogId?: unknown } | null)?.aiGatewayLogId;
+    return typeof id === "string" && id ? id : null;
+  } catch {
+    return null;
+  }
+}
+
+// AI Gateway 로그 REST API 경로 (비용 동기화용). 계정 id는 vars(CF_ACCOUNT_ID, 비밀 아님),
+// 토큰은 secret(AIG_LOGS_TOKEN)으로만 받는다 — 이 파일에 값을 넣지 않는다.
+export function aiGatewayLogsUrl(accountId: string, gatewayId: string = AI_GATEWAY_ID): string {
+  return `https://api.cloudflare.com/client/v4/accounts/${encodeURIComponent(accountId)}/ai-gateway/gateways/${encodeURIComponent(gatewayId)}/logs`;
+}

@@ -1,0 +1,150 @@
+/* ==========================================================================
+   S4 관측 · 평가 공용 스타일 (public/obs/obs.css) — M2 작성, M5 공유
+   --------------------------------------------------------------------------
+   규칙 (설계서 §3.0):
+   - 새 토큰은 --obs-* 접두사만 쓴다. 값은 styles.css 토큰을 참조한다
+     (C8 토큰 정리와 충돌하지 않게). styles.css 없이 열어도 보이도록 폴백 값을 둔다.
+   - 클래스는 .obs- 접두사. 기존 .card/.badge/.small/button.primary|secondary는 그대로 쓴다.
+   - M5는 이 파일 아래쪽에 자기 절(§M5)을 "추가만" 한다. 위 절의 클래스 이름을 바꾸지 않는다.
+   ========================================================================== */
+
+:root{
+  --obs-gap:var(--space-3,12px);
+  --obs-radius:var(--radius,8px);
+  --obs-line:var(--color-line,#e4e4e7);
+  --obs-muted:var(--color-muted,#71717a);
+  --obs-text:var(--color-text,#14233a);
+  --obs-surface:var(--color-surface,#fff);
+  --obs-surface-soft:var(--color-surface-soft,#fafafa);
+  --obs-code-bg:var(--color-surface-code,#f4f4f5);
+  --obs-font-mono:var(--font-mono,ui-monospace,Menlo,Consolas,monospace);
+  --obs-text-xs:var(--text-xs,12px);
+  --obs-text-sm:var(--text-sm,13px);
+  /* 상태 */
+  --obs-ok:var(--color-ok,#0e7a4d); --obs-ok-bg:var(--color-ok-bg,#e6f6ee); --obs-ok-line:var(--color-ok-line,#bfe6cf);
+  --obs-warn:var(--color-warn,#8a5a00); --obs-warn-bg:var(--color-warn-bg,#fff4d6); --obs-warn-line:var(--color-warn-line,#f2dd9a);
+  --obs-err:var(--color-err,#b3261e); --obs-err-bg:var(--color-err-bg,#fdecea); --obs-err-line:var(--color-err-line,#f5c6c2);
+  --obs-info:var(--color-info,#1d4ed8); --obs-info-bg:var(--color-info-bg,#dbeafe); --obs-info-line:var(--color-info-line,#bfdbfe);
+  --obs-neutral-bg:var(--color-surface-code,#f4f4f5); --obs-neutral-line:var(--color-line-strong,#d4d4d8);
+  /* Cloudflare 제품 (C7 "처리 과정" 패널과 같은 어휘) — 의미 토큰만 */
+  --obs-prod-kv:var(--cat-amber,#d97706);
+  --obs-prod-do:var(--cat-violet,#7c3aed);
+  --obs-prod-ai:var(--cat-sky,#0284c7);
+  --obs-prod-vectorize:var(--cat-emerald,#059669);
+  --obs-prod-d1:var(--color-primary,#123863);
+  /* 차트 */
+  --obs-chart-line:var(--color-accent,#2d7dde);
+  --obs-chart-grid:var(--color-line,#e4e4e7);
+  --obs-floor:var(--color-err,#b3261e);
+}
+
+/* §1 레이아웃 */
+.obs-root{color:var(--obs-text);font-size:var(--obs-text-sm)}
+.obs-toolbar{display:flex;flex-wrap:wrap;gap:var(--space-2,8px);align-items:flex-end;margin:0 0 var(--obs-gap)}
+.obs-toolbar label{display:flex;flex-direction:column;gap:2px;font-size:var(--obs-text-xs);color:var(--obs-muted)}
+.obs-toolbar select,.obs-toolbar input{height:var(--control-h,32px);border:1px solid var(--obs-neutral-line);border-radius:var(--radius-sm,6px);padding:0 8px;background:var(--obs-surface);color:var(--obs-text);font-size:var(--obs-text-sm)}
+.obs-toolbar input[type=search]{min-width:200px}
+.obs-toolbar .obs-check{flex-direction:row;align-items:center;gap:6px;height:var(--control-h,32px)}
+.obs-notice{font-size:var(--obs-text-xs);color:var(--obs-muted);background:var(--obs-surface-soft);border:1px solid var(--obs-line);border-radius:var(--radius-sm,6px);padding:6px 10px;margin:0 0 var(--obs-gap)}
+.obs-error{color:var(--obs-err);background:var(--obs-err-bg);border:1px solid var(--obs-err-line);border-radius:var(--radius-sm,6px);padding:8px 12px}
+.obs-empty{color:var(--obs-muted);padding:24px;text-align:center}
+.obs-muted{color:var(--obs-muted)}
+.obs-mono{font-family:var(--obs-font-mono);font-size:var(--obs-text-xs)}
+.obs-num{font-variant-numeric:tabular-nums;text-align:right;white-space:nowrap}
+.obs-section{margin:var(--space-4,16px) 0}
+.obs-section>h3{font-size:var(--text-base,14px);font-weight:var(--weight-bold,600);margin:0 0 var(--space-2,8px);display:flex;align-items:center;gap:8px}
+.obs-back{background:none;border:0;color:var(--color-accent,#2d7dde);padding:0;cursor:pointer;font-size:var(--obs-text-sm)}
+.obs-back:hover{text-decoration:underline}
+
+/* §2 표 */
+.obs-table-wrap{overflow-x:auto;border:1px solid var(--obs-line);border-radius:var(--obs-radius);background:var(--obs-surface)}
+.obs-table{width:100%;border-collapse:collapse;font-size:var(--obs-text-sm)}
+.obs-table th{position:sticky;top:0;background:var(--obs-surface-soft);text-align:left;font-weight:var(--weight-medium,500);color:var(--obs-muted);font-size:var(--obs-text-xs);padding:6px 10px;border-bottom:1px solid var(--obs-line);white-space:nowrap}
+.obs-table td{padding:6px 10px;border-bottom:1px solid var(--obs-line);vertical-align:middle}
+.obs-table tr:last-child td{border-bottom:0}
+.obs-table tr.obs-row-link{cursor:pointer}
+.obs-table tr.obs-row-link:hover td,.obs-table tr.obs-row-link:focus-within td{background:var(--color-surface-tint,#f8fbff)}
+.obs-table tr.obs-row-link:focus{outline:2px solid var(--color-accent,#2d7dde);outline-offset:-2px}
+.obs-table tr.obs-row-dropped td{color:var(--obs-muted)}
+.obs-q{max-width:320px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.obs-table td.obs-mono{white-space:normal;overflow-wrap:break-word}
+.obs-table th,.obs-table td{padding-left:8px;padding-right:8px}
+.obs-pager{display:flex;justify-content:center;margin-top:var(--obs-gap)}
+
+/* §3 배지 (기존 .badge 위에 상태 변형만 추가) */
+.obs-badge{display:inline-flex;align-items:center;gap:4px;padding:1px 8px;border-radius:var(--radius-pill,999px);font-size:var(--obs-text-xs);line-height:18px;font-weight:var(--weight-medium,500);white-space:nowrap;border:1px solid var(--obs-neutral-line);background:var(--obs-neutral-bg);color:var(--obs-text)}
+.obs-badge.ok{background:var(--obs-ok-bg);border-color:var(--obs-ok-line);color:var(--obs-ok)}
+.obs-badge.warn{background:var(--obs-warn-bg);border-color:var(--obs-warn-line);color:var(--obs-warn)}
+.obs-badge.err{background:var(--obs-err-bg);border-color:var(--obs-err-line);color:var(--obs-err)}
+.obs-badge.info{background:var(--obs-info-bg);border-color:var(--obs-info-line);color:var(--obs-info)}
+.obs-badge.est{border-style:dashed}
+.obs-prod{display:inline-flex;align-items:center;gap:4px;font-size:var(--text-2xs,11px);line-height:16px;padding:0 6px;border-radius:var(--radius-xs,4px);border:1px solid currentColor;white-space:nowrap;background:var(--obs-surface)}
+.obs-prod::before{content:"";width:6px;height:6px;border-radius:50%;background:currentColor}
+.obs-prod[data-prod=kv]{color:var(--obs-prod-kv)}
+.obs-prod[data-prod=durable-objects]{color:var(--obs-prod-do)}
+.obs-prod[data-prod=workers-ai]{color:var(--obs-prod-ai)}
+.obs-prod[data-prod=vectorize]{color:var(--obs-prod-vectorize)}
+.obs-prod[data-prod=d1]{color:var(--obs-prod-d1)}
+
+/* §4 상세 머리 */
+.obs-head{display:grid;gap:var(--space-2,8px)}
+.obs-head .obs-question{font-size:var(--text-md,16px);font-weight:var(--weight-bold,600)}
+.obs-head .obs-answer{white-space:pre-wrap;line-height:var(--leading,1.5);background:var(--obs-surface-soft);border:1px solid var(--obs-line);border-radius:var(--radius-sm,6px);padding:10px 12px}
+.obs-meta{display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:6px 16px;margin:0}
+.obs-meta div{display:flex;flex-direction:column;min-width:0}
+.obs-meta dt{font-size:var(--obs-text-xs);color:var(--obs-muted)}
+.obs-meta dd{margin:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+
+/* §5 워터폴 */
+.obs-wf{border:1px solid var(--obs-line);border-radius:var(--obs-radius);background:var(--obs-surface);padding:8px 12px}
+.obs-wf-row{display:grid;grid-template-columns:200px 1fr 72px;align-items:center;gap:10px;min-height:28px}
+.obs-wf-label{display:flex;align-items:center;gap:6px;min-width:0;font-size:var(--obs-text-sm)}
+.obs-wf-label .obs-wf-name{font-family:var(--obs-font-mono);font-size:var(--obs-text-xs)}
+.obs-wf-track{position:relative;height:14px;background:var(--obs-surface-soft);border-radius:3px}
+.obs-wf-bar{position:absolute;top:2px;height:10px;min-width:2px;border-radius:2px;background:var(--obs-chart-line)}
+.obs-wf-bar[data-prod=kv]{background:var(--obs-prod-kv)}
+.obs-wf-bar[data-prod=durable-objects]{background:var(--obs-prod-do)}
+.obs-wf-bar[data-prod=workers-ai]{background:var(--obs-prod-ai)}
+.obs-wf-bar[data-prod=vectorize]{background:var(--obs-prod-vectorize)}
+.obs-wf-bar[data-prod=d1]{background:var(--obs-prod-d1)}
+.obs-wf-bar.fail{background:repeating-linear-gradient(45deg,var(--obs-err),var(--obs-err) 4px,var(--obs-err-bg) 4px,var(--obs-err-bg) 8px)}
+.obs-wf-ms{font-variant-numeric:tabular-nums;text-align:right;font-size:var(--obs-text-xs);color:var(--obs-muted)}
+.obs-wf-axis{display:grid;grid-template-columns:200px 1fr 72px;gap:10px;font-size:var(--text-2xs,11px);color:var(--obs-muted);margin-top:4px}
+.obs-wf-axis span:nth-child(2){display:flex;justify-content:space-between}
+.obs-wf-attrs{grid-column:1 / -1;font-family:var(--obs-font-mono);font-size:var(--text-2xs,11px);color:var(--obs-muted);padding:0 0 4px 20px;word-break:break-all}
+
+/* §6 근거 후보 — 점수 막대와 하한선 */
+.obs-floor-legend{display:flex;align-items:center;gap:8px;font-size:var(--obs-text-xs);color:var(--obs-muted);margin:0 0 6px}
+.obs-floor-legend i{display:inline-block;width:0;height:12px;border-left:2px dashed var(--obs-floor)}
+.obs-score{display:grid;grid-template-columns:120px 44px;align-items:center;gap:6px}
+.obs-score-track{position:relative;height:8px;background:var(--obs-surface-soft);border:1px solid var(--obs-line);border-radius:4px}
+.obs-score-fill{position:absolute;left:0;top:0;bottom:0;border-radius:3px;background:var(--obs-prod-vectorize)}
+.obs-score-fill.low{background:var(--obs-neutral-line)}
+.obs-score-floor{position:absolute;top:-3px;bottom:-3px;border-left:2px dashed var(--obs-floor)}
+
+/* §7 프롬프트/응답 */
+.obs-details{border:1px solid var(--obs-line);border-radius:var(--obs-radius);background:var(--obs-surface)}
+.obs-details>summary{cursor:pointer;padding:8px 12px;font-weight:var(--weight-medium,500);list-style-position:inside}
+.obs-details[open]>summary{border-bottom:1px solid var(--obs-line)}
+.obs-msg{padding:8px 12px;border-bottom:1px solid var(--obs-line)}
+.obs-msg:last-child{border-bottom:0}
+.obs-msg-role{font-size:var(--obs-text-xs);color:var(--obs-muted);text-transform:uppercase;letter-spacing:.04em;margin-bottom:4px}
+.obs-pre{margin:0;white-space:pre-wrap;word-break:break-word;font-family:var(--obs-font-mono);font-size:var(--obs-text-xs);background:var(--obs-code-bg);border-radius:var(--radius-xs,4px);padding:8px;max-height:360px;overflow:auto}
+
+/* §8 KPI · 미니 차트 (common.js sparkline/lineChart — M5 공유) */
+.obs-kpis{display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:var(--space-2,8px);margin:0 0 var(--obs-gap)}
+.obs-kpi{border:1px solid var(--obs-line);border-radius:var(--obs-radius);background:var(--obs-surface);padding:8px 12px}
+.obs-kpi .obs-kpi-label{font-size:var(--obs-text-xs);color:var(--obs-muted)}
+.obs-kpi .obs-kpi-value{font-size:var(--text-xl,20px);font-weight:var(--weight-bold,600);font-variant-numeric:tabular-nums}
+.obs-chart{display:block;max-width:100%}
+.obs-chart .obs-chart-grid{stroke:var(--obs-chart-grid);stroke-width:1}
+.obs-chart .obs-chart-line{fill:none;stroke:var(--obs-chart-line);stroke-width:2}
+.obs-chart .obs-chart-dot{fill:var(--obs-chart-line)}
+.obs-chart .obs-chart-mark{stroke:var(--obs-warn);stroke-dasharray:3 3}
+.obs-chart text{fill:var(--obs-muted);font-size:10px}
+
+@media (max-width:720px){
+  .obs-wf-row,.obs-wf-axis{grid-template-columns:120px 1fr 56px}
+}
+
+/* §M5 — 평가·개선 루프 UI가 여기 아래에 추가한다 (위 절은 바꾸지 않는다). */
