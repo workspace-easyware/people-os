@@ -15,6 +15,7 @@ import type { AskTrace, RetrievalCandidate, TraceSink, TraceSpan } from "./obs/t
 // S4 M6-β: 활성 system 프롬프트는 M4 prompts.ts가 D1 prompt_versions에서 읽는다
 // (테이블·행이 없으면 하드코딩 v1 폴백 — 질문 응답이 깨지지 않는다).
 import { getActivePrompt } from "./obs/prompts";
+import { classifyTopic, TOPIC_GUARD_ANSWER, type TopicGuardOutcome } from "./obs/topic-guard";
 
 // runAsk와 helper가 쓰는 바인딩. index.ts의 Env는 이를 포함한다(구조적 타이핑).
 export type AskEnv = {
@@ -447,6 +448,29 @@ export async function runAsk(env: AskEnv, input: AskInput, opts: AskOptions = {}
   mark("session", sessionStart);
   span("session", sessionReadVia, sessionStart, true, { via: sessionReadVia, followUp: searchQuestion !== question });
 
+  // 업무 외 질문 판별 (Decision Model, Clef): 확신 높을 때만 거른다.
+  // 세션 문맥을 더한 searchQuestion으로 판별한다 (후속 질문 "그건 어떻게 돼?"가
+  // 단독으로는 업무와 무관해 보일 수 있어서). 평가 호출(origin='eval')은
+  // 건너뛴다 — 골든셋은 전부 업무 질문이다. 경계선·판별 실패는 정상 경로(fail-open).
+  let guardedOffTopic = false;
+  let guardInfo: TopicGuardOutcome | undefined;
+  if (origin === "user") {
+    const guardStart = Date.now();
+    try {
+      guardInfo = await classifyTopic(env, searchQuestion);
+      guardedOffTopic = guardInfo.offTopic;
+    } catch (e) {
+      guardInfo = { offTopic: false, confidence: 0, engine: "clef", reason: `guard error, fail-open: ${errMsg(e)}` };
+    }
+    span("topic_guard", "workers-ai", guardStart, true, {
+      offTopic: guardedOffTopic,
+      confidence: guardInfo.confidence,
+      engine: guardInfo.engine,
+      reason: guardInfo.reason,
+    });
+    mark("topic_guard", guardStart);
+  }
+
   // 근거 검색 — 하이브리드 (회수 튜닝): Vectorize + D1 키워드 검색을 합친다.
   // Vectorize만 쓰면 topK 밖 순위의 chunk를 못 가져온다. 문장형 질문은
   // 임베딩 점수가 흩어져 맞는 chunk가 4위 이하로 밀리는데, 그때도 정책
@@ -457,124 +481,126 @@ export async function runAsk(env: AskEnv, input: AskInput, opts: AskOptions = {}
   // 빼고 최대 MAX_SOURCES개까지만 쓴다. 근거가 아예 없으면
   // grounded:false로 LLM 미호출 — 지어내기 금지는 그대로 (C5).
   let sources: Source[] = [];
-  let searchEngine = "d1-text";
+  let searchEngine = guardedOffTopic ? "none" : "d1-text";
   let d1FallbackRan = false; // Vectorize/AI 실패 시 D1 폴백이 이미 돎
   let vectorError: string | undefined;
-  try {
-    await ensureVectorSeeded(env);
-    const embedStart = Date.now();
-    let emb: { data: number[][] | number[] };
+  if (!guardedOffTopic) {
     try {
-      emb = await env.AI.run(EMBED_MODEL, { text: [searchQuestion] }, aiGatewayOptionsWithMeta({ skipCache: true, tag: "embed", metadata: gwMeta("embed") })) as { data: number[][] | number[] };
-      takeAigLogId();
-    } catch (e) {
-      span("embed", "workers-ai", embedStart, false, { model: EMBED_MODEL, error: errMsg(e) });
-      throw e;
-    }
-    mark("embed", embedStart);
-    span("embed", "workers-ai", embedStart, true, { model: EMBED_MODEL });
-    const raw = emb.data;
-    const values = new Float32Array(Array.isArray(raw[0]) ? (raw[0] as number[]) : (raw as number[]));
-    const vecStart = Date.now();
-    let vec: VectorizeMatches;
-    try {
-      vec = await env.VECTOR.query(values, { topK: 5, returnMetadata: "all" });
-    } catch (e) {
-      span("vectorize", "vectorize", vecStart, false, { topK: 5, error: errMsg(e) });
-      throw e;
-    }
-    mark("vectorize", vecStart);
-    const all = vec.matches || [];
-    span("vectorize", "vectorize", vecStart, true, { topK: 5, matches: all.length, scoreFloor: SCORE_FLOOR });
-    const matches = all.filter((m) => (m.score || 0) >= SCORE_FLOOR);
-    // 근거 후보: Vectorize 순위 그대로. 하한 미달은 여기서 확정, 나머지는 게이트·병합 뒤 채운다.
-    const vecCands = all.map((m, i) => {
-      const meta = (m.metadata || {}) as { title?: unknown; section?: unknown };
-      const cand: RetrievalCandidate = {
-        chunkId: String(m.id), stage: "vectorize", rank: i + 1, vectorScore: m.score || 0,
-        title: typeof meta.title === "string" ? meta.title : undefined,
-        article: typeof meta.section === "string" ? meta.section : undefined,
-        outcome: (m.score || 0) >= SCORE_FLOOR ? "kept" : "below_floor",
-      };
-      return cand;
-    });
-    retrieval.push(...vecCands);
-    if (matches.length > 0) {
-      const gateStart = Date.now();
-      const gateScores = new Map<string, { keywordScore: number; docId?: string }>();
-      const resolved = new Map<string, "kept" | "dedup" | "unresolved">();
-      let gatedCount = 0;
+      await ensureVectorSeeded(env);
+      const embedStart = Date.now();
+      let emb: { data: number[][] | number[] };
       try {
-        const gated = await keywordGate(env, searchQuestion, matches.map((m) => ({ id: String(m.id), score: m.score || 0, metadata: (m.metadata || {}) as Record<string, unknown> })), gateScores);
-        gatedCount = gated.length;
-        const gatedIds = new Set(gated.map((g) => g.id));
-        for (const cand of vecCands) {
-          const gs = gateScores.get(cand.chunkId);
-          if (gs) { cand.keywordScore = gs.keywordScore; if (gs.docId) cand.docId = gs.docId; }
-          if (cand.outcome === "kept" && !gatedIds.has(cand.chunkId)) cand.outcome = "keyword_gate";
-        }
-        if (gated.length > 0) {
-          searchEngine = "vectorize";
-          sources = await resolveSources(env, searchQuestion, gated, resolved);
-          if (sources.length === 0) throw new Error("no resolvable matches");
-        }
-      } finally {
-        // dedup: 같은 문서의 더 높은 점수 매치에 밀림. unresolved(D1·메타데이터 없음)는
-        // 계약 enum에 없어서 후보 목록에서 빼고 gate span attrs에 개수만 남긴다.
-        let unresolved = 0;
-        for (let i = vecCands.length - 1; i >= 0; i--) {
-          const r = resolved.get(vecCands[i].chunkId);
-          if (r === "dedup") vecCands[i].outcome = "dedup";
-          else if (r === "unresolved") { unresolved++; retrieval.splice(retrieval.indexOf(vecCands[i]), 1); }
-        }
-        span("gate", "d1", gateStart, sources.length > 0 || gatedCount === 0, {
-          candidates: matches.length, passed: gatedCount, resolved: sources.length, unresolved, keywordGateMin: KEYWORD_GATE_MIN,
-        });
+        emb = await env.AI.run(EMBED_MODEL, { text: [searchQuestion] }, aiGatewayOptionsWithMeta({ skipCache: true, tag: "embed", metadata: gwMeta("embed") })) as { data: number[][] | number[] };
+        takeAigLogId();
+      } catch (e) {
+        span("embed", "workers-ai", embedStart, false, { model: EMBED_MODEL, error: errMsg(e) });
+        throw e;
       }
-      mark("gate", gateStart);
+      mark("embed", embedStart);
+      span("embed", "workers-ai", embedStart, true, { model: EMBED_MODEL });
+      const raw = emb.data;
+      const values = new Float32Array(Array.isArray(raw[0]) ? (raw[0] as number[]) : (raw as number[]));
+      const vecStart = Date.now();
+      let vec: VectorizeMatches;
+      try {
+        vec = await env.VECTOR.query(values, { topK: 5, returnMetadata: "all" });
+      } catch (e) {
+        span("vectorize", "vectorize", vecStart, false, { topK: 5, error: errMsg(e) });
+        throw e;
+      }
+      mark("vectorize", vecStart);
+      const all = vec.matches || [];
+      span("vectorize", "vectorize", vecStart, true, { topK: 5, matches: all.length, scoreFloor: SCORE_FLOOR });
+      const matches = all.filter((m) => (m.score || 0) >= SCORE_FLOOR);
+      // 근거 후보: Vectorize 순위 그대로. 하한 미달은 여기서 확정, 나머지는 게이트·병합 뒤 채운다.
+      const vecCands = all.map((m, i) => {
+        const meta = (m.metadata || {}) as { title?: unknown; section?: unknown };
+        const cand: RetrievalCandidate = {
+          chunkId: String(m.id), stage: "vectorize", rank: i + 1, vectorScore: m.score || 0,
+          title: typeof meta.title === "string" ? meta.title : undefined,
+          article: typeof meta.section === "string" ? meta.section : undefined,
+          outcome: (m.score || 0) >= SCORE_FLOOR ? "kept" : "below_floor",
+        };
+        return cand;
+      });
+      retrieval.push(...vecCands);
+      if (matches.length > 0) {
+        const gateStart = Date.now();
+        const gateScores = new Map<string, { keywordScore: number; docId?: string }>();
+        const resolved = new Map<string, "kept" | "dedup" | "unresolved">();
+        let gatedCount = 0;
+        try {
+          const gated = await keywordGate(env, searchQuestion, matches.map((m) => ({ id: String(m.id), score: m.score || 0, metadata: (m.metadata || {}) as Record<string, unknown> })), gateScores);
+          gatedCount = gated.length;
+          const gatedIds = new Set(gated.map((g) => g.id));
+          for (const cand of vecCands) {
+            const gs = gateScores.get(cand.chunkId);
+            if (gs) { cand.keywordScore = gs.keywordScore; if (gs.docId) cand.docId = gs.docId; }
+            if (cand.outcome === "kept" && !gatedIds.has(cand.chunkId)) cand.outcome = "keyword_gate";
+          }
+          if (gated.length > 0) {
+            searchEngine = "vectorize";
+            sources = await resolveSources(env, searchQuestion, gated, resolved);
+            if (sources.length === 0) throw new Error("no resolvable matches");
+          }
+        } finally {
+          // dedup: 같은 문서의 더 높은 점수 매치에 밀림. unresolved(D1·메타데이터 없음)는
+          // 계약 enum에 없어서 후보 목록에서 빼고 gate span attrs에 개수만 남긴다.
+          let unresolved = 0;
+          for (let i = vecCands.length - 1; i >= 0; i--) {
+            const r = resolved.get(vecCands[i].chunkId);
+            if (r === "dedup") vecCands[i].outcome = "dedup";
+            else if (r === "unresolved") { unresolved++; retrieval.splice(retrieval.indexOf(vecCands[i]), 1); }
+          }
+          span("gate", "d1", gateStart, sources.length > 0 || gatedCount === 0, {
+            candidates: matches.length, passed: gatedCount, resolved: sources.length, unresolved, keywordGateMin: KEYWORD_GATE_MIN,
+          });
+        }
+        mark("gate", gateStart);
+      }
+      // 하한·게이트를 통과한 매치가 없어도 아래 D1 병합이 본다.
+    } catch (e) {
+      vectorError = errMsg(e);
+      // Vectorize/AI 실패 — D1 텍스트 검색으로 답한다 (로컬 dev 경로).
+      // minScore 0: 기존 동작 유지 (약한 겹침도 로컬에서는 근거로 쓴다).
+      if (sources.length === 0) {
+        // 게이트 뒤 resolve 실패로 들어온 경우 Vectorize 후보는 근거가 아니다.
+        for (const cand of retrieval) if (cand.stage === "vectorize" && cand.outcome === "kept") cand.outcome = "keyword_gate";
+        const fbStart = Date.now();
+        sources = await d1TextSources(env, searchQuestion);
+        if (sources.length > 0) searchEngine = "d1-text";
+        d1FallbackRan = true;
+        sources.forEach((s, i) => retrieval.push({ chunkId: s.id, title: s.title, article: s.section, stage: "d1", rank: i + 1, keywordScore: s.score, outcome: "kept" }));
+        span("d1_merge", "d1", fbStart, true, { mode: "fallback", minScore: 0, found: sources.length, reason: vectorError });
+      }
     }
-    // 하한·게이트를 통과한 매치가 없어도 아래 D1 병합이 본다.
-  } catch (e) {
-    vectorError = errMsg(e);
-    // Vectorize/AI 실패 — D1 텍스트 검색으로 답한다 (로컬 dev 경로).
-    // minScore 0: 기존 동작 유지 (약한 겹침도 로컬에서는 근거로 쓴다).
-    if (sources.length === 0) {
-      // 게이트 뒤 resolve 실패로 들어온 경우 Vectorize 후보는 근거가 아니다.
-      for (const cand of retrieval) if (cand.stage === "vectorize" && cand.outcome === "kept") cand.outcome = "keyword_gate";
-      const fbStart = Date.now();
-      sources = await d1TextSources(env, searchQuestion);
-      if (sources.length > 0) searchEngine = "d1-text";
-      d1FallbackRan = true;
-      sources.forEach((s, i) => retrieval.push({ chunkId: s.id, title: s.title, article: s.section, stage: "d1", rank: i + 1, keywordScore: s.score, outcome: "kept" }));
-      span("d1_merge", "d1", fbStart, true, { mode: "fallback", minScore: 0, found: sources.length, reason: vectorError });
+    // D1 병합: Vectorize에서 못 가져온 chunk를 키워드 검색으로 보충한다.
+    // 암묵지 문서는 Vectorize upsert가 늦거나 실패해도 D1 chunk에는
+    // 있으므로 여기서 잡힌다 (C5-b). (실측: "출산 전후 재택"은 정책 chunk
+    // 전원 0점, 암묵지 chunk 27점.)
+    if (!d1FallbackRan) {
+      const mergeStart = Date.now();
+      // d1TextSources(…, KEYWORD_GATE_MIN)과 같은 결과: 같은 조회를 하한 0으로
+      // 받아 여기서 하한을 적용한다 (하한 미달 후보도 트레이스에 남기려고).
+      const d1All = await d1TextSources(env, searchQuestion);
+      const d1Extra = d1All.filter((s) => s.score >= KEYWORD_GATE_MIN);
+      const haveIds = new Set(sources.map((s) => s.id));
+      let added = 0;
+      let full = false;
+      d1All.forEach((s, i) => {
+        if (s.score < KEYWORD_GATE_MIN) retrieval.push({ chunkId: s.id, title: s.title, article: s.section, stage: "d1", rank: i + 1, keywordScore: s.score, outcome: "below_floor" });
+      });
+      for (const s of d1Extra) {
+        const rank = d1All.indexOf(s) + 1;
+        const cand: RetrievalCandidate = { chunkId: s.id, title: s.title, article: s.section, stage: "d1", rank, keywordScore: s.score, outcome: "kept" };
+        if (!full && sources.length >= MAX_SOURCES) full = true;
+        if (full) { cand.outcome = "over_max"; retrieval.push(cand); continue; }
+        if (!haveIds.has(s.id)) { sources.push(s); haveIds.add(s.id); added++; }
+        else cand.outcome = "dedup";
+        retrieval.push(cand);
+      }
+      span("d1_merge", "d1", mergeStart, true, { mode: "merge", minScore: KEYWORD_GATE_MIN, found: d1Extra.length, added, maxSources: MAX_SOURCES });
     }
-  }
-  // D1 병합: Vectorize에서 못 가져온 chunk를 키워드 검색으로 보충한다.
-  // 암묵지 문서는 Vectorize upsert가 늦거나 실패해도 D1 chunk에는
-  // 있으므로 여기서 잡힌다 (C5-b). (실측: "출산 전후 재택"은 정책 chunk
-  // 전원 0점, 암묵지 chunk 27점.)
-  if (!d1FallbackRan) {
-    const mergeStart = Date.now();
-    // d1TextSources(…, KEYWORD_GATE_MIN)과 같은 결과: 같은 조회를 하한 0으로
-    // 받아 여기서 하한을 적용한다 (하한 미달 후보도 트레이스에 남기려고).
-    const d1All = await d1TextSources(env, searchQuestion);
-    const d1Extra = d1All.filter((s) => s.score >= KEYWORD_GATE_MIN);
-    const haveIds = new Set(sources.map((s) => s.id));
-    let added = 0;
-    let full = false;
-    d1All.forEach((s, i) => {
-      if (s.score < KEYWORD_GATE_MIN) retrieval.push({ chunkId: s.id, title: s.title, article: s.section, stage: "d1", rank: i + 1, keywordScore: s.score, outcome: "below_floor" });
-    });
-    for (const s of d1Extra) {
-      const rank = d1All.indexOf(s) + 1;
-      const cand: RetrievalCandidate = { chunkId: s.id, title: s.title, article: s.section, stage: "d1", rank, keywordScore: s.score, outcome: "kept" };
-      if (!full && sources.length >= MAX_SOURCES) full = true;
-      if (full) { cand.outcome = "over_max"; retrieval.push(cand); continue; }
-      if (!haveIds.has(s.id)) { sources.push(s); haveIds.add(s.id); added++; }
-      else cand.outcome = "dedup";
-      retrieval.push(cand);
-    }
-    span("d1_merge", "d1", mergeStart, true, { mode: "merge", minScore: KEYWORD_GATE_MIN, found: d1Extra.length, added, maxSources: MAX_SOURCES });
   }
   // 근거 없음: LLM을 호출하지 않고 경고로 답한다 (C5, Baryon AX).
   // 연차휴가 규정을 강제 근거로 넣던 폴백은 삭제했다 — 근거가 없는데
@@ -588,13 +614,14 @@ export async function runAsk(env: AskEnv, input: AskInput, opts: AskOptions = {}
   let rawResponse: unknown;
   let usage: AskTrace["usage"];
   if (!grounded) {
-    answer = "등록된 규정에서 근거를 찾지 못했습니다. 이 질문에 대한 답은 아직 등록된 규정에 없습니다. 인사팀에 확인해 주세요.";
+    // 업무 외 판별 거절: 고정 답, LLM 미호출, 공백 큐에 쌓지 않는다 (큐 오염 방지).
+    answer = guardedOffTopic ? TOPIC_GUARD_ANSWER : "등록된 규정에서 근거를 찾지 못했습니다. 이 질문에 대한 답은 아직 등록된 규정에 없습니다. 인사팀에 확인해 주세요.";
     engine = "none";
     timings.llm = 0; // 근거 없음 — LLM을 호출하지 않는다
     // C5-b: 근거 없는 질문은 지식 공백 큐에 쌓는다 (라이브러리에서 담당자가 답한다).
     // 기록 실패가 질문 응답을 망가뜨리지 않게 try/catch로 감싼다.
     // 평가 호출(opts.recordGap=false)은 공백 큐에 행을 만들지 않는다.
-    if (shouldRecordGap) {
+    if (shouldRecordGap && !guardedOffTopic) {
       try { gapId = (await recordGap(env, question, "no-evidence")).id; }
       catch (e) { console.log("[gaps] recordGap failed:", e instanceof Error ? e.message : String(e)); }
     }
@@ -660,7 +687,7 @@ export async function runAsk(env: AskEnv, input: AskInput, opts: AskOptions = {}
   const trace: AskTrace = {
     eventId, sessionId, origin, ...(opts.evalRunId ? { evalRunId: opts.evalRunId } : {}),
     question, searchQuestion, answer,
-    status: grounded ? "grounded" : "no_evidence",
+    status: guardedOffTopic ? "off_topic" : grounded ? "grounded" : "no_evidence",
     ...(gapId ? { gapId } : {}),
     engine, searchEngine, promptVersion, model: grounded ? LLM_MODEL : "",
     knowledgeEpoch, timings: { ...timings }, spans, retrieval,

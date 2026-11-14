@@ -62,7 +62,7 @@
   function badge(text, kind, title) {
     return '<span class="obs-badge' + (kind ? ' ' + escAttr(kind) : '') + '"' + (title ? ' title="' + escAttr(title) + '"' : '') + '>' + esc(text) + '</span>';
   }
-  var STATUS = { grounded: ['근거 있음', 'ok'], no_evidence: ['근거 없음', 'warn'], error: ['오류', 'err'] };
+  var STATUS = { grounded: ['근거 있음', 'ok'], no_evidence: ['근거 없음', 'warn'], off_topic: ['업무 외', 'warn'], error: ['오류', 'err'] };
   function statusBadge(status) {
     var s = STATUS[status] || [status || '—', ''];
     return badge(s[0], s[1], status);

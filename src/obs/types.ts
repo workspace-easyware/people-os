@@ -4,7 +4,7 @@
 // ---- §7.1 수집 계약 ---------------------------------------------------------
 
 export type TraceSpan = {
-  name: "cache" | "session" | "embed" | "vectorize" | "gate" | "d1_merge" | "llm" | "session_save";
+  name: "cache" | "session" | "topic_guard" | "embed" | "vectorize" | "gate" | "d1_merge" | "llm" | "session_save";
   product: "kv" | "durable-objects" | "workers-ai" | "vectorize" | "d1";
   startMs: number;
   durationMs: number;
@@ -32,7 +32,7 @@ export type AskTrace = {
   question: string;
   searchQuestion: string;
   answer: string;
-  status: "grounded" | "no_evidence" | "error";
+  status: "grounded" | "no_evidence" | "off_topic" | "error";
   gapId?: string;
   engine: string;
   searchEngine: string;

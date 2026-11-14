@@ -32,7 +32,7 @@
       '<div class="obs-kpis" data-kpis></div>' +
       '<form class="obs-toolbar" data-filters>' +
       '<label>출처<select name="origin"><option value="user">user</option><option value="eval">eval</option><option value="all">전체</option></select></label>' +
-      '<label>상태<select name="status"><option value="">전체</option><option value="grounded">근거 있음</option><option value="no_evidence">근거 없음</option><option value="error">오류</option></select></label>' +
+      '<label>상태<select name="status"><option value="">전체</option><option value="grounded">근거 있음</option><option value="no_evidence">근거 없음</option><option value="off_topic">업무 외</option><option value="error">오류</option></select></label>' +
       '<label>피드백<select name="feedback"><option value="">전체</option><option value="down">👎만</option><option value="up">👍만</option><option value="none">없음</option></select></label>' +
       '<label class="obs-check"><input type="checkbox" name="risk"> 판정 위험(환각 의심)</label>' +
       '<label>질문 검색<input type="search" name="q" placeholder="질문에 포함된 말"></label>' +

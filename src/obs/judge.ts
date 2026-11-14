@@ -240,7 +240,7 @@ export async function judgeAnswer(env: { AI: unknown }, input: JudgeInput): Prom
 
 // ---- §6.1 규칙 판정표 ----------------------------------------------------------------
 
-export type SystemStatus = "grounded" | "no_evidence" | "error";
+export type SystemStatus = "grounded" | "no_evidence" | "off_topic" | "error";
 
 export type RulePlan =
   /** 규칙으로 통과 — judge·verdict 생략 (judge_skipped='rule'). */
