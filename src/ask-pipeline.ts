@@ -9,8 +9,8 @@
 // 근거 검색 helper(resolveSources, keywordGate, ensureVectorSeeded,
 // d1TextSources)와 공백 큐·epoch helper도 index.ts에서 그대로 옮겼다.
 // index.ts의 다른 경로(health, 게시 검증, 피드백 등)는 여기서 import한다.
-import { localSearchChunks, poolForKind, questionTokens, RAG_POOL_LABEL, uid } from "./lib";
-import type { RagPool } from "./lib";
+import { docOwnerClause, localSearchChunks, poolForDoc, poolForKind, questionTokens, RAG_POOL_LABEL, SHARED_USER_ID, uid, vectorUserFilter } from "./lib";
+import type { RagPool, RagViewer } from "./lib";
 import { aiGatewayOptions, aiGatewayOptionsWithMeta } from "./ai-gateway";
 import type { AskTrace, RetrievalCandidate, TraceSink, TraceSpan } from "./obs/types";
 // S4 M6-β: 활성 system 프롬프트는 M4 prompts.ts가 D1 prompt_versions에서 읽는다
@@ -89,6 +89,9 @@ export type Source = { id: string; title: string; section: string; snippet: stri
 type Match = { id: string; score: number; metadata?: Record<string, unknown> };
 
 // Vectorize 매치를 조문 단위 근거로 바꾼다 (C5).
+// - 입력 매치는 runAsk에서 이미 viewer 필터(vectorUserFilter)가 적용된
+//   Vectorize 결과라서, 여기서 별도 소유자 검사는 하지 않는다 (방어 깊이:
+//   격리는 조회 시점에 필터로 강제하고, 이 함수는 근거 변환만 맡는다).
 // - chunk id(새 색인)면 D1 chunks에서 직접 읽는다.
 // - policy id(재시딩 전 구 색인)면 그 정책의 조문 중 질문과 키워드가 가장
 //   겹치는 조문 1개를 쓴다. chunks가 없으면 정책 본문 앞 220자로 폴백.
@@ -117,13 +120,13 @@ export async function resolveSources(
       let author: string | undefined;
       let publishedAt: string | undefined;
       if (!title) {
-        const doc = await env.DB.prepare("SELECT title, kind, author, created_at FROM documents WHERE id = ?").bind(chunk.doc_id)
-          .first<{ title: string; kind: string; author: string | null; created_at: string }>();
+        const doc = await env.DB.prepare("SELECT title, kind, owner_id, author, created_at FROM documents WHERE id = ?").bind(chunk.doc_id)
+          .first<{ title: string; kind: string; owner_id: string | null; author: string | null; created_at: string }>();
         if (doc) {
           title = doc.title;
           if (doc.kind === "tacit") { kind = "tacit"; author = doc.author || "인사팀"; publishedAt = doc.created_at.slice(0, 10); }
           else if (doc.kind === "transcript") { kind = "transcript"; }
-          pool = poolForKind(doc.kind);
+          pool = poolForDoc(doc.kind, doc.owner_id);
         }
       }
       const src: Source = { id: chunk.id, title: title ?? chunk.doc_id, section: chunk.article, snippet: chunk.text, score: m.score, kind, pool, author, publishedAt };
@@ -154,11 +157,12 @@ export async function resolveSources(
       continue;
     }
     // 알 수 없는 id — 메타데이터가 있으면 그대로 쓴다.
-    const meta = (m.metadata || {}) as { title?: string; section?: string; snippet?: string; kind?: string };
+    const meta = (m.metadata || {}) as { title?: string; section?: string; snippet?: string; kind?: string; user_id?: string };
     if (meta.snippet) {
       const metaKind = meta.kind;
       const kind: "policy" | "tacit" | "transcript" = metaKind === "tacit" ? "tacit" : metaKind === "transcript" ? "transcript" : "policy";
-      const src: Source = { id: m.id, title: meta.title || m.id, section: meta.section || "", snippet: meta.snippet, score: m.score, kind, pool: poolForKind(metaKind) };
+      // 메타데이터의 user_id가 있으면 소유자 기준으로 풀을 정한다 (개인 문서가 "공용"으로 보이지 않게).
+      const src: Source = { id: m.id, title: meta.title || m.id, section: meta.section || "", snippet: meta.snippet, score: m.score, kind, pool: poolForDoc(metaKind, meta.user_id && meta.user_id !== SHARED_USER_ID ? meta.user_id : null) };
       produced.set(m.id, src);
       const prev = byDoc.get(m.id);
       if (!prev || prev.score < m.score) byDoc.set(m.id, src);
@@ -207,7 +211,9 @@ export async function ensureVectorSeeded(env: AskEnv, opts?: { force?: boolean }
     if (dims !== EMBED_DIMS) {
       return { seeded: false, error: `embedding dims ${dims} != index dims ${EMBED_DIMS}` };
     }
-    const vectors = list.map((ch, i) => ({ id: ch.id, values: data[i] as number[], metadata: { title: ch.title, section: ch.article, snippet: ch.text.slice(0, 220) } }));
+    // 정책 chunk는 전부 공용이라 user_id에 공용 센티넬 "shared"를 넣는다
+    // (개인별 RAG 격리: Vectorize 조회는 user_id $in ["shared", 본인 id]로 묶는다).
+    const vectors = list.map((ch, i) => ({ id: ch.id, values: data[i] as number[], metadata: { title: ch.title, section: ch.article, snippet: ch.text.slice(0, 220), user_id: SHARED_USER_ID } }));
     await env.VECTOR.upsert(vectors);
     const result = { seeded: true, dims, upserted: list.length, total: list.length, at: new Date().toISOString() };
     await env.DB.prepare("INSERT OR REPLACE INTO meta (key, value, updated_at) VALUES (?, ?, datetime('now'))").bind(VECTOR_SEED_KEY, JSON.stringify(result)).run();
@@ -227,6 +233,8 @@ export async function ensureVectorSeeded(env: AskEnv, opts?: { force?: boolean }
 // 가릴 수 없다 (bge-base-en: 근거 있음 0.81~0.83 / 근거 없음 0.81~0.82로 겹침).
 // 그래서 Vectorize 상위 매치가 D1 키워드 검색(localSearchChunks)에서도
 // 겹침이 있는지 확인한다. 겹침 점수가 KEYWORD_GATE_MIN 미만이면 근거에서 뺀다.
+// - 입력 매치는 runAsk에서 이미 viewer 필터가 적용된 Vectorize 결과라서,
+//   여기서 별도 소유자 검사는 하지 않는다 (방어 깊이: 격리는 조회 시점에 필터로 강제).
 // - chunk id면 해당 chunk, policy id(구 색인)면 그 정책의 조문 중 최고 점수로 본다.
 // - D1에서 chunk를 못 찾는 id(알 수 없는 id)는 그대로 둔다 (fail-open).
 // - 질문에서 겹침 신호가 되는 토큰이 하나도 없으면 게이트를 건너뛴다
@@ -311,10 +319,14 @@ export async function getKnowledgeEpoch(env: AskEnv): Promise<number> {
 // minScore 이상만 남긴다 (0이면 localSearch의 score>0 필터만 적용).
 // LEFT JOIN으로 암묵지 chunk(doc_id가 policies에 없음)도 찾고,
 // 암묵지 chunk는 출처 배지용 kind/author/게시일도 함께 싣는다.
-export async function d1TextSources(env: AskEnv, question: string, minScore = 0): Promise<Source[]> {
+// 개인별 RAG 격리: docOwnerClause(viewer, "d")로 본인이 볼 수 있는 문서의
+// chunk만 남긴다 (공용 owner_id IS NULL 또는 본인 소유). policies chunk는
+// documents 행이 없어 d.owner_id가 NULL이라 공용으로 취급된다.
+export async function d1TextSources(env: AskEnv, question: string, minScore = 0, viewer: RagViewer | null = null): Promise<Source[]> {
+  const scope = docOwnerClause(viewer, "d");
   const rows = await env.DB.prepare(
-    "SELECT c.id, c.doc_id, c.article, c.text, c.ord, COALESCE(p.title, d.title, c.doc_id) AS title, d.kind AS doc_kind, d.author AS doc_author, d.created_at AS doc_created FROM chunks c LEFT JOIN policies p ON p.id = c.doc_id LEFT JOIN documents d ON d.id = c.doc_id"
-  ).all<{ id: string; doc_id: string; article: string; text: string; ord: number; title: string; doc_kind: string | null; doc_author: string | null; doc_created: string | null }>();
+    `SELECT c.id, c.doc_id, c.article, c.text, c.ord, COALESCE(p.title, d.title, c.doc_id) AS title, d.kind AS doc_kind, d.owner_id AS doc_owner, d.author AS doc_author, d.created_at AS doc_created FROM chunks c LEFT JOIN policies p ON p.id = c.doc_id LEFT JOIN documents d ON d.id = c.doc_id WHERE ${scope.clause}`
+  ).bind(...scope.params).all<{ id: string; doc_id: string; article: string; text: string; ord: number; title: string; doc_kind: string | null; doc_owner: string | null; doc_author: string | null; doc_created: string | null }>();
   const list = rows.results || [];
   const found = localSearchChunks(question, list);
   const byId = new Map(list.map((r) => [r.id, r]));
@@ -325,7 +337,7 @@ export async function d1TextSources(env: AskEnv, question: string, minScore = 0)
       const docKind = row?.doc_kind;
       const tacit = docKind === "tacit";
       const kind: "policy" | "tacit" | "transcript" = tacit ? "tacit" : docKind === "transcript" ? "transcript" : "policy";
-      return { id: f.id, title: f.title, section: f.article, snippet: f.snippet, score: f.score, kind, pool: poolForKind(docKind), author: tacit ? (row?.doc_author || "인사팀") : undefined, publishedAt: tacit ? row?.doc_created?.slice(0, 10) : undefined };
+      return { id: f.id, title: f.title, section: f.article, snippet: f.snippet, score: f.score, kind, pool: poolForDoc(docKind, row?.doc_owner), author: tacit ? (row?.doc_author || "인사팀") : undefined, publishedAt: tacit ? row?.doc_created?.slice(0, 10) : undefined };
     });
 }
 
@@ -348,6 +360,7 @@ export type AskOptions = {
   persistSession?: boolean; // DO/D1 세션에 대화 저장 (기본 true)
   gatewaySkipCache?: boolean; // AI Gateway 캐시 건너뛰기 — LLM 호출만 (기본 false, force면 true)
   promptVersionId?: string; // 기본: 활성 버전
+  viewer?: RagViewer | null; // RAG 조회자 (기본 null = 익명/평가, 공용만 조회)
 };
 
 export type AskHooks = {
@@ -380,6 +393,7 @@ type SpanProduct = TraceSpan["product"];
 
 export async function runAsk(env: AskEnv, input: AskInput, opts: AskOptions = {}, hooks: AskHooks = {}): Promise<AskRunResult> {
   const origin = opts.origin ?? "user";
+  const viewer = opts.viewer ?? null; // 개인별 RAG 격리: null이면 공용만 조회
   const readCache = opts.readCache ?? true;
   const writeCache = opts.writeCache ?? true;
   const persistSession = opts.persistSession ?? true;
@@ -415,8 +429,11 @@ export async function runAsk(env: AskEnv, input: AskInput, opts: AskOptions = {}
   // 세션과 무관한 키로 캐시하면 다른 세션의 오래된(잘못된) 답을 돌려주게 된다.
   // C5-b: 지식 epoch도 키에 넣는다. 암묵지 게시 때 epoch가 올라가면
   // 게시 전 캐시 답(근거 없음 경고)이 나오지 않고 새로 계산한다.
+  // 캐시 키에 viewer id도 넣는다: 같은 세션 id라도 사용자가 바뀌면
+  // 다른 사람의 개인 문서 기반 답이 캐시에서 새는 것을 막기 위함이다
+  // (viewer 없으면 "anon" — 익명/평가 호출은 공용만 보니 공유해도 안전하다).
   const knowledgeEpoch = await getKnowledgeEpoch(env);
-  const cacheKey = `ask:${sessionId}:${question}:${knowledgeEpoch}`;
+  const cacheKey = `ask:${viewer?.id ?? "anon"}:${sessionId}:${question}:${knowledgeEpoch}`;
   const cacheStart = Date.now();
   if (readCache) {
     try {
@@ -511,7 +528,11 @@ export async function runAsk(env: AskEnv, input: AskInput, opts: AskOptions = {}
       const vecStart = Date.now();
       let vec: VectorizeMatches;
       try {
-        vec = await env.VECTOR.query(values, { topK: 5, returnMetadata: "all" });
+        // 개인별 RAG 격리: user_id 필터는 서버에서 먼저 적용되고 topK는
+        // 필터된 집합에서 뽑힌다 (필터 밖 개인 문서는 순위에도 들지 않는다).
+        // vectorUserFilter는 Record<string, unknown>을 돌려줘 workers-types의
+        // VectorizeVectorMetadataFilter와 직접 맞지 않아 최소한의 캐스트를 쓴다.
+        vec = await env.VECTOR.query(values, { topK: 5, returnMetadata: "all", filter: vectorUserFilter(viewer) as VectorizeVectorMetadataFilter });
       } catch (e) {
         span("vectorize", "vectorize", vecStart, false, { topK: 5, error: errMsg(e) });
         throw e;
@@ -575,7 +596,7 @@ export async function runAsk(env: AskEnv, input: AskInput, opts: AskOptions = {}
         // 게이트 뒤 resolve 실패로 들어온 경우 Vectorize 후보는 근거가 아니다.
         for (const cand of retrieval) if (cand.stage === "vectorize" && cand.outcome === "kept") cand.outcome = "keyword_gate";
         const fbStart = Date.now();
-        sources = await d1TextSources(env, searchQuestion);
+        sources = await d1TextSources(env, searchQuestion, 0, viewer);
         if (sources.length > 0) searchEngine = "d1-text";
         d1FallbackRan = true;
         sources.forEach((s, i) => retrieval.push({ chunkId: s.id, title: s.title, article: s.section, stage: "d1", rank: i + 1, keywordScore: s.score, outcome: "kept" }));
@@ -590,7 +611,7 @@ export async function runAsk(env: AskEnv, input: AskInput, opts: AskOptions = {}
       const mergeStart = Date.now();
       // d1TextSources(…, KEYWORD_GATE_MIN)과 같은 결과: 같은 조회를 하한 0으로
       // 받아 여기서 하한을 적용한다 (하한 미달 후보도 트레이스에 남기려고).
-      const d1All = await d1TextSources(env, searchQuestion);
+      const d1All = await d1TextSources(env, searchQuestion, 0, viewer);
       const d1Extra = d1All.filter((s) => s.score >= KEYWORD_GATE_MIN);
       const haveIds = new Set(sources.map((s) => s.id));
       let added = 0;

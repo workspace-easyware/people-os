@@ -3,7 +3,8 @@ import type { Context } from "hono";
 import PptxGenJS from "pptxgenjs";
 import { AgentSession } from "./agent-session";
 import { splitOggOpus } from "./ogg";
-import { coachingTranscript, localReflect, localSearchChunks, localSummarize, policies, poolForKind, sampleTranscript, splitMarkdownIntoChunks, splitPolicyIntoChunks, uid } from "./lib";
+import { coachingTranscript, docOwnerClause, localReflect, localSearchChunks, localSummarize, policies, poolForDoc, poolForKind, sampleTranscript, SHARED_USER_ID, splitMarkdownIntoChunks, splitPolicyIntoChunks, uid, vectorUserIdForDoc } from "./lib";
+import type { RagViewer } from "./lib";
 import { AI_GATEWAY_ID, aiGatewayOptions } from "./ai-gateway";
 import { decodePlainText, detectDocumentFormat, extractHwpxText } from "./parse";
 import { generateDigest, getLatestDigest } from "./digest";
@@ -23,7 +24,7 @@ import { syncGatewayCosts } from "./obs/costs";
 import type { EvalItemMessage } from "./obs/types";
 // 로그인 (2026-11-15): 인증 API + adminAllowed(이중 게이트용 상수 시간 비교).
 import { authApp } from "./auth-routes";
-import { adminAllowed } from "./auth";
+import { adminAllowed, getSessionUser, isAdminRequest } from "./auth";
 
 export { adminAllowed };
 
@@ -245,8 +246,8 @@ async function enqueuePipeline(env: Env, recordingId: string, docId: string, tit
 // - 동시 실행은 lock_until 잠금으로 막는다 (180초 TTL, 죽은 작업은 다음 호출이 재개).
 // 전사본을 지어내지 않는다: 실패 구간은 "[구간 N 전사 실패]" 자리 표시자만 남긴다.
 async function advanceRecording(env: Env, recordingId: string, opts: { maxSegments: number; maxMs: number }): Promise<{ status: string; locked?: boolean }> {
-  const row = await env.DB.prepare("SELECT id, title, object_key, mime_type, transcript_status, partial, done_chunks FROM recordings WHERE id = ?").bind(recordingId)
-    .first<{ id: string; title: string; object_key: string; mime_type: string; transcript_status: string; partial: string | null; done_chunks: number | null }>();
+  const row = await env.DB.prepare("SELECT id, title, object_key, mime_type, transcript_status, partial, done_chunks, owner_id FROM recordings WHERE id = ?").bind(recordingId)
+    .first<{ id: string; title: string; object_key: string; mime_type: string; transcript_status: string; partial: string | null; done_chunks: number | null; owner_id: string | null }>();
   if (!row) return { status: "missing" };
   if (row.transcript_status === "ready") return { status: "ready" };
   if (row.transcript_status === "pending") return { status: "pending" };
@@ -295,8 +296,9 @@ async function advanceRecording(env: Env, recordingId: string, opts: { maxSegmen
         return { status: "pending" };
       }
       const docId = uid("doc");
-      await env.DB.prepare("INSERT INTO documents (id, title, kind, content, r2_key) VALUES (?, ?, 'transcript', ?, ?)")
-        .bind(docId, row.title.replace(/\.[^.]+$/, ""), partial, row.object_key).run();
+      // 개인별 RAG 격리: 전사본 문서는 녹음 행의 소유자를 그대로 복사한다.
+      await env.DB.prepare("INSERT INTO documents (id, title, kind, content, r2_key, owner_id) VALUES (?, ?, 'transcript', ?, ?, ?)")
+        .bind(docId, row.title.replace(/\.[^.]+$/, ""), partial, row.object_key, row.owner_id ?? null).run();
       await env.DB.prepare("UPDATE recordings SET transcript = ?, transcript_status = 'ready', doc_id = ?, progress = NULL WHERE id = ?")
         .bind(partial, docId, recordingId).run();
       // S1: 전사 완료 → 요약·색인은 큐 소비자에게 넘긴다. enqueue에 실패해도
@@ -492,10 +494,15 @@ app.post("/api/documents", async (c) => {
   // 파일 업로드: multipart/form-data (C5 Phase 3 파서 라우팅).
   const ct = c.req.header("content-type") || "";
   if (ct.includes("multipart/form-data")) return handleDocumentFileUpload(c);
-  const body = await c.req.json().catch(() => ({})) as { title?: string; content?: string; kind?: string };
+  const body = await c.req.json().catch(() => ({})) as { title?: string; content?: string; kind?: string; personal?: boolean };
   if (!body.content || body.content.trim().length < 3) return c.json({ ok: false, error: "content is required" }, 400);
   const id = uid("doc");
   const title = body.title || body.content.slice(0, 40);
+  const kind = body.kind || "transcript";
+  // 개인별 RAG 격리: 전사본은 기본 개인 소유(세션 사용자, 없으면 공용 NULL),
+  // file/tacit은 기본 공용(NULL)이고 body.personal:true일 때만 개인으로 한다.
+  const viewer = await getSessionUser(c.env, c.req.header("cookie"));
+  const ownerId = kind === "transcript" ? (viewer?.id ?? null) : (body.personal === true ? (viewer?.id ?? null) : null);
   const r2Key = `documents/${id}.txt`;
   let r2Stored = false;
   try {
@@ -504,8 +511,8 @@ app.post("/api/documents", async (c) => {
   } catch {
     r2Stored = false; // 로컬 Miniflare R2 실패 시 D1에만 저장 (폴백)
   }
-  await c.env.DB.prepare("INSERT INTO documents (id, title, kind, content, r2_key) VALUES (?, ?, ?, ?, ?)")
-    .bind(id, title, body.kind || "transcript", body.content, r2Stored ? r2Key : null).run();
+  await c.env.DB.prepare("INSERT INTO documents (id, title, kind, content, r2_key, owner_id) VALUES (?, ?, ?, ?, ?, ?)")
+    .bind(id, title, kind, body.content, r2Stored ? r2Key : null, ownerId).run();
   return c.json({ ok: true, id, title, r2Stored, fallback: !r2Stored ? "d1-only" : null }, 201);
 });
 
@@ -531,6 +538,9 @@ async function handleDocumentFileUpload(c: Context<{ Bindings: Env }>) {
 
   const id = uid("doc");
   const title = ((form.get("title") as string) || "").trim() || f.name.replace(/\.[^.]+$/, "") || f.name;
+  // 개인별 RAG 격리: form의 personal 필드가 "true"이고 로그인돼 있으면 개인 업로드.
+  const viewer = await getSessionUser(c.env, c.req.header("cookie"));
+  const ownerId = (form.get("personal") as string | null) === "true" && viewer ? viewer.id : null;
   const bytes = new Uint8Array(await f.arrayBuffer());
   const detected = detectDocumentFormat(bytes);
   const ext = (f.name.split(".").pop() || "bin").toLowerCase().replace(/[^a-z0-9]/g, "") || "bin";
@@ -585,13 +595,13 @@ async function handleDocumentFileUpload(c: Context<{ Bindings: Env }>) {
       extractedStored = true;
     } catch { extractedStored = false; }
   }
-  await c.env.DB.prepare("INSERT INTO documents (id, title, kind, content, r2_key, source_r2_key, extract_status, extract_error) VALUES (?, ?, 'file', ?, ?, ?, ?, ?)")
-    .bind(id, title, extracted, !extractError && extractedStored ? extractedKey : null, sourceStored ? sourceKey : null, extractStatus, extractError).run();
+  await c.env.DB.prepare("INSERT INTO documents (id, title, kind, content, r2_key, source_r2_key, extract_status, extract_error, owner_id) VALUES (?, ?, 'file', ?, ?, ?, ?, ?, ?)")
+    .bind(id, title, extracted, !extractError && extractedStored ? extractedKey : null, sourceStored ? sourceKey : null, extractStatus, extractError, ownerId).run();
   let chunks = 0;
   let upserted = 0;
   let indexError: string | undefined;
   if (!extractError && extracted.trim().length >= 3) {
-    const indexed = await indexDocument(c.env, { id, title, markdown: extracted, kind: "file" });
+    const indexed = await indexDocument(c.env, { id, title, markdown: extracted, kind: "file", ownerId });
     chunks = indexed.chunks;
     upserted = indexed.upserted;
     indexError = indexed.indexError;
@@ -676,25 +686,39 @@ app.post("/api/transcribe", async (c) => {
   // 행을 먼저 만들고 전사는 백그라운드로: 긴 파일은 동기 Whisper 호출이
   // 응답 시간 안에 안 끝나서(97분 ogg, 27분 무응답) 행 자체가 안 남았다.
   // 전사본을 지어내지 않는다 — 행은 'processing'으로 시작한다.
+  // 개인별 RAG 격리: 전사본은 업로더의 개인 소유(익명이면 공용 NULL).
+  const viewer = await getSessionUser(c.env, c.req.header("cookie"));
   const now = new Date().toISOString();
-  await c.env.DB.prepare("INSERT INTO recordings (id, title, provider, model, object_key, mime_type, size, transcript, transcript_status, doc_id, created_at) VALUES (?, ?, 'workers-ai', ?, ?, ?, ?, NULL, 'processing', NULL, ?)")
-    .bind(id, f.name, WHISPER_MODEL, objectKey, f.type || "application/octet-stream", f.size, now).run();
+  await c.env.DB.prepare("INSERT INTO recordings (id, title, provider, model, object_key, mime_type, size, transcript, transcript_status, doc_id, created_at, owner_id) VALUES (?, ?, 'workers-ai', ?, ?, ?, ?, NULL, 'processing', NULL, ?, ?)")
+    .bind(id, f.name, WHISPER_MODEL, objectKey, f.type || "application/octet-stream", f.size, now, viewer?.id ?? null).run();
   c.executionCtx.waitUntil(advanceRecording(c.env, id, { maxSegments: 2, maxMs: 60_000 }));
   return c.json({ ok: true, recordingId: id, title: f.name, transcript: null, transcriptStatus: "processing", r2Verified: true, provider: "workers-ai", model: WHISPER_MODEL }, 201);
 });
 
 // 최근 음성 녹음 목록 (전사본 내용은 안 돌려준다 — 목록은 메타데이터만)
+// 개인별 RAG 격리: hr_admin은 전체, 그 외는 공용(owner_id NULL) + 본인 것만.
 app.get("/api/recordings", async (c) => {
   await ensureSeeded(c.env.DB);
-  const rows = await c.env.DB.prepare("SELECT id, title, provider, model, mime_type, size, transcript_status, progress, pipeline_stage, pipeline_error, doc_id, created_at FROM recordings ORDER BY created_at DESC LIMIT 20").all();
+  const viewer = await getSessionUser(c.env, c.req.header("cookie"));
+  const isAdmin = viewer?.role === "hr_admin";
+  const { clause, params } = docOwnerClause(viewer, "recordings");
+  const rows = isAdmin
+    ? await c.env.DB.prepare("SELECT id, title, provider, model, mime_type, size, transcript_status, progress, pipeline_stage, pipeline_error, doc_id, owner_id, created_at FROM recordings ORDER BY created_at DESC LIMIT 20").all()
+    : await c.env.DB.prepare(`SELECT id, title, provider, model, mime_type, size, transcript_status, progress, pipeline_stage, pipeline_error, doc_id, owner_id, created_at FROM recordings WHERE ${clause} ORDER BY created_at DESC LIMIT 20`).bind(...params).all();
   return c.json({ ok: true, recordings: rows.results || [] });
 });
 
 app.get("/api/recordings/:id", async (c) => {
   await ensureSeeded(c.env.DB);
-  const row = await c.env.DB.prepare("SELECT id, title, provider, model, object_key, mime_type, size, transcript, transcript_status, progress, pipeline_stage, pipeline_error, doc_id, created_at FROM recordings WHERE id = ?").bind(c.req.param("id"))
-    .first<{ id: string; title: string; provider: string; model: string; object_key: string; mime_type: string; size: number; transcript: string | null; transcript_status: string; progress: string | null; doc_id: string | null; created_at: string }>();
+  const row = await c.env.DB.prepare("SELECT id, title, provider, model, object_key, mime_type, size, transcript, transcript_status, progress, pipeline_stage, pipeline_error, doc_id, owner_id, created_at FROM recordings WHERE id = ?").bind(c.req.param("id"))
+    .first<{ id: string; title: string; provider: string; model: string; object_key: string; mime_type: string; size: number; transcript: string | null; transcript_status: string; progress: string | null; doc_id: string | null; owner_id: string | null; created_at: string }>();
   if (!row) return c.json({ ok: false, error: "recording not found" }, 404);
+  // 전사본 텍스트가 응답에 포함되므로 소유자 게이트를 둔다: 소유자가 있는
+  // 녹음은 소유자 본인 또는 hr_admin만 볼 수 있다. owner_id NULL은 공용.
+  const viewer = await getSessionUser(c.env, c.req.header("cookie"));
+  if (row.owner_id && (!viewer || (viewer.id !== row.owner_id && viewer.role !== "hr_admin"))) {
+    return c.json({ ok: false, error: "forbidden" }, 403);
+  }
   return c.json({ ok: true, recording: row });
 });
 
@@ -704,6 +728,13 @@ app.get("/api/recordings/:id", async (c) => {
 // 기대지 않는 경로다. 잠금이 걸려 있으면 현재 행만 돌려준다.
 app.post("/api/recordings/:id/advance", async (c) => {
   await ensureSeeded(c.env.DB);
+  // 소유자 게이트: 전사본 전체 행을 돌려주므로, 전사 작업을 시작하기 전에 확인한다.
+  const ownerRow = await c.env.DB.prepare("SELECT owner_id FROM recordings WHERE id = ?").bind(c.req.param("id")).first<{ owner_id: string | null }>();
+  if (!ownerRow) return c.json({ ok: false, error: "recording not found" }, 404);
+  const advViewer = await getSessionUser(c.env, c.req.header("cookie"));
+  if (ownerRow.owner_id && (!advViewer || (advViewer.id !== ownerRow.owner_id && advViewer.role !== "hr_admin"))) {
+    return c.json({ ok: false, error: "forbidden" }, 403);
+  }
   // advanceRecording이 던져도 행을 돌려준다: 500 HTML이 가면 프론트
   // r.json()이 터져 폴링 루프가 죽는다.
   await advanceRecording(c.env, c.req.param("id"), { maxSegments: 1, maxMs: 120_000 }).catch(() => {});
@@ -721,9 +752,14 @@ app.post("/api/recordings/:id/advance", async (c) => {
 // (partial/done_chunks)을 유지한 채 이어가고, pending 행은 처음부터 다시 한다.
 app.post("/api/recordings/:id/retry", async (c) => {
   await ensureSeeded(c.env.DB);
-  const row = await c.env.DB.prepare("SELECT id, title, object_key, transcript, transcript_status, doc_id, created_at FROM recordings WHERE id = ?").bind(c.req.param("id"))
-    .first<{ id: string; title: string; object_key: string; transcript: string | null; transcript_status: string; doc_id: string | null; created_at: string }>();
+  const row = await c.env.DB.prepare("SELECT id, title, object_key, transcript, transcript_status, doc_id, owner_id, created_at FROM recordings WHERE id = ?").bind(c.req.param("id"))
+    .first<{ id: string; title: string; object_key: string; transcript: string | null; transcript_status: string; doc_id: string | null; owner_id: string | null; created_at: string }>();
   if (!row) return c.json({ ok: false, error: "recording not found" }, 404);
+  // 소유자 게이트: 남의 녹음을 다시 전사시키는 것을 막는다.
+  const retryViewer = await getSessionUser(c.env, c.req.header("cookie"));
+  if (row.owner_id && (!retryViewer || (retryViewer.id !== row.owner_id && retryViewer.role !== "hr_admin"))) {
+    return c.json({ ok: false, error: "forbidden" }, 403);
+  }
   if (row.transcript_status === "ready" && row.transcript) return c.json({ ok: true, recordingId: row.id, transcriptStatus: "ready", transcript: row.transcript, docId: row.doc_id, note: "already ready" });
   if (row.transcript_status === "processing") {
     const ageMs = Date.now() - new Date(row.created_at).getTime();
@@ -742,9 +778,14 @@ app.post("/api/recordings/:id/retry", async (c) => {
 // 이미 완료된 파이프라인은 건드리지 않는다. DLQ로 간 메시지도 여기서 복구한다.
 app.post("/api/recordings/:id/pipeline-retry", async (c) => {
   await ensureSeeded(c.env.DB);
-  const row = await c.env.DB.prepare("SELECT id, title, doc_id, transcript_status, pipeline_stage FROM recordings WHERE id = ?").bind(c.req.param("id"))
-    .first<{ id: string; title: string; doc_id: string | null; transcript_status: string; pipeline_stage: string | null }>();
+  const row = await c.env.DB.prepare("SELECT id, title, doc_id, transcript_status, pipeline_stage, owner_id FROM recordings WHERE id = ?").bind(c.req.param("id"))
+    .first<{ id: string; title: string; doc_id: string | null; transcript_status: string; pipeline_stage: string | null; owner_id: string | null }>();
   if (!row) return c.json({ ok: false, error: "recording not found" }, 404);
+  // 소유자 게이트: 남의 녹음 파이프라인을 다시 돌리는 것을 막는다.
+  const pipeViewer = await getSessionUser(c.env, c.req.header("cookie"));
+  if (row.owner_id && (!pipeViewer || (pipeViewer.id !== row.owner_id && pipeViewer.role !== "hr_admin"))) {
+    return c.json({ ok: false, error: "forbidden" }, 403);
+  }
   if (row.transcript_status !== "ready" || !row.doc_id) {
     return c.json({ ok: false, error: "transcription is not ready yet" }, 409);
   }
@@ -780,7 +821,7 @@ async function bumpKnowledgeEpoch(env: Env): Promise<number> {
 // 정책 시딩(ensureVectorSeeded)과 동일 형식의 메타데이터를 쓴다.
 // AI/Vectorize가 안 되면(로컬 dev) D1 chunk는 남기고 indexError를 돌려준다 —
 // 게시 자체는 망가뜨리지 않고, D1 텍스트 폴백 경로는 그 chunk로 답할 수 있다.
-async function indexDocument(env: Env, doc: { id: string; title: string; markdown: string; kind?: string }): Promise<{ chunks: number; upserted: number; indexError?: string }> {
+async function indexDocument(env: Env, doc: { id: string; title: string; markdown: string; kind?: string; ownerId?: string | null }): Promise<{ chunks: number; upserted: number; indexError?: string }> {
   const chunks = splitMarkdownIntoChunks({ id: doc.id, title: doc.title, body: doc.markdown });
   await env.DB.prepare("DELETE FROM chunks WHERE doc_id = ?").bind(doc.id).run();
   for (const ch of chunks) {
@@ -799,7 +840,9 @@ async function indexDocument(env: Env, doc: { id: string; title: string; markdow
     // Vectorize 메타데이터 kind는 문서의 실제 종류를 쓴다 (C5 Phase 3:
     // 파일 업로드 문서가 'tacit'으로 오표시되지 않게. D1 documents.kind가
     // 출처 배지의 기준이고, 여기는 알 수 없는 id 폴백 경로에서만 쓰인다).
-    const vectors = chunks.map((ch, i) => ({ id: ch.id, values: rows[i], metadata: { title: doc.title, section: ch.article, snippet: ch.text.slice(0, 220), kind: doc.kind ?? "tacit", pool: poolForKind(doc.kind) } }));
+    // 개인별 RAG 격리: user_id는 소유자 id, 없으면 공용 센티넬 "shared".
+    // pool도 소유자 기준으로 정한다 (개인 파일 업로드가 "공용"으로 보이지 않게).
+    const vectors = chunks.map((ch, i) => ({ id: ch.id, values: rows[i], metadata: { title: doc.title, section: ch.article, snippet: ch.text.slice(0, 220), kind: doc.kind ?? "tacit", pool: poolForDoc(doc.kind, doc.ownerId), user_id: vectorUserIdForDoc(doc.ownerId) } }));
     await env.VECTOR.upsert(vectors);
     return { chunks: chunks.length, upserted: vectors.length };
   } catch (e) {
@@ -831,7 +874,8 @@ async function verifyTacitEvidence(
       const emb = await env.AI.run(EMBED_MODEL, { text: [question] }, aiGatewayOptions({ skipCache: true, tag: "embed" })) as { data: number[][] | number[] };
       const raw = emb.data;
       const values = new Float32Array(Array.isArray(raw[0]) ? (raw[0] as number[]) : (raw as number[]));
-      const vec = await env.VECTOR.query(values, { topK: 3, returnMetadata: "all" });
+      // 암묵지는 공용이라 공용 필터로만 조회한다 (남의 개인 chunk가 순위에 끼는 것을 막는다).
+      const vec = await env.VECTOR.query(values, { topK: 3, returnMetadata: "all", filter: { user_id: SHARED_USER_ID } });
       const matches = (vec.matches || []).filter((m) => (m.score || 0) >= SCORE_FLOOR);
       const gated = await keywordGate(env, question, matches.map((m) => ({ id: String(m.id), score: m.score || 0, metadata: (m.metadata || {}) as Record<string, unknown> })));
       const sources = await resolveSources(env, question, gated);
@@ -885,10 +929,12 @@ app.post("/api/ask", async (c) => {
 
   // 캐시 조회 → 세션 문맥 → 근거 검색 → 답 생성 → 세션 저장 → 감사 기록 → 캐시 저장
   // 은 runAsk (src/ask-pipeline.ts, S4 M6-α). force면 캐시를 읽지 않고 AI Gateway 캐시도 건너뛴다.
+  // 개인별 RAG 격리: 세션 사용자를 viewer로 넘긴다. 익명이면 viewer null → 공용만 검색.
+  const viewer = await getSessionUser(c.env, c.req.header("cookie"));
   const r = await runAsk(
     c.env,
     { question, sessionId, startedAt: t0 },
-    { readCache: !body.force, gatewaySkipCache: body.force === true },
+    { readCache: !body.force, gatewaySkipCache: body.force === true, viewer },
     // Hono의 ExecutionContext 타입은 workers-types와 필드가 조금 달라 캐스트한다 (런타임 객체는 같다).
     { traceSink, ctx: c.executionCtx as unknown as ExecutionContext },
   );
@@ -1032,12 +1078,21 @@ app.post("/api/coaching/reflect", async (c) => {
 // ---- home (작업 공간 대시보드) ----
 app.get("/api/home", async (c) => {
   await ensureSeeded(c.env.DB);
-  const count = async (sql: string) => (await c.env.DB.prepare(sql).first<{ n: number }>())?.n ?? 0;
-  const documents = await count("SELECT COUNT(*) AS n FROM documents");
-  const summaries = await count("SELECT COUNT(*) AS n FROM documents WHERE summary IS NOT NULL AND summary != ''");
+  // 목록 조회는 RAG 검색과 다르다: hr_admin은 관리자 탭에서 전체 문서를 본다.
+  // (RAG 검색에서는 hr_admin도 본인 개인 문서만 본다 — vectorUserFilter 참조.)
+  // 일반 사용자·익명은 공용 + 본인 것만 본다. 문서 카운트도 같은 범위로 센다.
+  const viewer = await getSessionUser(c.env, c.req.header("cookie"));
+  const isAdmin = viewer?.role === "hr_admin";
+  const { clause: docClause, params: docParams } = docOwnerClause(viewer, "documents");
+  const count = async (sql: string, params: unknown[] = []) => (await c.env.DB.prepare(sql).bind(...params).first<{ n: number }>())?.n ?? 0;
+  const docWhere = isAdmin ? "" : ` WHERE ${docClause}`;
+  const documents = await count(`SELECT COUNT(*) AS n FROM documents${docWhere}`, isAdmin ? [] : docParams);
+  const summaries = await count(`SELECT COUNT(*) AS n FROM documents WHERE summary IS NOT NULL AND summary != ''${isAdmin ? "" : ` AND ${docClause}`}`, isAdmin ? [] : docParams);
   const openTasks = await count("SELECT COUNT(*) AS n FROM tasks WHERE done = 0");
   const reflections = await count("SELECT COUNT(*) AS n FROM reflections");
-  const recentDocuments = (await c.env.DB.prepare("SELECT id, title, kind, created_at FROM documents ORDER BY created_at DESC LIMIT 5").all()).results || [];
+  const recentDocuments = isAdmin
+    ? (await c.env.DB.prepare("SELECT id, title, kind, created_at FROM documents ORDER BY created_at DESC LIMIT 5").all()).results || []
+    : (await c.env.DB.prepare(`SELECT id, title, kind, created_at FROM documents WHERE ${docClause} ORDER BY created_at DESC LIMIT 5`).bind(...docParams).all()).results || [];
   const tasks = (await c.env.DB.prepare("SELECT id, title, source, created_at FROM tasks WHERE done = 0 ORDER BY created_at DESC LIMIT 5").all()).results || [];
   const recentReflections = (await c.env.DB.prepare("SELECT id, patterns, created_at FROM reflections ORDER BY created_at DESC LIMIT 3").all()).results || [];
   return c.json({ ok: true, counts: { documents, summaries, openTasks, reflections }, recentDocuments, openTasks: tasks, recentReflections });
@@ -1101,15 +1156,23 @@ app.post("/api/deck", async (c) => {
   const id = uid("deck");
   const r2Key = `decks/${id}.pptx`;
   await c.env.FILES.put(r2Key, bytes, { httpMetadata: { contentType: PPTX_MIME } });
-  await c.env.DB.prepare("INSERT INTO decks (id, title, r2_key, bytes, slides) VALUES (?, ?, ?, ?, ?)").bind(id, title, r2Key, bytes.length, slides).run();
+  // 개인별 RAG 격리: 덱은 만든 사람의 개인 소유(익명이면 공용 NULL).
+  const viewer = await getSessionUser(c.env, c.req.header("cookie"));
+  await c.env.DB.prepare("INSERT INTO decks (id, title, r2_key, bytes, slides, owner_id) VALUES (?, ?, ?, ?, ?, ?)").bind(id, title, r2Key, bytes.length, slides, viewer?.id ?? null).run();
   return c.json({ ok: true, id, title, url: `/api/deck/${id}`, bytes: bytes.length, slides, source: body.source || null, outline: outline.present }, 201);
 });
 
 app.get("/api/deck/:id", async (c) => {
   await ensureSeeded(c.env.DB);
   const id = c.req.param("id");
-  const row = await c.env.DB.prepare("SELECT id, title, r2_key, bytes FROM decks WHERE id = ?").bind(id).first<{ id: string; title: string; r2_key: string; bytes: number }>();
+  const row = await c.env.DB.prepare("SELECT id, title, r2_key, bytes, owner_id FROM decks WHERE id = ?").bind(id).first<{ id: string; title: string; r2_key: string; bytes: number; owner_id: string | null }>();
   if (!row) return c.json({ ok: false, error: "deck not found" }, 404);
+  // R2 다운로드 게이트: 소유자가 있는 덱은 소유자 본인 또는 hr_admin만 받을 수 있다.
+  // owner_id NULL은 공용이라 누구나 받을 수 있다.
+  const viewer = await getSessionUser(c.env, c.req.header("cookie"));
+  if (row.owner_id && (!viewer || (viewer.id !== row.owner_id && viewer.role !== "hr_admin"))) {
+    return c.json({ ok: false, error: "forbidden" }, 403);
+  }
   const obj = await c.env.FILES.get(row.r2_key);
   if (!obj) return c.json({ ok: false, error: "deck file not found" }, 404);
   // Content-Disposition의 filename은 ASCII만 허용된다 (Fetch 명세).
@@ -1129,7 +1192,14 @@ app.get("/api/deck/:id", async (c) => {
 // ---- library ----
 app.get("/api/library", async (c) => {
   await ensureSeeded(c.env.DB);
-  const docs = await c.env.DB.prepare("SELECT id, title, kind, summary, actions, created_at, extract_status, extract_error FROM documents ORDER BY created_at DESC LIMIT 20").all();
+  // 목록 조회는 RAG 검색과 다르다: hr_admin은 관리자 탭에서 전체 문서를 본다.
+  // (RAG 검색에서는 hr_admin도 본인 개인 문서만 본다.) 일반 사용자·익명은 공용 + 본인 것만.
+  const viewer = await getSessionUser(c.env, c.req.header("cookie"));
+  const isAdmin = viewer?.role === "hr_admin";
+  const { clause, params } = docOwnerClause(viewer, "documents");
+  const docs = isAdmin
+    ? await c.env.DB.prepare("SELECT id, title, kind, summary, actions, created_at, extract_status, extract_error FROM documents ORDER BY created_at DESC LIMIT 20").all()
+    : await c.env.DB.prepare(`SELECT id, title, kind, summary, actions, created_at, extract_status, extract_error FROM documents WHERE ${clause} ORDER BY created_at DESC LIMIT 20`).bind(...params).all();
   const pols = await c.env.DB.prepare("SELECT id, title, section FROM policies ORDER BY id").all();
   const refls = await c.env.DB.prepare("SELECT id, session_id, patterns, next_questions, created_at FROM reflections ORDER BY created_at DESC LIMIT 10").all();
   return c.json({ ok: true, documents: docs.results || [], policies: pols.results || [], reflections: refls.results || [] });
@@ -1192,6 +1262,61 @@ app.get("/api/seed-vectors", async (c) => {
   return c.json({ ok: r.seeded, upserted: r.upserted ?? 0, total: r.upserted ?? 0, deletedOld: 0, model: EMBED_MODEL, index: VECTOR_INDEX_NAME, dims: r.dims ?? null, errors: r.error ? [r.error] : [] });
 });
 
+// 개인별 RAG 격리 재색인 (모듈 C): D1 chunks 전부를 문서 소유자와 함께 읽어
+// bge-m3으로 다시 임베딩하고 Vectorize에 upsert한다. chunks에 documents를
+// LEFT JOIN하므로 정책 chunk(documents 행 없음)는 owner NULL → 공용 "shared"가 된다.
+// upsert는 같은 id에 멱등이라 재실행해도 안전하다 — 중간에 끊겨도 다시 돌리면 된다.
+// 관리자 전용: 이중 게이트(isAdminRequest — hr_admin 세션 또는 X-Admin-Secret).
+// 쿼리 파라미터 limit(기본 500, 최대 2000)·offset(기본 0)으로 나눠서 돌릴 수 있다.
+app.post("/api/admin/reindex", async (c) => {
+  if (!(await isAdminRequest(c.env, c.req.header("cookie"), c.req.header("x-admin-secret")))) {
+    return c.json({ ok: false, error: "unauthorized" }, 401);
+  }
+  await ensureSeeded(c.env.DB);
+  const limit = Math.max(1, Math.min(2000, Number(c.req.query("limit") ?? 500) || 500));
+  const offset = Math.max(0, Number(c.req.query("offset") ?? 0) || 0);
+  const totalRow = await c.env.DB.prepare("SELECT COUNT(*) AS n FROM chunks").first<{ n: number }>();
+  const total = totalRow?.n ?? 0;
+  const rows = await c.env.DB.prepare(
+    "SELECT c.id, c.doc_id, c.article, c.text, COALESCE(p.title, d.title, c.doc_id) AS title, d.kind, d.owner_id FROM chunks c LEFT JOIN documents d ON d.id = c.doc_id LEFT JOIN policies p ON p.id = c.doc_id ORDER BY c.doc_id, c.ord LIMIT ? OFFSET ?"
+  ).bind(limit, offset).all<{ id: string; doc_id: string; article: string; text: string; title: string | null; kind: string | null; owner_id: string | null }>();
+  const list = rows.results || [];
+  const errors: string[] = [];
+  let upserted = 0;
+  const BATCH = 20; // 임베딩 배치 크기: 20개씩 Workers AI 호출
+  for (let i = 0; i < list.length; i += BATCH) {
+    const batch = list.slice(i, i + BATCH);
+    try {
+      const texts = batch.map((ch) => `${ch.title ?? ch.doc_id} ${ch.article} ${ch.text}`);
+      const emb = await c.env.AI.run(EMBED_MODEL, { text: texts }, aiGatewayOptions({ skipCache: true, tag: "embed" })) as { data: number[][] | number[] };
+      const data = emb.data;
+      // Workers AI는 텍스트 1개면 data를 평탄한 number[]로, 여러 개면
+      // number[][]로 돌려준다 (indexDocument와 같은 정규화).
+      const embRows = Array.isArray(data) && data.length > 0 && Array.isArray(data[0]) ? (data as number[][]) : [data as number[]];
+      if (!Array.isArray(data) || embRows.length !== texts.length) throw new Error("unexpected embedding response shape");
+      if (embRows[0].length !== EMBED_DIMS) throw new Error(`embedding dims ${embRows[0].length} != index dims ${EMBED_DIMS}`);
+      const vectors = batch.map((ch, j) => {
+        const kind = ch.kind ?? "policy"; // 정책 chunk는 documents 행이 없어 kind 없음
+        return {
+          id: ch.id,
+          values: embRows[j],
+          metadata: { title: ch.title ?? ch.doc_id, section: ch.article, snippet: ch.text.slice(0, 220), kind, pool: poolForDoc(kind, ch.owner_id), user_id: vectorUserIdForDoc(ch.owner_id) },
+        };
+      });
+      await c.env.VECTOR.upsert(vectors);
+      upserted += vectors.length;
+    } catch (e) {
+      // 배치 하나가 실패해도 나머지는 계속 진행하고, 사유를 errors에 남긴다.
+      errors.push(`batch ${i}-${Math.min(i + BATCH, list.length)}: ${e instanceof Error ? e.message : String(e)}`);
+    }
+  }
+  // 전체 실패(처리할 chunk가 있는데 하나도 안 올라감)면 ok:false.
+  const ok = list.length === 0 || upserted > 0;
+  await c.env.DB.prepare("INSERT OR REPLACE INTO meta (key, value, updated_at) VALUES (?, ?, datetime('now'))")
+    .bind("vector_reindexed_v2", JSON.stringify({ upserted, at: new Date().toISOString() })).run();
+  return c.json({ ok, upserted, total, chunks: list.length, errors });
+});
+
 // ---- digest (아침 다이제스트, C9) ----
 app.get("/api/digest", async (c) => {
   const digest = await getLatestDigest(c.env);
@@ -1241,10 +1366,10 @@ async function processPipelineMessage(env: Env, msg: PipelineMessage): Promise<v
     await setPipelineStage(env, rec.id, "summarizing");
     await summarizeDocument(env, rec.doc_id);
     await setPipelineStage(env, rec.id, "indexing");
-    const doc = await env.DB.prepare("SELECT title, content, kind FROM documents WHERE id = ?").bind(rec.doc_id)
-      .first<{ title: string; content: string; kind: string }>();
+    const doc = await env.DB.prepare("SELECT title, content, kind, owner_id FROM documents WHERE id = ?").bind(rec.doc_id)
+      .first<{ title: string; content: string; kind: string; owner_id: string | null }>();
     if (!doc) throw new Error("document not found");
-    const indexed = await indexDocument(env, { id: rec.doc_id, title: doc.title, markdown: doc.content, kind: doc.kind });
+    const indexed = await indexDocument(env, { id: rec.doc_id, title: doc.title, markdown: doc.content, kind: doc.kind, ownerId: doc.owner_id });
     if (indexed.indexError) throw new Error(`index failed: ${indexed.indexError}`);
     await setPipelineStage(env, rec.id, "done");
   } catch (e) {

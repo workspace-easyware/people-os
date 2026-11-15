@@ -120,7 +120,41 @@ export type RagPool = "shared" | "personal";
 export function poolForKind(kind: string | undefined | null): RagPool {
   return kind === "transcript" ? "personal" : "shared";
 }
+/**
+ * 문서의 실제 RAG 풀. 소유자가 지정된 개인 문서는 종류와 무관하게 개인 풀로 본다
+ * (개인 파일 업로드 kind='file'도 개인 문서이므로 배지가 "공용"으로 나오면 안 된다).
+ * 소유자가 없으면 종류 기준(poolForKind)을 쓴다.
+ */
+export function poolForDoc(kind: string | undefined | null, ownerId: string | null | undefined): RagPool {
+  return ownerId ? "personal" : poolForKind(kind);
+}
 export const RAG_POOL_LABEL: Record<RagPool, string> = { shared: "공용", personal: "개인" };
+
+/** 개인별 RAG 격리: Vectorize user_id 메타데이터의 공용 센티넬 값. */
+export const SHARED_USER_ID = "shared";
+/** RAG 조회자. null = 익명/평가 호출(공용만 조회). */
+export type RagViewer = { id: string; role: string } | null;
+/** 문서의 Vectorize user_id 메타데이터 값. ownerId가 없으면 공용 센티넬 "shared". */
+export function vectorUserIdForDoc(ownerId: string | null | undefined): string {
+  return ownerId ?? SHARED_USER_ID;
+}
+/**
+ * Vectorize 조회용 user_id 필터.
+ * Vectorize에는 $or가 없어서 공용 벡터에 "shared" 센티넬을 넣고 $in으로 묶는다.
+ * 로그인 사용자: 공용 + 본인 개인. 익명/평가(viewer null): 공용만.
+ */
+export function vectorUserFilter(viewer: RagViewer): Record<string, unknown> {
+  if (!viewer) return { user_id: SHARED_USER_ID };
+  return { user_id: { $in: [SHARED_USER_ID, viewer.id] } };
+}
+/**
+ * D1 문서 소유자 범위 조건. alias는 documents/recordings/decks 테이블 별칭.
+ * 로그인 사용자: 공용(owner_id IS NULL) 또는 본인. 익명/평가: 공용만.
+ */
+export function docOwnerClause(viewer: RagViewer, alias: string): { clause: string; params: string[] } {
+  if (!viewer) return { clause: `(${alias}.owner_id IS NULL)`, params: [] };
+  return { clause: `(${alias}.owner_id IS NULL OR ${alias}.owner_id = ?)`, params: [viewer.id] };
+}
 
 const TOKEN_SUFFIXES = ["입니다", "이에요", "에서", "으로", "부터", "까지", "하면", "해요", "돼요", "나요", "에는", "에게", "하고", "이고", "는", "은", "이", "가", "을", "를", "에", "와", "과", "의", "도", "만", "로", "해", "돼", "되"];
 // 내용어가 아닌 토큰은 겹침 신호에서 뺀다 (본문에 흔해 오탐을 만든다).
