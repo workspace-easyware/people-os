@@ -8,6 +8,9 @@
 import { aiGatewayOptions } from "../ai-gateway";
 
 export const TOPIC_GUARD_MODEL_CLEF = "@cf/cloudflare/clef";
+/** 앙상블 파트너 (2026-11-16): 토픽 가드 실측에서 확신도가 가장 좋았다
+ * (업무 관련 0.019/0.032, 업무 외 0.976/0.964). */
+export const TOPIC_GUARD_MODEL_CLEF_OMNI = "@cf/cloudflare/clef-omni";
 export const TOPIC_GUARD_FALLBACK_MODEL = "@cf/meta/llama-4-scout-17b-16e-instruct";
 /** 확신 기준: Clef가 off_topic일 확률이 이 값 이상일 때만 거른다. */
 export const TOPIC_GUARD_THRESHOLD = 0.85;
@@ -137,18 +140,33 @@ function parseTopicLlmAnswer(raw: unknown): { offTopic: boolean; confidence: num
 }
 
 /**
- * 질문의 업무 관련성을 판별한다. Clef 우선, 실패·파싱 불가 시 llama 폴백.
- * 판별 자체가 실패하면 fail-open (offTopic=false) — 질문을 막지 않는다.
+ * 질문의 업무 관련성을 판별한다. 앙상블 (2026-11-16): Clef + Clef-omni를
+ * 병렬로 부르고 OR 규칙을 적용한다 — 둘 중 하나라도 P(off_topic) ≥ 0.85면
+ * off_topic (업무 외를 놓치지 않는 게 우선). 둘 다 0.85 미만이면
+ * work_related. 둘 다 실패·파싱 불가 시 llama 폴백, 판별 자체가 실패하면
+ * fail-open (offTopic=false) — 질문을 막지 않는다.
  */
 export async function classifyTopic(env: { AI: unknown }, question: string): Promise<TopicGuardOutcome> {
   const ai = env.AI as AiLike;
-  try {
-    const out = await ai.run(TOPIC_GUARD_MODEL_CLEF, buildTopicClefInput(question), aiGatewayOptions({ tag: "topic-guard" }));
-    const parsed = parseTopicClefAnswer(out);
-    if (parsed) return { ...parsed, engine: "clef" };
-  } catch (e) {
-    // Clef 호출 실패 → 폴백으로 (아래). 호출 자체가 막히면 안 된다.
-    void e;
+  const inputs = buildTopicClefInput(question);
+  const calls = await Promise.allSettled([
+    ai.run(TOPIC_GUARD_MODEL_CLEF, inputs, aiGatewayOptions({ tag: "topic-guard" })),
+    ai.run(TOPIC_GUARD_MODEL_CLEF_OMNI, inputs, aiGatewayOptions({ tag: "topic-guard-omni" })),
+  ]);
+  const parsed = calls.map((r) => (r.status === "fulfilled" ? parseTopicClefAnswer(r.value) : null));
+  const clef = parsed[0];
+  const omni = parsed[1];
+  if (clef || omni) {
+    const pClef = clef ? clef.confidence : -1;
+    const pOmni = omni ? omni.confidence : -1;
+    const pMax = Math.max(pClef, pOmni);
+    const fmt = (label: string, p: { confidence: number } | null) => (p ? `${label} p=${p.confidence}` : `${label}=fail`);
+    return {
+      offTopic: pMax >= TOPIC_GUARD_THRESHOLD,
+      confidence: pMax,
+      engine: "clef",
+      reason: `ensemble ${fmt("clef", clef)} + ${fmt("omni", omni)}`,
+    };
   }
   try {
     const out = await ai.run(
@@ -161,8 +179,8 @@ export async function classifyTopic(env: { AI: unknown }, question: string): Pro
       },
       aiGatewayOptions({ tag: "topic-guard" }),
     );
-    const parsed = parseTopicLlmAnswer(out);
-    if (parsed) return { ...parsed, engine: "llm-fallback" };
+    const parsedLlm = parseTopicLlmAnswer(out);
+    if (parsedLlm) return { ...parsedLlm, engine: "llm-fallback" };
   } catch (e) {
     void e;
   }

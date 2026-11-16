@@ -27,6 +27,7 @@
 .obs-item-detail td{background:var(--obs-surface-soft)}
 .obs-detail-grid{display:grid;grid-template-columns:1fr 1fr;gap:var(--obs-gap)}
 .obs-detail-h{font-size:var(--obs-text-xs);color:var(--obs-muted);margin:6px 0 4px}
+.obs-improve{margin-top:6px;font-size:var(--obs-text-xs);line-height:1.5}
 .obs-dims{margin:6px 0}
 .obs-sort{margin-left:auto;display:inline-flex;align-items:center;gap:6px;font-weight:normal;color:var(--obs-muted)}
 .obs-sort select{height:var(--control-h,32px)}

@@ -19,6 +19,7 @@ import {
   isAdminRequest,
   issueSetupLink,
   loginAttemptKey,
+  normalizeCoachingRole,
   loginBlocked,
   passwordOk,
   randomToken,
@@ -60,8 +61,8 @@ function originOk(c: C): boolean {
   }
 }
 
-function publicUser(u: { id: string; email: string; name: string; role: string }) {
-  return { id: u.id, email: u.email, name: u.name, role: u.role };
+function publicUser(u: { id: string; email: string; name: string; role: string; coaching_role?: string | null }) {
+  return { id: u.id, email: u.email, name: u.name, role: u.role, coaching_role: normalizeCoachingRole(u.coaching_role) };
 }
 
 /** hr_admin 세션 사용자. 시크릿 경로(X-Admin-Secret)는 사용자가 없어 null을 돌려준다. */
@@ -99,11 +100,11 @@ authApp.post("/bootstrap", async (c) => {
   const digest = await hashPassword(password, salt, c.env.PASSWORD_PEPPER);
   const id = crypto.randomUUID();
   await c.env.DB.prepare(
-    "INSERT INTO users(id, email, name, password_hash, password_salt, role, status, created_at) VALUES(?, ?, ?, ?, ?, 'hr_admin', 'active', ?)",
+    "INSERT INTO users(id, email, name, password_hash, password_salt, role, status, coaching_role, created_at) VALUES(?, ?, ?, ?, ?, 'hr_admin', 'active', 'coach', ?)",
   )
     .bind(id, email, name, digest, salt, new Date().toISOString())
     .run();
-  return c.json({ ok: true, user: { id, email, name, role: "hr_admin" } }, 201, {
+  return c.json({ ok: true, user: { id, email, name, role: "hr_admin", coaching_role: "coach" } }, 201, {
     "set-cookie": await createSession(c.env, id),
     "cache-control": "no-store",
   });
@@ -121,6 +122,7 @@ authApp.post("/auth/login", async (c) => {
   if (await loginBlocked(c.env, key)) return fail(c, 429, "로그인 시도가 많습니다. 15분 후 다시 시도해 주세요.");
   const account = await c.env.DB.prepare("SELECT * FROM users WHERE email = ?").bind(email).first<{
     id: string; email: string; name: string; password_hash: string | null; password_salt: string | null; role: string; status: string;
+    coaching_role: string | null;
   }>();
   let digest = "";
   try {
@@ -172,7 +174,7 @@ authApp.post("/auth/set-password", async (c) => {
     .first<{ token_hash: string; user_id: string }>();
   if (!link) return fail(c, 400, "만료되었거나 이미 사용한 설정 링크입니다. 관리자에게 새 링크를 요청하세요.");
   const account = await c.env.DB.prepare("SELECT * FROM users WHERE id = ?").bind(link.user_id).first<{
-    id: string; email: string; name: string; role: string; status: string;
+    id: string; email: string; name: string; role: string; status: string; coaching_role: string | null;
   }>();
   if (!account || account.status === "inactive") return fail(c, 403, "이용할 수 없는 계정입니다.");
   const salt = randomToken();
@@ -258,8 +260,8 @@ authApp.get("/admin/users", async (c) => {
   const admin = await requireAdmin(c);
   if (!admin) return fail(c, 401, "로그인이 필요합니다.");
   const rows = await c.env.DB.prepare(
-    "SELECT id, email, name, role, status, created_at FROM users ORDER BY created_at, email",
-  ).all<{ id: string; email: string; name: string; role: string; status: string; created_at: string }>();
+    "SELECT id, email, name, role, coaching_role, status, created_at FROM users ORDER BY created_at, email",
+  ).all<{ id: string; email: string; name: string; role: string; coaching_role: string; status: string; created_at: string }>();
   return c.json({ ok: true, users: rows.results }, 200, { "cache-control": "no-store" });
 });
 
@@ -271,18 +273,19 @@ authApp.post("/admin/users", async (c) => {
   const email = typeof body.email === "string" ? body.email.trim().toLowerCase() : "";
   const name = typeof body.name === "string" ? body.name.trim() : "";
   const role = body.role === "hr_admin" ? "hr_admin" : "user";
+  const coachingRole = normalizeCoachingRole(body.coaching_role);
   if (!isValidEmail(email) || !name || name.length > 100) return fail(c, 400, "이메일·이름을 확인해 주세요.");
   const existing = await c.env.DB.prepare("SELECT id FROM users WHERE email = ?").bind(email).first();
   if (existing) return fail(c, 409, "이미 등록된 이메일입니다.");
   const id = crypto.randomUUID();
   await c.env.DB.prepare(
-    "INSERT INTO users(id, email, name, role, status, created_at) VALUES(?, ?, ?, ?, 'pending', ?)",
+    "INSERT INTO users(id, email, name, role, coaching_role, status, created_at) VALUES(?, ?, ?, ?, ?, 'pending', ?)",
   )
-    .bind(id, email, name, role, new Date().toISOString())
+    .bind(id, email, name, role, coachingRole, new Date().toISOString())
     .run();
   const issuedBy = admin === "secret" ? "admin-secret" : admin.id;
   const setupPath = await issueSetupLink(c.env, id, issuedBy);
-  return c.json({ ok: true, user: { id, email, name, role, status: "pending" }, setupPath }, 201, {
+  return c.json({ ok: true, user: { id, email, name, role, coaching_role: coachingRole, status: "pending" }, setupPath }, 201, {
     "cache-control": "no-store",
   });
 });
@@ -293,16 +296,23 @@ authApp.patch("/admin/users/:id", async (c) => {
   if (!admin) return fail(c, 401, "로그인이 필요합니다.");
   const id = c.req.param("id");
   const body = await readJson(c);
-  const target = await c.env.DB.prepare("SELECT id, role, status FROM users WHERE id = ?").bind(id).first<{
-    id: string; role: string; status: string;
+  const target = await c.env.DB.prepare("SELECT id, role, status, coaching_role FROM users WHERE id = ?").bind(id).first<{
+    id: string; role: string; status: string; coaching_role: string | null;
   }>();
   if (!target) return fail(c, 404, "계정을 찾을 수 없습니다.");
-  if (admin !== "secret" && admin.id === id) return fail(c, 403, "자기 계정의 역할·상태는 바꿀 수 없습니다.");
+  // 자기 계정의 역할·상태·코칭 역할은 바꿀 수 없다 (세션 관리자 기준. 시크릿 경로는 운영용으로 허용).
+  if (admin !== "secret" && admin.id === id) return fail(c, 403, "자기 계정의 역할·상태·코칭 역할은 바꿀 수 없습니다.");
+  if (body.coaching_role !== undefined && body.coaching_role !== "coach" && body.coaching_role !== "coachee") {
+    return fail(c, 400, "코칭 역할은 coach 또는 coachee만 가능합니다.");
+  }
   const role = body.role === "hr_admin" || body.role === "user" ? body.role : target.role;
   const status = body.status === "active" || body.status === "inactive" || body.status === "pending" ? body.status : target.status;
-  await c.env.DB.prepare("UPDATE users SET role = ?, status = ? WHERE id = ?").bind(role, status, id).run();
+  const coachingRole = body.coaching_role === "coach" || body.coaching_role === "coachee"
+    ? body.coaching_role
+    : normalizeCoachingRole(target.coaching_role);
+  await c.env.DB.prepare("UPDATE users SET role = ?, status = ?, coaching_role = ? WHERE id = ?").bind(role, status, coachingRole, id).run();
   if (status === "inactive") await revokeSessions(c.env, id);
-  return c.json({ ok: true, user: { id, role, status } }, 200, { "cache-control": "no-store" });
+  return c.json({ ok: true, user: { id, role, status, coaching_role: coachingRole } }, 200, { "cache-control": "no-store" });
 });
 
 authApp.post("/admin/users/:id/reset", async (c) => {

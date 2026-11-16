@@ -9,14 +9,17 @@
 // 근거 검색 helper(resolveSources, keywordGate, ensureVectorSeeded,
 // d1TextSources)와 공백 큐·epoch helper도 index.ts에서 그대로 옮겼다.
 // index.ts의 다른 경로(health, 게시 검증, 피드백 등)는 여기서 import한다.
-import { docOwnerClause, localSearchChunks, poolForDoc, poolForKind, questionTokens, RAG_POOL_LABEL, SHARED_USER_ID, uid, vectorUserFilter } from "./lib";
+import { docOwnerClause, docOwnerClauseForPool, localSearchChunks, poolForDoc, poolForKind, questionTokens, RAG_POOL_LABEL, SHARED_USER_ID, uid, vectorPoolFilter } from "./lib";
 import type { RagPool, RagViewer } from "./lib";
 import { aiGatewayOptions, aiGatewayOptionsWithMeta } from "./ai-gateway";
 import type { AskTrace, RetrievalCandidate, TraceSink, TraceSpan } from "./obs/types";
 // S4 M6-β: 활성 system 프롬프트는 M4 prompts.ts가 D1 prompt_versions에서 읽는다
 // (테이블·행이 없으면 하드코딩 v1 폴백 — 질문 응답이 깨지지 않는다).
 import { getActivePrompt } from "./obs/prompts";
-import { classifyTopic, TOPIC_GUARD_ANSWER, type TopicGuardOutcome } from "./obs/topic-guard";
+import { classifyTopic, TOPIC_GUARD_ANSWER, TOPIC_GUARD_THRESHOLD, type TopicGuardOutcome } from "./obs/topic-guard";
+// 판단 모델 병행 (2026-11-16): 의도 라우터 + 근거 재순위 (둘 다 Clef-omni).
+import { classifyIntent, HR_REDIRECT_ANSWER, PERSONAL_REDIRECT_ANSWER, ROUTER_REDIRECT_MIN_CONFIDENCE } from "./obs/router";
+import { rerankSources } from "./obs/rerank";
 
 // runAsk와 helper가 쓰는 바인딩. index.ts의 Env는 이를 포함한다(구조적 타이핑).
 export type AskEnv = {
@@ -29,7 +32,9 @@ export type AskEnv = {
 
 // llama-3-8b-instruct와 llama-3.1-8b-instruct는 2026-05-30에 deprecated 되어
 // Workers AI 바인딩에서 5028을 반환한다. (REST API에서는 3.1-8b가 되지만 바인딩에서는 안 된다.)
-export const LLM_MODEL = "@cf/meta/llama-4-scout-17b-16e-instruct";
+// [2026-11-16] Qwen3-30b-a3b-fp8로 전환 — 골든셋 평가 6/6, 평균 judge 0.9 (Scout 기준선 6/6, 0.85),
+// 코칭 리플렉션 유효 JSON 3/3/3, Scout 대비 ~3.7배 빠름, ~2.5-5배 저렴.
+export const LLM_MODEL = "@cf/qwen/qwen3-30b-a3b-fp8";
 // 임베딩은 bge-m3 (1024차원, 다국어, Vectorize 인덱스 people-os-index-m3).
 // bge-base-en-v1.5(768차원, 영어용)는 한국어 질문을 구분하지 못해 근거 있음
 // 질문과 근거 없음 질문의 코사인 유사도가 0.81~0.83으로 겹쳤다 (2026-11-13
@@ -84,12 +89,72 @@ export function responseText(out: unknown): string {
   return JSON.stringify(res ?? out);
 }
 
-export type Source = { id: string; title: string; section: string; snippet: string; score: number; kind?: "policy" | "tacit" | "transcript"; pool: RagPool; author?: string; publishedAt?: string };
+export type Source = { id: string; title: string; section: string; snippet: string; score: number; kind?: "policy" | "tacit" | "transcript"; pool: RagPool; author?: string; publishedAt?: string; sectionPath?: string; nodeSummary?: string; nodeId?: string; docId?: string };
 
 type Match = { id: string; score: number; metadata?: Record<string, unknown> };
 
+// ---- 트리 메타데이터: 근거 풍부화 (2026-11-16) ----------------------------------
+// doc_nodes는 검색기가 아니라 청크에 붙는 메타데이터다. 적중한 청크의 node_id로
+// 부모 노드를 조회해 섹션 경로·요약을 근거에 덧붙인다.
+// - 섹션 경로: 루트 제외, 조상 제목을 " › "로 연결 (예: "제3장 휴가 › 제12조 연차휴가").
+// - 노드가 루트 자체면 경로는 "" (chunk.article을 그대로 쓴다).
+// - 소유자 스코핑: doc_nodes에 owner_id를 복제하지 않고 documents JOIN +
+//   docOwnerClauseForPool로만 스코핑한다 (소유자 정보의 출처를 하나로 둔다).
+
+export type NodeInfo = { path: string; summary: string | null };
+
+export async function sectionPathForNode(
+  env: AskEnv,
+  docId: string,
+  nodeId: string,
+  viewer: RagViewer,
+  pool: RagPool,
+): Promise<NodeInfo> {
+  const scope = docOwnerClauseForPool(viewer, "d", pool);
+  const rows = await env.DB.prepare(
+    `SELECT n.id, n.parent_id, n.title, n.summary, n.depth FROM doc_nodes n JOIN documents d ON d.id = n.doc_id WHERE n.doc_id = ? AND ${scope.clause} ORDER BY n.ord`,
+  ).bind(docId, ...scope.params)
+    .all<{ id: string; parent_id: string | null; title: string; summary: string | null; depth: number }>();
+  const list = rows.results || [];
+  const byId = new Map(list.map((n) => [n.id, n]));
+  const node = byId.get(nodeId);
+  if (!node) return { path: "", summary: null };
+  const titles: string[] = [];
+  let cur: { id: string; parent_id: string | null; title: string; summary: string | null; depth: number } | undefined = node;
+  let summary: string | null = node.summary;
+  while (cur) {
+    if (cur.depth > 0) titles.unshift(cur.title);
+    if (!summary && cur.summary) summary = cur.summary;
+    cur = cur.parent_id ? byId.get(cur.parent_id) : undefined;
+  }
+  return { path: titles.join(" › "), summary };
+}
+
+/** 여러 chunk의 node_id로 섹션 경로·요약을 한 번에 조회한다 (node_id → 정보). */
+export async function enrichNodeInfo(
+  env: AskEnv,
+  chunks: Array<{ docId: string; nodeId: string | null }>,
+  viewer: RagViewer,
+  pool: RagPool,
+): Promise<Map<string, NodeInfo>> {
+  const out = new Map<string, NodeInfo>();
+  const byDoc = new Map<string, string[]>();
+  for (const c of chunks) {
+    if (!c.nodeId) continue;
+    const arr = byDoc.get(c.docId) ?? [];
+    if (!arr.includes(c.nodeId)) arr.push(c.nodeId);
+    byDoc.set(c.docId, arr);
+  }
+  for (const [docId, nodeIds] of byDoc) {
+    for (const nodeId of nodeIds) {
+      out.set(nodeId, await sectionPathForNode(env, docId, nodeId, viewer, pool));
+    }
+  }
+  return out;
+}
+
 // Vectorize 매치를 조문 단위 근거로 바꾼다 (C5).
-// - 입력 매치는 runAsk에서 이미 viewer 필터(vectorUserFilter)가 적용된
+// - 입력 매치는 runAsk에서 이미 풀 필터(vectorPoolFilter)가 적용된
 //   Vectorize 결과라서, 여기서 별도 소유자 검사는 하지 않는다 (방어 깊이:
 //   격리는 조회 시점에 필터로 강제하고, 이 함수는 근거 변환만 맡는다).
 // - chunk id(새 색인)면 D1 chunks에서 직접 읽는다.
@@ -103,13 +168,41 @@ export async function resolveSources(
   env: AskEnv,
   question: string,
   matches: Match[],
-  outcomes?: Map<string, "kept" | "dedup" | "unresolved">
+  outcomes?: Map<string, "kept" | "dedup" | "unresolved">,
+  pool: RagPool = "shared",
+  viewer: RagViewer = null,
 ): Promise<Source[]> {
   const byDoc = new Map<string, Source>();
   const produced = new Map<string, Source>();
   for (const m of matches) {
-    const chunk = await env.DB.prepare("SELECT id, doc_id, article, text FROM chunks WHERE id = ?").bind(m.id)
-      .first<{ id: string; doc_id: string; article: string; text: string }>();
+    // digest 벡터(`${docId}-digest`)는 문서 단위 길잡이다. 원본 청크가 근거가
+    // 되게 해당 문서에서 질문과 가장 겹치는 chunk 1개를 근거로 쓴다.
+    // digest가 없으면(문서 삭제 등) unresolved로 떨어진다.
+    if (m.id.endsWith("-digest")) {
+      const docId = m.id.slice(0, -"-digest".length);
+      const docRows = await env.DB.prepare("SELECT id, doc_id, article, text, ord, node_id FROM chunks WHERE doc_id = ? ORDER BY ord").bind(docId)
+        .all<{ id: string; doc_id: string; article: string; text: string; ord: number; node_id: string | null }>();
+      const list = docRows.results || [];
+      if (list.length) {
+        const doc = await env.DB.prepare("SELECT title, kind, owner_id FROM documents WHERE id = ?").bind(docId)
+          .first<{ title: string; kind: string; owner_id: string | null }>();
+        const scored = localSearchChunks(question, list.map((ch) => ({ ...ch, title: doc?.title ?? docId })));
+        const best = scored.length ? scored[0] : { ...list[0], score: 0 };
+        const bestNodeId = (best as { node_id?: string | null }).node_id ?? list.find((c) => c.id === best.id)?.node_id ?? null;
+        const src: Source = {
+          id: best.id, title: doc?.title ?? docId, section: best.article, snippet: best.text,
+          score: m.score, kind: doc?.kind === "transcript" ? "transcript" : doc?.kind === "tacit" ? "tacit" : "policy",
+          pool: doc ? poolForDoc(doc.kind, doc.owner_id) : "shared", docId,
+          nodeId: bestNodeId ?? undefined,
+        };
+        produced.set(m.id, src);
+        const prev = byDoc.get(docId);
+        if (!prev || prev.score < m.score) byDoc.set(docId, src);
+      }
+      continue;
+    }
+    const chunk = await env.DB.prepare("SELECT id, doc_id, article, text, node_id FROM chunks WHERE id = ?").bind(m.id)
+      .first<{ id: string; doc_id: string; article: string; text: string; node_id: string | null }>();
     if (chunk) {
       // 제목·종류: 정책이면 policies에서, 암묵지 문서(kind='tacit')면
       // documents에서 읽는다. 암묵지는 출처 배지용 author·게시일도 채운다.
@@ -129,7 +222,7 @@ export async function resolveSources(
           pool = poolForDoc(doc.kind, doc.owner_id);
         }
       }
-      const src: Source = { id: chunk.id, title: title ?? chunk.doc_id, section: chunk.article, snippet: chunk.text, score: m.score, kind, pool, author, publishedAt };
+      const src: Source = { id: chunk.id, title: title ?? chunk.doc_id, section: chunk.article, snippet: chunk.text, score: m.score, kind, pool, author, publishedAt, nodeId: chunk.node_id ?? undefined, docId: chunk.doc_id };
       produced.set(m.id, src);
       const prev = byDoc.get(chunk.doc_id);
       if (!prev || prev.score < m.score) byDoc.set(chunk.doc_id, src);
@@ -157,8 +250,11 @@ export async function resolveSources(
       continue;
     }
     // 알 수 없는 id — 메타데이터가 있으면 그대로 쓴다.
+    // 단, 개인 풀에서는 이 폴백을 끈다 (2026-11-16): D1에 없는 chunk는
+    // 근거에서 제외한다. 고아 벡터(재색인 잔재)의 메타데이터 snippet이
+    // 개인 근거로 새는 것을 막기 위함이다. 공용 풀은 그대로 둔다.
     const meta = (m.metadata || {}) as { title?: string; section?: string; snippet?: string; kind?: string; user_id?: string };
-    if (meta.snippet) {
+    if (meta.snippet && pool !== "personal") {
       const metaKind = meta.kind;
       const kind: "policy" | "tacit" | "transcript" = metaKind === "tacit" ? "tacit" : metaKind === "transcript" ? "transcript" : "policy";
       // 메타데이터의 user_id가 있으면 소유자 기준으로 풀을 정한다 (개인 문서가 "공용"으로 보이지 않게).
@@ -175,7 +271,20 @@ export async function resolveSources(
       outcomes.set(m.id, !src ? "unresolved" : keptSet.has(src) ? "kept" : "dedup");
     }
   }
-  return [...byDoc.values()].sort((a, b) => b.score - a.score);
+  // 근거 풍부화 (2026-11-16): 적중한 청크의 node_id로 부모 노드 제목·요약을 붙인다.
+  // 실패하면 조용히 넘어간다 (풍부화 없이도 근거는 동작한다).
+  const kept = [...byDoc.values()].sort((a, b) => b.score - a.score);
+  try {
+    const infos = await enrichNodeInfo(env, kept.map((s) => ({ docId: s.docId ?? "", nodeId: s.nodeId ?? null })), viewer, pool);
+    for (const s of kept) {
+      if (!s.nodeId) continue;
+      const info = infos.get(s.nodeId);
+      if (!info) continue;
+      if (info.path) s.sectionPath = info.path;
+      if (info.summary) s.nodeSummary = info.summary;
+    }
+  } catch { /* 풍부화 실패는 무시 */ }
+  return kept;
 }
 
 // Vectorize 시딩 (C5 Phase 2): bge-m3 1024차원 새 인덱스 people-os-index-m3.
@@ -290,18 +399,20 @@ function normalizeGapQuestion(q: string): string {
 
 // 공백 큐 기록: 같은 질문의 open 행이 있으면 count+1·asked_at 갱신,
 // 없으면 새로 삽입한다. D1 실패 시 던지므로 호출부에서 try/catch로 감싼다.
-export async function recordGap(env: AskEnv, question: string, source: "no-evidence" | "downvote"): Promise<{ id: string; count: number }> {
+// 0021: userId = 질문한 사용자 (익명·평가는 null). 같은 질문의 open 행에 합쳐질 때는
+// 처음 질문자를 유지하고, 비어 있을 때만 이번 질문자로 채운다.
+export async function recordGap(env: AskEnv, question: string, source: "no-evidence" | "downvote", userId: string | null = null): Promise<{ id: string; count: number }> {
   const q = normalizeGapQuestion(question);
   const now = Date.now();
   const row = await env.DB.prepare("SELECT id, count FROM knowledge_gaps WHERE question = ? AND status = 'open'").bind(q).first<{ id: string; count: number }>();
   if (row) {
     const next = (row.count || 1) + 1;
-    await env.DB.prepare("UPDATE knowledge_gaps SET count = ?, asked_at = ? WHERE id = ?").bind(next, now, row.id).run();
+    await env.DB.prepare("UPDATE knowledge_gaps SET count = ?, asked_at = ?, user_id = COALESCE(user_id, ?) WHERE id = ?").bind(next, now, userId, row.id).run();
     return { id: row.id, count: next };
   }
   const id = uid("gap");
-  await env.DB.prepare("INSERT INTO knowledge_gaps (id, question, asked_at, status, doc_id, count, source) VALUES (?, ?, ?, 'open', NULL, 1, ?)")
-    .bind(id, q, now, source).run();
+  await env.DB.prepare("INSERT INTO knowledge_gaps (id, question, asked_at, status, doc_id, count, source, user_id) VALUES (?, ?, ?, 'open', NULL, 1, ?, ?)")
+    .bind(id, q, now, source, userId).run();
   return { id, count: 1 };
 }
 
@@ -319,26 +430,39 @@ export async function getKnowledgeEpoch(env: AskEnv): Promise<number> {
 // minScore 이상만 남긴다 (0이면 localSearch의 score>0 필터만 적용).
 // LEFT JOIN으로 암묵지 chunk(doc_id가 policies에 없음)도 찾고,
 // 암묵지 chunk는 출처 배지용 kind/author/게시일도 함께 싣는다.
-// 개인별 RAG 격리: docOwnerClause(viewer, "d")로 본인이 볼 수 있는 문서의
-// chunk만 남긴다 (공용 owner_id IS NULL 또는 본인 소유). policies chunk는
-// documents 행이 없어 d.owner_id가 NULL이라 공용으로 취급된다.
-export async function d1TextSources(env: AskEnv, question: string, minScore = 0, viewer: RagViewer | null = null): Promise<Source[]> {
-  const scope = docOwnerClause(viewer, "d");
+// 풀 분리 (2026-11-16): pool 인자로 D1 범위를 정한다. shared면 공용 문서만
+// (owner_id IS NULL), personal이면 본인 소유 문서만. 기본값은 viewer의
+// 기존 범위(공용+본인) — 호출부가 pool을 넘기지 않으면 예전 동작 유지.
+export async function d1TextSources(env: AskEnv, question: string, minScore = 0, viewer: RagViewer | null = null, pool?: RagPool): Promise<Source[]> {
+  const scope = pool ? docOwnerClauseForPool(viewer, "d", pool) : docOwnerClause(viewer, "d");
   const rows = await env.DB.prepare(
-    `SELECT c.id, c.doc_id, c.article, c.text, c.ord, COALESCE(p.title, d.title, c.doc_id) AS title, d.kind AS doc_kind, d.owner_id AS doc_owner, d.author AS doc_author, d.created_at AS doc_created FROM chunks c LEFT JOIN policies p ON p.id = c.doc_id LEFT JOIN documents d ON d.id = c.doc_id WHERE ${scope.clause}`
-  ).bind(...scope.params).all<{ id: string; doc_id: string; article: string; text: string; ord: number; title: string; doc_kind: string | null; doc_owner: string | null; doc_author: string | null; doc_created: string | null }>();
+    `SELECT c.id, c.doc_id, c.node_id, c.article, c.text, c.ord, COALESCE(p.title, d.title, c.doc_id) AS title, d.kind AS doc_kind, d.owner_id AS doc_owner, d.author AS doc_author, d.created_at AS doc_created FROM chunks c LEFT JOIN policies p ON p.id = c.doc_id LEFT JOIN documents d ON d.id = c.doc_id WHERE ${scope.clause}`
+  ).bind(...scope.params).all<{ id: string; doc_id: string; node_id: string | null; article: string; text: string; ord: number; title: string; doc_kind: string | null; doc_owner: string | null; doc_author: string | null; doc_created: string | null }>();
   const list = rows.results || [];
   const found = localSearchChunks(question, list);
   const byId = new Map(list.map((r) => [r.id, r]));
-  return found
+  const out = found
     .filter((f) => f.score >= minScore)
     .map((f) => {
       const row = byId.get(f.id);
       const docKind = row?.doc_kind;
       const tacit = docKind === "tacit";
       const kind: "policy" | "tacit" | "transcript" = tacit ? "tacit" : docKind === "transcript" ? "transcript" : "policy";
-      return { id: f.id, title: f.title, section: f.article, snippet: f.snippet, score: f.score, kind, pool: poolForDoc(docKind, row?.doc_owner), author: tacit ? (row?.doc_author || "인사팀") : undefined, publishedAt: tacit ? row?.doc_created?.slice(0, 10) : undefined };
+      return { id: f.id, title: f.title, section: f.article, snippet: f.snippet, score: f.score, kind, pool: poolForDoc(docKind, row?.doc_owner), author: tacit ? (row?.doc_author || "인사팀") : undefined, publishedAt: tacit ? row?.doc_created?.slice(0, 10) : undefined, nodeId: row?.node_id ?? null, docId: row?.doc_id ?? "" } as Source;
     });
+  // 근거 풍부화 (2026-11-16): D1 키워드 폴백 근거에도 resolveSources와 같은
+  // 섹션 경로·노드 요약을 붙인다. 실패하면 조용히 넘어간다.
+  try {
+    const infos = await enrichNodeInfo(env, out.map((s) => ({ docId: s.docId ?? "", nodeId: s.nodeId ?? null })), viewer, pool ?? "shared");
+    for (const s of out) {
+      if (!s.nodeId) continue;
+      const info = infos.get(s.nodeId);
+      if (!info) continue;
+      if (info.path) s.sectionPath = info.path;
+      if (info.summary) s.nodeSummary = info.summary;
+    }
+  } catch { /* 풍부화 실패는 무시 */ }
+  return out;
 }
 
 // ---- runAsk ----
@@ -352,7 +476,7 @@ export type AskInput = {
 };
 
 export type AskOptions = {
-  origin?: "user" | "eval"; // 기본 'user'
+  origin?: "user" | "eval" | "personal" | "metadata"; // 기본 'user'
   evalRunId?: string;
   recordGap?: boolean; // 근거 없음 → knowledge_gaps (기본 true, 평가는 false)
   readCache?: boolean; // KV/D1 답 캐시 조회 (기본 true, force면 false)
@@ -361,6 +485,13 @@ export type AskOptions = {
   gatewaySkipCache?: boolean; // AI Gateway 캐시 건너뛰기 — LLM 호출만 (기본 false, force면 true)
   promptVersionId?: string; // 기본: 활성 버전
   viewer?: RagViewer | null; // RAG 조회자 (기본 null = 익명/평가, 공용만 조회)
+  // 검색 풀 (2026-11-16, HR/개인 창 분리). 기본 "shared" — HR 규정 검색창은
+  // 공용만 본다. 개인 창은 "personal"을 넘긴다. 두 풀을 섞어 검색하지 않는다.
+  pool?: RagPool;
+  // 관점 선택 (2026-11-16): hr_admin이 개인 창에서 다른 사용자를 고르면 그 사용자의
+  // 개인 풀을 검색한다. 없으면 viewer. DO 세션 키·캐시 키·트레이스 user_id는
+  // 계속 viewer(실제 요청자)를 쓴다 — 검색 범위만 바뀐다.
+  scopeViewer?: RagViewer | null;
 };
 
 export type AskHooks = {
@@ -393,13 +524,27 @@ type SpanProduct = TraceSpan["product"];
 
 export async function runAsk(env: AskEnv, input: AskInput, opts: AskOptions = {}, hooks: AskHooks = {}): Promise<AskRunResult> {
   const origin = opts.origin ?? "user";
+  // 사용자 경로 단계(라우터·토픽 가드·재순위)는 HR 창(user)과 개인 창(personal) 모두 돈다.
+  // eval·metadata 호출만 건너뛴다. origin은 트레이스 구분용이다.
+  const isUserPath = origin === "user" || origin === "personal";
   const viewer = opts.viewer ?? null; // 개인별 RAG 격리: null이면 공용만 조회
+  // 관점 선택: 검색 범위 사용자 (기본 = viewer). 세션·캐시 키는 viewer 그대로.
+  const scopeViewer: RagViewer | null = opts.scopeViewer !== undefined ? opts.scopeViewer : viewer;
+  // 풀 분리 (2026-11-16): 기본 shared — HR 창은 공용만, 개인 창은 personal을 넘긴다.
+  const pool: RagPool = opts.pool ?? "shared";
   const readCache = opts.readCache ?? true;
   const writeCache = opts.writeCache ?? true;
   const persistSession = opts.persistSession ?? true;
   const shouldRecordGap = opts.recordGap ?? true;
   const gatewaySkipCache = opts.gatewaySkipCache ?? false;
   const { question, sessionId } = input;
+  // DO 격리 강화 (2026-11-16): DO 인스턴스 + D1 sessions 폴백 키에 viewer id를
+  // 넣는다. sessionId만으로는 서버가 "이 세션이 이 사용자의 것인지"를 검증하지
+  // 않아서, sessionId가 같으면(공유·예측) 다른 사용자의 대화 기록을 읽을 수 있다.
+  // viewer id를 붙이면 sessionId가 같아도 사용자가 다르면 다른 인스턴스가 된다.
+  // (캐시 키는 이미 viewer id를 포함한다 — 같은 패턴.) 기존 세션 기록은 구 키로
+  // 남아 있어 새 키로는 안 보이지만, 세션 기억은 휘발성(최근 20턴)이라 무시한다.
+  const sessionKey = `${viewer?.id ?? "anon"}:${sessionId}`;
 
   // 처리 시간 측정 (C7): 단계별 ms를 응답·감사 기록에 남긴다.
   const t0 = input.startedAt ?? Date.now();
@@ -432,8 +577,10 @@ export async function runAsk(env: AskEnv, input: AskInput, opts: AskOptions = {}
   // 캐시 키에 viewer id도 넣는다: 같은 세션 id라도 사용자가 바뀌면
   // 다른 사람의 개인 문서 기반 답이 캐시에서 새는 것을 막기 위함이다
   // (viewer 없으면 "anon" — 익명/평가 호출은 공용만 보니 공유해도 안전하다).
+  // 풀도 키에 넣는다 (2026-11-16): 같은 질문이라도 HR 창(공용)과 개인 창
+  // (개인)의 답은 다르므로 풀별로 캐시를 나눈다.
   const knowledgeEpoch = await getKnowledgeEpoch(env);
-  const cacheKey = `ask:${viewer?.id ?? "anon"}:${sessionId}:${question}:${knowledgeEpoch}`;
+  const cacheKey = `ask:${pool}:${viewer?.id ?? "anon"}:${sessionId}:${question}:${knowledgeEpoch}`;
   const cacheStart = Date.now();
   if (readCache) {
     try {
@@ -454,7 +601,7 @@ export async function runAsk(env: AskEnv, input: AskInput, opts: AskOptions = {}
   const sessionStart = Date.now();
   let sessionReadVia: "durable-objects" | "d1" = "durable-objects";
   try {
-    const stub = env.AGENT_SESSION.get(env.AGENT_SESSION.idFromName(sessionId));
+    const stub = env.AGENT_SESSION.get(env.AGENT_SESSION.idFromName(sessionKey));
     const res = await stub.fetch("https://do/history");
     const data = await res.json() as { history?: Array<{ role: string; content: string }> };
     const lastUser = [...(data.history || [])].reverse().find((h) => h.role === "user");
@@ -462,7 +609,7 @@ export async function runAsk(env: AskEnv, input: AskInput, opts: AskOptions = {}
   } catch {
     sessionReadVia = "d1";
     try {
-      const prev = await env.DB.prepare("SELECT history FROM sessions WHERE id = ?").bind(sessionId).first<{ history: string }>();
+      const prev = await env.DB.prepare("SELECT history FROM sessions WHERE id = ?").bind(sessionKey).first<{ history: string }>();
       if (prev) {
         const hist = JSON.parse(prev.history) as Array<{ role: string; content: string }>;
         const lastUser = [...hist].reverse().find((h) => h.role === "user");
@@ -473,13 +620,57 @@ export async function runAsk(env: AskEnv, input: AskInput, opts: AskOptions = {}
   mark("session", sessionStart);
   span("session", sessionReadVia, sessionStart, true, { via: sessionReadVia, followUp: searchQuestion !== question });
 
-  // 업무 외 질문 판별 (Decision Model, Clef): 확신 높을 때만 거른다.
+  // 의도 라우터 (Decision Model, Clef-omni) — 2026-11-16. HR/개인 창 분리 가드.
+  // 세션 문맥을 더한 searchQuestion으로 판별한다. 평가 호출(origin='eval')은
+  // 건너뛴다 — 골든셋은 전부 HR 규정 질문이다. 판별 실패는 fail-open으로
+  // 정상 진행한다 (라우터가 검색을 막지 않는다).
+  // - personal인데 HR 창(pool shared) → 개인 창 안내로 돌려보낸다 (검색 안 함).
+  // - hr_regulation인데 개인 창(pool personal) → HR 창 안내로 돌려보낸다.
+  // - 돌려보내기는 확신도 ≥ 0.8일 때만 한다. 확신도가 낮으면 현재 풀에서
+  //   검색한다 (fail-open). 텍스트만으로는 "어느 풀에 답이 있는지"를 확신할
+  //   수 없기 때문이다 — 프로젝트명 같은 개인 콘텐츠는 텍스트에서 안 보인다.
+  // - off_topic은 HR 창에서만, 확신도 ≥ 0.85일 때만 거른다 (토픽 가드와
+  //   같은 기준). 개인 창에서는 off_topic 판별을 무시한다 — 개인 문서는
+  //   임의의 프로젝트명·주제를 포함해 텍스트만으로 업무 외를 가릴 수 없고,
+  //   검색 자체가 필터다 (맞는 문서가 없으면 근거 없음으로 답한다).
+  let guardedOffTopic = false;
+  let routerRedirect: string | undefined;
+  let routerInfo: { intent: string; confidence: number; engine: string; reason: string } | undefined;
+  if (isUserPath) {
+    const routerStart = Date.now();
+    try {
+      const routed = await classifyIntent(env, searchQuestion);
+      if (routed) {
+        routerInfo = routed;
+        const confident = routed.confidence >= ROUTER_REDIRECT_MIN_CONFIDENCE;
+        if (routed.intent === "personal" && pool === "shared" && confident) routerRedirect = PERSONAL_REDIRECT_ANSWER;
+        else if (routed.intent === "hr_regulation" && pool === "personal" && confident) routerRedirect = HR_REDIRECT_ANSWER;
+        else if (routed.intent === "off_topic" && pool === "shared" && routed.confidence >= TOPIC_GUARD_THRESHOLD) guardedOffTopic = true;
+      }
+    } catch { /* 라우터 실패 시 fail-open — 정상 진행 */ }
+    span("router", "workers-ai", routerStart, true, {
+      intent: routerInfo?.intent ?? "fail-open",
+      confidence: routerInfo?.confidence ?? 0,
+      engine: routerInfo?.engine ?? "none",
+      redirect: !!routerRedirect,
+      offTopic: guardedOffTopic,
+      ...(routerInfo ? { reason: routerInfo.reason } : {}),
+    });
+    mark("router", routerStart);
+  }
+
+  // 업무 외 질문 판별 (Decision Model, Clef + Clef-omni 앙상블): 확신 높을 때만 거른다.
   // 세션 문맥을 더한 searchQuestion으로 판별한다 (후속 질문 "그건 어떻게 돼?"가
   // 단독으로는 업무와 무관해 보일 수 있어서). 평가 호출(origin='eval')은
   // 건너뛴다 — 골든셋은 전부 업무 질문이다. 경계선·판별 실패는 정상 경로(fail-open).
-  let guardedOffTopic = false;
+  // 라우터가 이미 off_topic으로 판별했으면 토픽 가드 호출을 건너뛴다.
   let guardInfo: TopicGuardOutcome | undefined;
-  if (origin === "user") {
+  // 라우터가 이미 off_topic으로 판별했거나 돌려보내기로 정했으면 토픽 가드
+  // 호출을 건너뛴다 (검색을 안 하는데 판별할 필요가 없다).
+  // 개인 창(pool personal)에서는 토픽 가드를 아예 안 돌린다 — 개인 문서는
+  // 임의의 프로젝트명·주제를 포함해 텍스트만으로 업무 외를 가릴 수 없고,
+  // 검색 자체가 필터다 (맞는 문서가 없으면 근거 없음으로 답한다).
+  if (isUserPath && !guardedOffTopic && !routerRedirect && pool === "shared") {
     const guardStart = Date.now();
     try {
       guardInfo = await classifyTopic(env, searchQuestion);
@@ -506,10 +697,11 @@ export async function runAsk(env: AskEnv, input: AskInput, opts: AskOptions = {}
   // 빼고 최대 MAX_SOURCES개까지만 쓴다. 근거가 아예 없으면
   // grounded:false로 LLM 미호출 — 지어내기 금지는 그대로 (C5).
   let sources: Source[] = [];
-  let searchEngine = guardedOffTopic ? "none" : "d1-text";
+  let searchEngine = guardedOffTopic || routerRedirect ? "none" : "d1-text";
   let d1FallbackRan = false; // Vectorize/AI 실패 시 D1 폴백이 이미 돎
   let vectorError: string | undefined;
-  if (!guardedOffTopic) {
+  // 라우터가 돌려보낸 질문(잘못된 창)은 검색하지 않는다.
+  if (!guardedOffTopic && !routerRedirect) {
     try {
       await ensureVectorSeeded(env);
       const embedStart = Date.now();
@@ -528,11 +720,12 @@ export async function runAsk(env: AskEnv, input: AskInput, opts: AskOptions = {}
       const vecStart = Date.now();
       let vec: VectorizeMatches;
       try {
-        // 개인별 RAG 격리: user_id 필터는 서버에서 먼저 적용되고 topK는
-        // 필터된 집합에서 뽑힌다 (필터 밖 개인 문서는 순위에도 들지 않는다).
-        // vectorUserFilter는 Record<string, unknown>을 돌려줘 workers-types의
+        // 풀 분리 (2026-11-16): HR 창은 공용 벡터만, 개인 창은 본인 개인
+        // 벡터만 조회한다. vectorPoolFilter는 서버에서 강제하고 topK는
+        // 필터된 집합에서 뽑힌다 (필터 밖 문서는 순위에도 들지 않는다).
+        // vectorPoolFilter는 Record<string, unknown>을 돌려줘 workers-types의
         // VectorizeVectorMetadataFilter와 직접 맞지 않아 최소한의 캐스트를 쓴다.
-        vec = await env.VECTOR.query(values, { topK: 5, returnMetadata: "all", filter: vectorUserFilter(viewer) as VectorizeVectorMetadataFilter });
+        vec = await env.VECTOR.query(values, { topK: 5, returnMetadata: "all", filter: vectorPoolFilter(scopeViewer, pool) as VectorizeVectorMetadataFilter });
       } catch (e) {
         span("vectorize", "vectorize", vecStart, false, { topK: 5, error: errMsg(e) });
         throw e;
@@ -569,7 +762,7 @@ export async function runAsk(env: AskEnv, input: AskInput, opts: AskOptions = {}
           }
           if (gated.length > 0) {
             searchEngine = "vectorize";
-            sources = await resolveSources(env, searchQuestion, gated, resolved);
+            sources = await resolveSources(env, searchQuestion, gated, resolved, pool, scopeViewer);
             if (sources.length === 0) throw new Error("no resolvable matches");
           }
         } finally {
@@ -596,7 +789,7 @@ export async function runAsk(env: AskEnv, input: AskInput, opts: AskOptions = {}
         // 게이트 뒤 resolve 실패로 들어온 경우 Vectorize 후보는 근거가 아니다.
         for (const cand of retrieval) if (cand.stage === "vectorize" && cand.outcome === "kept") cand.outcome = "keyword_gate";
         const fbStart = Date.now();
-        sources = await d1TextSources(env, searchQuestion, 0, viewer);
+        sources = await d1TextSources(env, searchQuestion, 0, scopeViewer, pool);
         if (sources.length > 0) searchEngine = "d1-text";
         d1FallbackRan = true;
         sources.forEach((s, i) => retrieval.push({ chunkId: s.id, title: s.title, article: s.section, stage: "d1", rank: i + 1, keywordScore: s.score, outcome: "kept" }));
@@ -611,7 +804,7 @@ export async function runAsk(env: AskEnv, input: AskInput, opts: AskOptions = {}
       const mergeStart = Date.now();
       // d1TextSources(…, KEYWORD_GATE_MIN)과 같은 결과: 같은 조회를 하한 0으로
       // 받아 여기서 하한을 적용한다 (하한 미달 후보도 트레이스에 남기려고).
-      const d1All = await d1TextSources(env, searchQuestion, 0, viewer);
+      const d1All = await d1TextSources(env, searchQuestion, 0, scopeViewer, pool);
       const d1Extra = d1All.filter((s) => s.score >= KEYWORD_GATE_MIN);
       const haveIds = new Set(sources.map((s) => s.id));
       let added = 0;
@@ -630,6 +823,21 @@ export async function runAsk(env: AskEnv, input: AskInput, opts: AskOptions = {}
       }
       span("d1_merge", "d1", mergeStart, true, { mode: "merge", minScore: KEYWORD_GATE_MIN, found: d1Extra.length, added, maxSources: MAX_SOURCES });
     }
+    // 근거 재순위 (Decision Model, Clef-omni) — 2026-11-16. 후보가 2개 이상이면
+    // 판단 모델이 질문에 가장 잘 답하는 근거를 골라 1위로 올린다. 실패하면
+    // 원래 순서를 유지한다 (fail-open). 평가 호출(origin='eval')은 건너뛴다 —
+    // 골든셋 기준선을 그대로 유지하고, 재순위는 사용자 경로에서만 검증한다.
+    if (isUserPath && sources.length >= 2) {
+      const rerankStart = Date.now();
+      try {
+        const rr = await rerankSources(env, searchQuestion, sources);
+        sources = rr.sources;
+        span("rerank", "workers-ai", rerankStart, true, { reranked: rr.reranked, winnerId: rr.winnerId ?? null, reason: rr.reason });
+        mark("rerank", rerankStart);
+      } catch (e) {
+        span("rerank", "workers-ai", rerankStart, false, { error: errMsg(e) });
+      }
+    }
   }
   // 근거 없음: LLM을 호출하지 않고 경고로 답한다 (C5, Baryon AX).
   // 연차휴가 규정을 강제 근거로 넣던 폴백은 삭제했다 — 근거가 없는데
@@ -643,15 +851,16 @@ export async function runAsk(env: AskEnv, input: AskInput, opts: AskOptions = {}
   let rawResponse: unknown;
   let usage: AskTrace["usage"];
   if (!grounded) {
-    // 업무 외 판별 거절: 고정 답, LLM 미호출, 공백 큐에 쌓지 않는다 (큐 오염 방지).
-    answer = guardedOffTopic ? TOPIC_GUARD_ANSWER : "등록된 규정에서 근거를 찾지 못했습니다. 이 질문에 대한 답은 아직 등록된 규정에 없습니다. 인사팀에 확인해 주세요.";
+    // 업무 외 판별 거절·라우터 돌려보내기: 고정 답, LLM 미호출, 공백 큐에
+    // 쌓지 않는다 (큐 오염 방지 — 잘못된 창 질문은 지식 공백이 아니다).
+    answer = routerRedirect ?? (guardedOffTopic ? TOPIC_GUARD_ANSWER : "등록된 규정에서 근거를 찾지 못했습니다. 이 질문에 대한 답은 아직 등록된 규정에 없습니다. 인사팀에 확인해 주세요.");
     engine = "none";
     timings.llm = 0; // 근거 없음 — LLM을 호출하지 않는다
     // C5-b: 근거 없는 질문은 지식 공백 큐에 쌓는다 (라이브러리에서 담당자가 답한다).
     // 기록 실패가 질문 응답을 망가뜨리지 않게 try/catch로 감싼다.
     // 평가 호출(opts.recordGap=false)은 공백 큐에 행을 만들지 않는다.
-    if (shouldRecordGap && !guardedOffTopic) {
-      try { gapId = (await recordGap(env, question, "no-evidence")).id; }
+    if (shouldRecordGap && !guardedOffTopic && !routerRedirect) {
+      try { gapId = (await recordGap(env, question, "no-evidence", viewer?.id ?? null)).id; }
       catch (e) { console.log("[gaps] recordGap failed:", e instanceof Error ? e.message : String(e)); }
     }
   } else {
@@ -662,7 +871,11 @@ export async function runAsk(env: AskEnv, input: AskInput, opts: AskOptions = {}
     const llmStart = Date.now();
     let llmError: string | undefined;
     try {
-      const context = sources.map((s) => `[${RAG_POOL_LABEL[s.pool]} › ${s.title} › ${s.section}] ${s.snippet}`).join("\n");
+      const context = sources.map((s) => {
+        const section = s.sectionPath || s.section;
+        const summary = s.nodeSummary ? `〈${s.nodeSummary.slice(0, 120)}〉 ` : "";
+        return `[${RAG_POOL_LABEL[s.pool]} › ${s.title} › ${section}] ${summary}${s.snippet}`;
+      }).join("\n");
       promptMessages = [
         { role: "system", content: prompt.body },
         { role: "user", content: `질문: ${question}\n근거:\n${context}` },
@@ -696,15 +909,15 @@ export async function runAsk(env: AskEnv, input: AskInput, opts: AskOptions = {}
   if (persistSession) {
     const saveStart = Date.now();
     try {
-      const stub = env.AGENT_SESSION.get(env.AGENT_SESSION.idFromName(sessionId));
+      const stub = env.AGENT_SESSION.get(env.AGENT_SESSION.idFromName(sessionKey));
       await stub.fetch("https://do/message", { method: "POST", body: JSON.stringify({ role: "user", content: question }) });
       await stub.fetch("https://do/message", { method: "POST", body: JSON.stringify({ role: "assistant", content: answer }) });
     } catch {
       sessionVia = "d1";
-      const existing = await env.DB.prepare("SELECT history FROM sessions WHERE id = ?").bind(sessionId).first<{ history: string }>();
+      const existing = await env.DB.prepare("SELECT history FROM sessions WHERE id = ?").bind(sessionKey).first<{ history: string }>();
       const history = existing ? JSON.parse(existing.history) : [];
       history.push({ role: "user", content: question }, { role: "assistant", content: answer });
-      await env.DB.prepare("INSERT OR REPLACE INTO sessions (id, history, updated_at) VALUES (?, ?, datetime('now'))").bind(sessionId, JSON.stringify(history.slice(-20))).run();
+      await env.DB.prepare("INSERT OR REPLACE INTO sessions (id, history, updated_at) VALUES (?, ?, datetime('now'))").bind(sessionKey, JSON.stringify(history.slice(-20))).run();
     }
     span("session_save", sessionVia === "d1" ? "d1" : "durable-objects", saveStart, true, { via: sessionVia });
   } else {
@@ -725,6 +938,7 @@ export async function runAsk(env: AskEnv, input: AskInput, opts: AskOptions = {}
     ...(rawResponse !== undefined ? { rawResponse } : {}),
     ...(usage ? { usage } : {}),
     aigLogIds,
+    userId: viewer?.id ?? null, // 0021: 질문한 사용자 (익명·평가 null)
   };
   // C7 답변 감사: 질문 1건마다 ask_events 행 1건. 기록 실패가 질문 자체를
   // 망가뜨리지는 않게 try/catch로 감싼다. 캐시된 답은 원본 호출의 행을
@@ -737,8 +951,8 @@ export async function runAsk(env: AskEnv, input: AskInput, opts: AskOptions = {}
   } else {
     try {
       await env.DB.prepare(
-        "INSERT INTO ask_events (id, session_id, question, answer, source_ids, grounded, engine, search_engine, timings_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)"
-      ).bind(eventId, sessionId, question, answer, JSON.stringify(sources.map((s) => s.id)), grounded ? 1 : 0, engine, searchEngine, JSON.stringify(timings)).run();
+        "INSERT INTO ask_events (id, session_id, question, answer, source_ids, grounded, engine, search_engine, timings_json, user_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+      ).bind(eventId, sessionId, question, answer, JSON.stringify(sources.map((s) => s.id)), grounded ? 1 : 0, engine, searchEngine, JSON.stringify(timings), viewer?.id ?? null).run();
     } catch (e) {
       console.log("[audit] ask_events insert failed:", e instanceof Error ? e.message : String(e));
     }

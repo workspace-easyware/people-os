@@ -119,6 +119,14 @@
           : '<div class="small obs-muted">적용(applied)된 공백이 생기면 여기에 회귀 실행 버튼이 강조됩니다.</div>') + '</div>';
     }
 
+    // 개선 코멘트 (재귀적 자기개선 근거): 평가 결과에서 온 공백에만 있다.
+    // 평가 결과가 아닌 공백(no_evidence/downvote/사용자 low_score)은 빈칸.
+    function improveBlock(g) {
+      if (!g.resultId) return '';
+      if (g.judgeComment) return '<div class="obs-improve"><b>개선 코멘트:</b> ' + esc(g.judgeComment) + '</div>';
+      return '<div class="obs-improve obs-muted">이 실행에는 개선 코멘트가 없습니다 (judge-v2 이전 실행).</div>';
+    }
+
     function actionsCell(g) {
       if (g.status === 'dismissed' || g.status === 'verified') return '<span class="obs-muted small">—</span>';
       return '<div class="obs-actions">' + ['publish_tacit', 'fix_document', 'adjust_prompt', 'promote', 'dismiss'].map(function (a) {
@@ -150,10 +158,10 @@
           if (g.docId) links.push('<span class="obs-mono obs-ellip" title="문서 id: ' + escAttr(g.docId) + '">' + esc(g.docId) + '</span>');
           if (g.eventId) links.push('<a href="#obs/trace/' + escAttr(encodeURIComponent(g.eventId)) + '">트레이스</a>');
           var judge = g.judgeScore != null || g.judgeReason
-            ? (g.judgeScore != null ? '<b>' + esc(O.fmtScore(g.judgeScore)) + '</b> ' : '') + '<span class="obs-clamp" title="' + escAttr(g.judgeReason || '') + '">' + esc(g.judgeReason || '') + '</span>'
+            ? (g.judgeScore != null ? '<b>' + esc(O.fmtScore(g.judgeScore)) + '</b> ' : '') + '<span>' + esc(g.judgeReason || '') + '</span>' + improveBlock(g)
             : '<span class="obs-muted">—</span>';
           return '<tr class="obs-gap-row"><td class="obs-q" title="' + escAttr(g.question) + '">' + esc(g.question) + historyRows(g) + '</td>' +
-            '<td>' + kindBadge(g.kind) + '</td><td class="obs-num">' + esc(g.count) + '</td>' +
+            '<td>' + kindBadge(g.kind) + '<div class="small">질문자: <b>' + esc(g.askerName || '익명') + '</b></div></td><td class="obs-num">' + esc(g.count) + '</td>' +
             '<td class="obs-num obs-date">' + esc(O.kst(g.lastSeenAt)) + '</td>' +
             '<td class="obs-docs">' + (links.join(' ') || '<span class="obs-muted">—</span>') + '</td>' +
             '<td class="obs-judge-cell">' + judge + '</td>' +

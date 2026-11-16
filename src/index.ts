@@ -8,6 +8,8 @@ import type { RagViewer } from "./lib";
 import { AI_GATEWAY_ID, aiGatewayOptions } from "./ai-gateway";
 import { decodePlainText, detectDocumentFormat, extractHwpxText } from "./parse";
 import { generateDigest, getLatestDigest } from "./digest";
+// 트리 메타데이터 (2026-11-16): doc_nodes + 전사본 digest. Queue 소비자가 만든다.
+import { buildTreeForDoc, treeHash } from "./tree";
 // S4 M6-α: /api/ask 파이프라인과 근거 검색 helper·상수는 ask-pipeline.ts로 옮겼다 (동작 불변).
 import {
   EMBED_DIMS, EMBED_MODEL, KEYWORD_GATE_MIN, KNOWLEDGE_EPOCH_KEY, LLM_MODEL, SCORE_FLOOR, VECTOR_INDEX_NAME, VECTOR_SEED_ERROR_KEY,
@@ -105,8 +107,16 @@ type PipelineMessage = {
   title: string;
   enqueuedAt: string;
 };
-// S4: 큐 메시지 유니온 (전사 파이프라인 | 평가 항목 1건).
-type QueueMessage = PipelineMessage | EvalItemMessage;
+
+// 트리 빌드 메시지 (2026-11-16): doc_nodes + 전사본 digest 생성. 멱등.
+type BuildTreeMessage = {
+  type: "build-tree";
+  docId: string;
+  hash?: string;
+  enqueuedAt: string;
+};
+// S4: 큐 메시지 유니온 (전사 파이프라인 | 평가 항목 1건 | 트리 빌드).
+type QueueMessage = PipelineMessage | EvalItemMessage | BuildTreeMessage;
 // S4 평가 cron: 03:00 KST. 07:00 KST 다이제스트 cron(0 22 * * *)과 event.cron으로 구분한다.
 const EVAL_CRON = "0 18 * * *";
 // trace sink (M2): runAsk가 끝날 때 ask_events + spans/retrievals + R2 원문을 기록한다.
@@ -246,8 +256,8 @@ async function enqueuePipeline(env: Env, recordingId: string, docId: string, tit
 // - 동시 실행은 lock_until 잠금으로 막는다 (180초 TTL, 죽은 작업은 다음 호출이 재개).
 // 전사본을 지어내지 않는다: 실패 구간은 "[구간 N 전사 실패]" 자리 표시자만 남긴다.
 async function advanceRecording(env: Env, recordingId: string, opts: { maxSegments: number; maxMs: number }): Promise<{ status: string; locked?: boolean }> {
-  const row = await env.DB.prepare("SELECT id, title, object_key, mime_type, transcript_status, partial, done_chunks, owner_id FROM recordings WHERE id = ?").bind(recordingId)
-    .first<{ id: string; title: string; object_key: string; mime_type: string; transcript_status: string; partial: string | null; done_chunks: number | null; owner_id: string | null }>();
+  const row = await env.DB.prepare("SELECT id, title, object_key, mime_type, transcript_status, partial, done_chunks, owner_id, is_coaching FROM recordings WHERE id = ?").bind(recordingId)
+    .first<{ id: string; title: string; object_key: string; mime_type: string; transcript_status: string; partial: string | null; done_chunks: number | null; owner_id: string | null; is_coaching: number | null }>();
   if (!row) return { status: "missing" };
   if (row.transcript_status === "ready") return { status: "ready" };
   if (row.transcript_status === "pending") return { status: "pending" };
@@ -297,8 +307,9 @@ async function advanceRecording(env: Env, recordingId: string, opts: { maxSegmen
       }
       const docId = uid("doc");
       // 개인별 RAG 격리: 전사본 문서는 녹음 행의 소유자를 그대로 복사한다.
-      await env.DB.prepare("INSERT INTO documents (id, title, kind, content, r2_key, owner_id) VALUES (?, ?, 'transcript', ?, ?, ?)")
-        .bind(docId, row.title.replace(/\.[^.]+$/, ""), partial, row.object_key, row.owner_id ?? null).run();
+      // 코칭 플래그(0020): 녹음 업로드 때 받은 is_coaching을 전사본 문서로 넘긴다.
+      await env.DB.prepare("INSERT INTO documents (id, title, kind, content, r2_key, owner_id, is_coaching) VALUES (?, ?, 'transcript', ?, ?, ?, ?)")
+        .bind(docId, row.title.replace(/\.[^.]+$/, ""), partial, row.object_key, row.owner_id ?? null, row.is_coaching ? 1 : 0).run();
       await env.DB.prepare("UPDATE recordings SET transcript = ?, transcript_status = 'ready', doc_id = ?, progress = NULL WHERE id = ?")
         .bind(partial, docId, recordingId).run();
       // S1: 전사 완료 → 요약·색인은 큐 소비자에게 넘긴다. enqueue에 실패해도
@@ -488,21 +499,37 @@ app.get("/api/seed-status", async (c) => {
   return c.json({ ok: true, model: EMBED_MODEL, index: VECTOR_INDEX_NAME, dims: EMBED_DIMS, seeded: seed.seeded, upserted: seed.upserted ?? null, chunks: chunks?.n ?? 0, lastError, error: seed.error ?? null });
 });
 
+// ---- 관점 선택 (2026-11-16, 사용자 식별) ----
+// hr_admin만 asUserId로 "이 사용자 대신" 업로드·검색·할 일 생성을 한다. 일반 사용자·익명이
+// 보낸 asUserId는 무시한다(항상 본인). hr_admin이 보낸 id가 users에 없으면 400.
+// 반환: target = 대상 사용자(없으면 null = 지정 안 함), error = 400 메시지.
+type TargetUser = { id: string; name: string; email: string; role: string };
+async function resolveAsUser(env: Env, viewer: { id: string; role: string } | null, raw: unknown): Promise<{ target: TargetUser | null; error?: string }> {
+  const id = typeof raw === "string" ? raw.trim() : "";
+  if (!id || !viewer || viewer.role !== "hr_admin") return { target: null };
+  const u = await env.DB.prepare("SELECT id, name, email, role FROM users WHERE id = ?").bind(id).first<TargetUser>();
+  if (!u) return { target: null, error: "asUserId: 존재하지 않는 사용자입니다" };
+  return { target: u };
+}
+
 // ---- documents ----
 app.post("/api/documents", async (c) => {
   await ensureSeeded(c.env.DB);
   // 파일 업로드: multipart/form-data (C5 Phase 3 파서 라우팅).
   const ct = c.req.header("content-type") || "";
   if (ct.includes("multipart/form-data")) return handleDocumentFileUpload(c);
-  const body = await c.req.json().catch(() => ({})) as { title?: string; content?: string; kind?: string; personal?: boolean };
+  const body = await c.req.json().catch(() => ({})) as { title?: string; content?: string; kind?: string; personal?: boolean; is_coaching?: boolean; asUserId?: unknown };
   if (!body.content || body.content.trim().length < 3) return c.json({ ok: false, error: "content is required" }, 400);
   const id = uid("doc");
   const title = body.title || body.content.slice(0, 40);
   const kind = body.kind || "transcript";
   // 개인별 RAG 격리: 전사본은 기본 개인 소유(세션 사용자, 없으면 공용 NULL),
   // file/tacit은 기본 공용(NULL)이고 body.personal:true일 때만 개인으로 한다.
+  // 관점 선택: hr_admin이 asUserId를 보내면 그 사용자의 개인 문서로 만든다.
   const viewer = await getSessionUser(c.env, c.req.header("cookie"));
-  const ownerId = kind === "transcript" ? (viewer?.id ?? null) : (body.personal === true ? (viewer?.id ?? null) : null);
+  const as = await resolveAsUser(c.env, viewer, body.asUserId);
+  if (as.error) return c.json({ ok: false, error: as.error }, 400);
+  const ownerId = as.target ? as.target.id : kind === "transcript" ? (viewer?.id ?? null) : (body.personal === true ? (viewer?.id ?? null) : null);
   const r2Key = `documents/${id}.txt`;
   let r2Stored = false;
   try {
@@ -511,9 +538,22 @@ app.post("/api/documents", async (c) => {
   } catch {
     r2Stored = false; // 로컬 Miniflare R2 실패 시 D1에만 저장 (폴백)
   }
-  await c.env.DB.prepare("INSERT INTO documents (id, title, kind, content, r2_key, owner_id) VALUES (?, ?, ?, ?, ?, ?)")
-    .bind(id, title, kind, body.content, r2Stored ? r2Key : null, ownerId).run();
-  return c.json({ ok: true, id, title, r2Stored, fallback: !r2Stored ? "d1-only" : null }, 201);
+  const isCoaching = body.is_coaching === true ? 1 : 0;
+  await c.env.DB.prepare("INSERT INTO documents (id, title, kind, content, r2_key, owner_id, is_coaching) VALUES (?, ?, ?, ?, ?, ?, ?)")
+    .bind(id, title, kind, body.content, r2Stored ? r2Key : null, ownerId, isCoaching).run();
+  // 텍스트 입력 문서도 색인한다 (2026-11-16 버그 수정: 이전엔 chunk가 안 생겨
+  // RAG에서 안 보였다). ownerId는 위에서 계산한 값 그대로 — 격리는 indexDocument가
+  // Vectorize user_id 메타데이터로 처리한다. 색인이 실패해도 문서 행은 남긴다.
+  let indexed: { chunks: number; upserted: number; indexError?: string };
+  try {
+    indexed = await indexDocument(c.env, { id, title, markdown: body.content, kind, ownerId });
+  } catch (e) {
+    indexed = { chunks: 0, upserted: 0, indexError: e instanceof Error ? e.message : String(e) };
+  }
+  return c.json({
+    ok: true, id, title, is_coaching: isCoaching === 1, asUser: as.target?.name ?? null, r2Stored, fallback: !r2Stored ? "d1-only" : null,
+    chunks: indexed.chunks, upserted: indexed.upserted, ...(indexed.indexError ? { indexError: indexed.indexError } : {}),
+  }, 201);
 });
 
 // 문서 파일 업로드 (C5 Phase 3 파서 라우팅).
@@ -540,7 +580,10 @@ async function handleDocumentFileUpload(c: Context<{ Bindings: Env }>) {
   const title = ((form.get("title") as string) || "").trim() || f.name.replace(/\.[^.]+$/, "") || f.name;
   // 개인별 RAG 격리: form의 personal 필드가 "true"이고 로그인돼 있으면 개인 업로드.
   const viewer = await getSessionUser(c.env, c.req.header("cookie"));
-  const ownerId = (form.get("personal") as string | null) === "true" && viewer ? viewer.id : null;
+  // 관점 선택: hr_admin이 asUserId를 보내면 그 사용자의 개인 문서로 만든다.
+  const as = await resolveAsUser(c.env, viewer, form.get("asUserId"));
+  if (as.error) return c.json({ ok: false, error: as.error }, 400);
+  const ownerId = as.target ? as.target.id : (form.get("personal") as string | null) === "true" && viewer ? viewer.id : null;
   const bytes = new Uint8Array(await f.arrayBuffer());
   const detected = detectDocumentFormat(bytes);
   const ext = (f.name.split(".").pop() || "bin").toLowerCase().replace(/[^a-z0-9]/g, "") || "bin";
@@ -595,8 +638,9 @@ async function handleDocumentFileUpload(c: Context<{ Bindings: Env }>) {
       extractedStored = true;
     } catch { extractedStored = false; }
   }
-  await c.env.DB.prepare("INSERT INTO documents (id, title, kind, content, r2_key, source_r2_key, extract_status, extract_error, owner_id) VALUES (?, ?, 'file', ?, ?, ?, ?, ?, ?)")
-    .bind(id, title, extracted, !extractError && extractedStored ? extractedKey : null, sourceStored ? sourceKey : null, extractStatus, extractError, ownerId).run();
+  const isCoaching = (form.get("is_coaching") as string | null) === "true" ? 1 : 0;
+  await c.env.DB.prepare("INSERT INTO documents (id, title, kind, content, r2_key, source_r2_key, extract_status, extract_error, owner_id, is_coaching) VALUES (?, ?, 'file', ?, ?, ?, ?, ?, ?, ?)")
+    .bind(id, title, extracted, !extractError && extractedStored ? extractedKey : null, sourceStored ? sourceKey : null, extractStatus, extractError, ownerId, isCoaching).run();
   let chunks = 0;
   let upserted = 0;
   let indexError: string | undefined;
@@ -606,7 +650,7 @@ async function handleDocumentFileUpload(c: Context<{ Bindings: Env }>) {
     upserted = indexed.upserted;
     indexError = indexed.indexError;
   }
-  return c.json({ ok: true, id, title, format: detected.format, extractStatus, extractError, chunks, upserted, indexError: indexError ?? null, r2Stored: extractedStored }, 201);
+  return c.json({ ok: true, id, title, is_coaching: isCoaching === 1, asUser: as.target?.name ?? null, format: detected.format, extractStatus, extractError, chunks, upserted, indexError: indexError ?? null, r2Stored: extractedStored }, 201);
 }
 
 // 문서 요약 공용 함수 — POST /api/documents/:id/summarize와 S1 큐 소비자가 함께 쓴다.
@@ -672,6 +716,12 @@ app.post("/api/transcribe", async (c) => {
   if (!isAudio) return c.json({ ok: false, error: "audio file is required" }, 400);
   if (f.size <= 0) return c.json({ ok: false, error: "empty file" }, 400);
   if (f.size > MAX_AUDIO_BYTES) return c.json({ ok: false, error: "file must be 25MB or smaller" }, 400);
+  // 개인별 RAG 격리: 전사본은 업로더의 개인 소유(익명이면 공용 NULL).
+  // 관점 선택: hr_admin이 asUserId를 보내면 그 사용자 소유로 만든다 (R2 저장 전에 검증).
+  const viewer = await getSessionUser(c.env, c.req.header("cookie"));
+  const as = await resolveAsUser(c.env, viewer, form.get("asUserId"));
+  if (as.error) return c.json({ ok: false, error: as.error }, 400);
+  const recOwnerId = as.target ? as.target.id : (viewer?.id ?? null);
 
   const id = uid("rec");
   const title = f.name.replace(/\.[^.]+$/, "") || f.name;
@@ -686,13 +736,13 @@ app.post("/api/transcribe", async (c) => {
   // 행을 먼저 만들고 전사는 백그라운드로: 긴 파일은 동기 Whisper 호출이
   // 응답 시간 안에 안 끝나서(97분 ogg, 27분 무응답) 행 자체가 안 남았다.
   // 전사본을 지어내지 않는다 — 행은 'processing'으로 시작한다.
-  // 개인별 RAG 격리: 전사본은 업로더의 개인 소유(익명이면 공용 NULL).
-  const viewer = await getSessionUser(c.env, c.req.header("cookie"));
   const now = new Date().toISOString();
-  await c.env.DB.prepare("INSERT INTO recordings (id, title, provider, model, object_key, mime_type, size, transcript, transcript_status, doc_id, created_at, owner_id) VALUES (?, ?, 'workers-ai', ?, ?, ?, ?, NULL, 'processing', NULL, ?, ?)")
-    .bind(id, f.name, WHISPER_MODEL, objectKey, f.type || "application/octet-stream", f.size, now, viewer?.id ?? null).run();
+  // 코칭 플래그(0020): form 필드 is_coaching === "true"면 녹음에 남기고, 전사 완료 시 문서로 넘긴다.
+  const recIsCoaching = (form.get("is_coaching") as string | null) === "true" ? 1 : 0;
+  await c.env.DB.prepare("INSERT INTO recordings (id, title, provider, model, object_key, mime_type, size, transcript, transcript_status, doc_id, created_at, owner_id, is_coaching) VALUES (?, ?, 'workers-ai', ?, ?, ?, ?, NULL, 'processing', NULL, ?, ?, ?)")
+    .bind(id, f.name, WHISPER_MODEL, objectKey, f.type || "application/octet-stream", f.size, now, recOwnerId, recIsCoaching).run();
   c.executionCtx.waitUntil(advanceRecording(c.env, id, { maxSegments: 2, maxMs: 60_000 }));
-  return c.json({ ok: true, recordingId: id, title: f.name, transcript: null, transcriptStatus: "processing", r2Verified: true, provider: "workers-ai", model: WHISPER_MODEL }, 201);
+  return c.json({ ok: true, recordingId: id, title: f.name, asUser: as.target?.name ?? null, transcript: null, transcriptStatus: "processing", r2Verified: true, provider: "workers-ai", model: WHISPER_MODEL }, 201);
 });
 
 // 최근 음성 녹음 목록 (전사본 내용은 안 돌려준다 — 목록은 메타데이터만)
@@ -844,6 +894,15 @@ async function indexDocument(env: Env, doc: { id: string; title: string; markdow
     // pool도 소유자 기준으로 정한다 (개인 파일 업로드가 "공용"으로 보이지 않게).
     const vectors = chunks.map((ch, i) => ({ id: ch.id, values: rows[i], metadata: { title: doc.title, section: ch.article, snippet: ch.text.slice(0, 220), kind: doc.kind ?? "tacit", pool: poolForDoc(doc.kind, doc.ownerId), user_id: vectorUserIdForDoc(doc.ownerId) } }));
     await env.VECTOR.upsert(vectors);
+    // 트리 빌드 큐 (2026-11-16): 전사본·파일 문서만. HR 규정(kind='policy')과
+    // tacit 답은 건너뛴다 (buildTreeForDoc이 kind를 다시 확인한다).
+    // 색인 실패가 아니므로 큐 전송 실패가 색인 결과를 바꾸지 않게 best-effort로 한다.
+    if (doc.kind === "transcript" || doc.kind === "file") {
+      try {
+        const hash = await treeHash(doc.markdown);
+        await env.PIPELINE.send({ type: "build-tree", docId: doc.id, hash, enqueuedAt: new Date().toISOString() } as BuildTreeMessage);
+      } catch { /* 트리 큐 전송 실패는 무시 — 백필로 다시 만들 수 있다 */ }
+    }
     return { chunks: chunks.length, upserted: vectors.length };
   } catch (e) {
     return { chunks: chunks.length, upserted: 0, indexError: e instanceof Error ? e.message : String(e) };
@@ -941,6 +1000,47 @@ app.post("/api/ask", async (c) => {
   return c.json(r.body);
 });
 
+// ---- 개인 업무 검색 (2026-11-16) ----
+// 개인 풀만 검색한다 (본인 전사본·업로드 문서). HR 규정 내용은 나오지 않는다.
+// 로그인 필수 (익명은 401). HR 창과 세션 문맥을 섞지 않게 세션 id에
+// "personal:" 접두를 붙인다. 응답 형식은 /api/ask와 동일하다.
+// 라우터가 HR 규정 질문으로 판별하면 HR 창 안내를 돌려준다 (runAsk 내부).
+app.post("/api/personal/ask", async (c) => {
+  await ensureSeeded(c.env.DB);
+  const viewer = await getSessionUser(c.env, c.req.header("cookie"));
+  if (!viewer) return c.json({ ok: false, error: "login required" }, 401);
+  const body = await c.req.json().catch(() => ({})) as { question?: string; sessionId?: string; force?: boolean; asUserId?: unknown };
+  if (!body.question || body.question.trim().length < 2) return c.json({ ok: false, error: "question is required" }, 400);
+  // 관점 선택: hr_admin이 asUserId를 보내면 그 사용자의 개인 풀을 검색한다.
+  // DO 세션 키·트레이스 user_id는 실제 요청자(viewer) 그대로 — 검색 범위만 바뀐다.
+  const as = await resolveAsUser(c.env, viewer, body.asUserId);
+  if (as.error) return c.json({ ok: false, error: as.error }, 400);
+  const scopeViewer = as.target ? { id: as.target.id, role: as.target.role } : viewer;
+  const scopeOther = !!as.target && as.target.id !== viewer.id;
+  const question = body.question.trim();
+  const rawSession = (body.sessionId || "").replace(/^personal:/, "");
+  const sessionId = `personal:${rawSession || uid("sess")}`;
+  const t0 = Date.now();
+  // 레이트 리밋: 사용자 기준 분당 20회 (HR 창과 버킷 분리).
+  const rate = await checkAskRateLimit(c.env, `personal:${viewer.id}`);
+  if (!rate.allowed) {
+    return c.json(
+      { ok: false, error: `너무 많은 질문입니다. ${rate.resetInSec}초 후에 다시 시도해 주세요.` },
+      429,
+      { "Retry-After": String(rate.resetInSec) }
+    );
+  }
+  const r = await runAsk(
+    c.env,
+    { question, sessionId, startedAt: t0 },
+    // 캐시 키는 바꾸지 않는다(viewer 기준). 다른 사용자 관점 검색은 같은 키로 다른 범위의 답이
+    // 섞이지 않게 캐시를 읽지도 쓰지도 않는다.
+    { origin: "personal", readCache: !body.force && !scopeOther, writeCache: !scopeOther, gatewaySkipCache: body.force === true, viewer, scopeViewer, pool: "personal" },
+    { traceSink, ctx: c.executionCtx as unknown as ExecutionContext },
+  );
+  return c.json({ ...r.body, asUser: as.target ? as.target.name : viewer.name, asUserId: scopeViewer?.id ?? viewer.id });
+});
+
 // ---- feedback (C7) ----
 // 답변 카드의 👍/👎를 ask_events에 기록한다. 👎는 C5-b에서 지식 공백 큐로
 // 연결한다 (지금은 기록만 — 큐 UI는 C5-b에서 만든다).
@@ -949,7 +1049,7 @@ app.post("/api/feedback", async (c) => {
   const body = await c.req.json().catch(() => ({})) as { eventId?: string; rating?: string; comment?: string };
   if (!body.eventId) return c.json({ ok: false, error: "eventId is required" }, 400);
   if (body.rating !== "up" && body.rating !== "down") return c.json({ ok: false, error: "rating must be 'up' or 'down'" }, 400);
-  const row = await c.env.DB.prepare("SELECT id, question FROM ask_events WHERE id = ?").bind(body.eventId).first<{ id: string; question: string }>();
+  const row = await c.env.DB.prepare("SELECT id, question, user_id FROM ask_events WHERE id = ?").bind(body.eventId).first<{ id: string; question: string; user_id: string | null }>();
   if (!row) return c.json({ ok: false, error: "event not found" }, 404);
   await c.env.DB.prepare("UPDATE ask_events SET feedback = ?, feedback_comment = ?, feedback_at = datetime('now') WHERE id = ?")
     .bind(body.rating, (body.comment || "").slice(0, 500) || null, body.eventId).run();
@@ -958,7 +1058,8 @@ app.post("/api/feedback", async (c) => {
   catch (e) { console.log("[obs] mirrorFeedbackScore failed:", e instanceof Error ? e.message : String(e)); }
   // C5-b: 👎는 지식 공백 큐에 올린다 (같은 질문의 open 행이 있으면 count만 증가).
   if (body.rating === "down") {
-    try { await recordGap(c.env, row.question, "downvote"); }
+    // 0021: 공백의 질문자 = 그 답변을 받은 질문자 (ask_events.user_id, 익명은 NULL).
+    try { await recordGap(c.env, row.question, "downvote", row.user_id ?? null); }
     catch (e) { console.log("[gaps] recordGap(downvote) failed:", e instanceof Error ? e.message : String(e)); }
   }
   return c.json({
@@ -969,15 +1070,28 @@ app.post("/api/feedback", async (c) => {
   });
 });
 
+// 0021: 공백 질문자 표시 이름. 기록된 사용자가 있으면 그 이름, 없으면 평가 실행에서 온
+// 행(low-score/regression)은 "평가", 그 외는 "익명".
+function gapAskerName(source: string, userId: string | null, name: string | null): string {
+  if (userId) return name || "알 수 없는 사용자";
+  if (source === "low-score" || source === "regression") return "평가";
+  return "익명";
+}
+
 // ---- 지식 공백 큐 (C5-b) ----
 // 근거 없는 질문·👎 피드백 질문 목록. 최신순. answered/resolved에는
 // 게시된 암묵지 문서 제목을 함께 돌려준다 (프론트 링크용).
 app.get("/api/gaps", async (c) => {
   await ensureSeeded(c.env.DB);
   const rows = await c.env.DB.prepare(
-    "SELECT g.id, g.question, g.asked_at, g.status, g.doc_id, g.count, g.source, d.title AS doc_title FROM knowledge_gaps g LEFT JOIN documents d ON d.id = g.doc_id ORDER BY g.asked_at DESC LIMIT 50"
-  ).all<{ id: string; question: string; asked_at: number; status: string; doc_id: string | null; count: number; source: string; doc_title: string | null }>();
-  return c.json({ ok: true, gaps: rows.results || [] });
+    // 0021: 질문자 이름 (user_id NULL → "익명", 평가에서 온 행(low-score/regression) → "평가").
+    "SELECT g.id, g.question, g.asked_at, g.status, g.doc_id, g.count, g.source, g.user_id, d.title AS doc_title, u.name AS asker_user_name FROM knowledge_gaps g LEFT JOIN documents d ON d.id = g.doc_id LEFT JOIN users u ON u.id = g.user_id ORDER BY g.asked_at DESC LIMIT 50"
+  ).all<{ id: string; question: string; asked_at: number; status: string; doc_id: string | null; count: number; source: string; user_id: string | null; doc_title: string | null; asker_user_name: string | null }>();
+  const gaps = (rows.results || []).map(({ user_id, asker_user_name, ...g }) => ({
+    ...g,
+    asker_name: gapAskerName(g.source, user_id, asker_user_name),
+  }));
+  return c.json({ ok: true, gaps });
 });
 
 // 암묵지 게시 (C5-b): 담당자가 쓴 답을 Markdown 문서(kind='tacit')로
@@ -1044,11 +1158,90 @@ app.get("/api/config", async (c) => {
 });
 
 // ---- coaching ----
+// 코치 / 코칭 대상 (2026-11-16, migration 0018): 모드는 세션 사용자의 coaching_role로만 정한다.
+// 요청 본문에서는 transcript·sessionId만 읽는다 — mode·coaching_role 같은 클라이언트 필드는 무시한다.
+// 익명 요청은 기존 동작(코치 모드)을 유지한다 (프론트는 로그인 후에만 이 탭을 연다).
+type CoacheeAction = { action: string; timeframe: string };
+function localCoacheeReflect(transcript: string): { reflection_points: string[]; action_plan: CoacheeAction[] } {
+  const reflection_points: string[] = [];
+  if (/부담/.test(transcript)) reflection_points.push("팀장으로서 분위기를 만들어야 한다는 부담이 내 행동(연차를 쓰지 않음)으로 이어지고 있다");
+  if (/연차/.test(transcript)) reflection_points.push("팀원들이 연차를 못 쓰는 모습이 내가 연차를 쓰지 않는 모습과 닮아 있다");
+  if (/보여주고|행동/.test(transcript)) reflection_points.push("말보다 행동으로 먼저 보여주고 싶다는 마음이 있다");
+  if (reflection_points.length === 0) reflection_points.push("이번 세션에서 반복해서 꺼낸 주제가 지금 내게 가장 중요한 고민이다");
+  const action_plan: CoacheeAction[] = [
+    { action: "이번 달 안에 연차 하루를 정해 팀 캘린더에 먼저 공유한다", timeframe: "2주 이내" },
+    { action: "주간 회의에서 팀원들에게 연차 계획을 편하게 말해 달라고 직접 요청한다", timeframe: "다음 주간 회의" },
+    { action: "연차를 쓴 뒤 팀 분위기에 어떤 변화가 있었는지 메모해 다음 코칭 세션에서 나눈다", timeframe: "다음 코칭 세션 전" },
+  ];
+  return { reflection_points: reflection_points.slice(0, 4), action_plan };
+}
+function cleanStrings(v: unknown, max: number): string[] {
+  return Array.isArray(v) ? v.filter((x): x is string => typeof x === "string" && x.trim().length > 0).map((x) => x.trim().slice(0, 300)).slice(0, max) : [];
+}
+function cleanActions(v: unknown, max: number): CoacheeAction[] {
+  if (!Array.isArray(v)) return [];
+  const out: CoacheeAction[] = [];
+  for (const x of v) {
+    if (typeof x === "string" && x.trim()) out.push({ action: x.trim().slice(0, 300), timeframe: "" });
+    else if (x && typeof x === "object") {
+      const o = x as Record<string, unknown>;
+      const action = typeof o.action === "string" ? o.action.trim() : "";
+      const timeframe = typeof o.timeframe === "string" ? o.timeframe.trim() : "";
+      if (action) out.push({ action: action.slice(0, 300), timeframe: timeframe.slice(0, 60) });
+    }
+  }
+  return out.slice(0, max);
+}
+
 app.post("/api/coaching/reflect", async (c) => {
   await ensureSeeded(c.env.DB);
-  const body = await c.req.json().catch(() => ({})) as { transcript?: string; sessionId?: string };
+  const body = await c.req.json().catch(() => ({})) as { transcript?: string; sessionId?: string; counterpartId?: unknown };
   const transcript = body.transcript || coachingTranscript();
   if (transcript.trim().length < 10) return c.json({ ok: false, error: "transcript is required" }, 400);
+  const viewer = await getSessionUser(c.env, c.req.header("cookie"));
+  // 참여자 (0020): 작성자 쪽은 항상 서버의 세션 사용자 id. 상대방만 요청의 counterpartId에서 오며,
+  // users에 있는 id일 때만 쓴다 (없으면 조용히 NULL). 클라이언트의 coach_id/coachee_id는 읽지 않는다.
+  let counterpart: string | null = null;
+  const cpRaw = typeof body.counterpartId === "string" ? body.counterpartId.trim() : "";
+  if (viewer && cpRaw && cpRaw !== viewer.id) {
+    const u = await c.env.DB.prepare("SELECT id FROM users WHERE id = ?").bind(cpRaw).first<{ id: string }>();
+    counterpart = u?.id ?? null;
+  }
+  const coachId = viewer ? (viewer.coaching_role === "coachee" ? counterpart : viewer.id) : null;
+  const coacheeId = viewer ? (viewer.coaching_role === "coachee" ? viewer.id : counterpart) : null;
+  if (viewer && viewer.coaching_role === "coachee") {
+    // ---- 코칭 대상 모드: 자기 성찰 포인트 + 액션 플랜 ----
+    let cEngine = "local-rule";
+    let cOut = localCoacheeReflect(transcript);
+    try {
+      const ai = await c.env.AI.run(LLM_MODEL, {
+        messages: [
+          {
+            role: "system",
+            content:
+              "너는 코칭을 받은 사람(코칭 대상)의 자기 성찰을 돕는 조력자다. 코치용 질문이 아니라, 코칭 대상 본인이 읽을 내용을 1인칭 관점으로 쓴다. " +
+              "세션 전사본에 실제로 나온 말에 근거해서만 쓰고, 전사본에 없는 사실은 지어내지 마라. " +
+              "1) 자기 성찰 포인트 2~4개: 이번 세션에서 내가 알아차린 점(생각·감정·반복 패턴)을 한 문장씩. " +
+              "2) 액션 플랜 2~4개: 다음 세션 전까지 실천할 구체적인 행동과 권장 기한(예: '이번 주', '2주 이내', '다음 세션 전'). " +
+              "한국어로, JSON으로만 답하라: {\"reflection_points\":[\"...\"],\"action_plan\":[{\"action\":\"...\",\"timeframe\":\"...\"}]}",
+          },
+          { role: "user", content: transcript.slice(0, 4000) },
+        ],
+      }, aiGatewayOptions({ tag: "coaching-coachee" }));
+      const parsed = extractJson(responseText(ai));
+      const points = cleanStrings(parsed.reflection_points, 4);
+      const plan = cleanActions(parsed.action_plan, 4);
+      if (points.length && plan.length) {
+        cOut = { reflection_points: points, action_plan: plan };
+        cEngine = "workers-ai";
+      }
+    } catch { /* 로컬 폴백 유지 */ }
+    const cid = uid("refl");
+    await c.env.DB.prepare("INSERT INTO reflections (id, session_id, transcript, questions, patterns, next_questions, mode, coach_id, coachee_id) VALUES (?, ?, ?, ?, ?, ?, 'coachee', ?, ?)")
+      .bind(cid, body.sessionId || null, transcript, "[]", JSON.stringify(cOut.reflection_points), JSON.stringify(cOut.action_plan), coachId, coacheeId).run();
+    return c.json({ ok: true, id: cid, mode: "coachee", coach_id: coachId, coachee_id: coacheeId, ...cOut, engine: cEngine });
+  }
+  // ---- 코치 모드 (기존 동작 그대로) ----
   let engine = "local-rule";
   let out = localReflect(transcript);
   try {
@@ -1070,9 +1263,9 @@ app.post("/api/coaching/reflect", async (c) => {
     }
   } catch { /* 로컬 폴백 유지 */ }
   const id = uid("refl");
-  await c.env.DB.prepare("INSERT INTO reflections (id, session_id, transcript, questions, patterns, next_questions) VALUES (?, ?, ?, ?, ?, ?)")
-    .bind(id, body.sessionId || null, transcript, JSON.stringify(out.questions), JSON.stringify(out.patterns), JSON.stringify(out.next_questions)).run();
-  return c.json({ ok: true, id, ...out, engine });
+  await c.env.DB.prepare("INSERT INTO reflections (id, session_id, transcript, questions, patterns, next_questions, coach_id, coachee_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)")
+    .bind(id, body.sessionId || null, transcript, JSON.stringify(out.questions), JSON.stringify(out.patterns), JSON.stringify(out.next_questions), coachId, coacheeId).run();
+  return c.json({ ok: true, id, mode: "coach", coach_id: coachId, coachee_id: coacheeId, ...out, engine });
 });
 
 // ---- home (작업 공간 대시보드) ----
@@ -1088,30 +1281,71 @@ app.get("/api/home", async (c) => {
   const docWhere = isAdmin ? "" : ` WHERE ${docClause}`;
   const documents = await count(`SELECT COUNT(*) AS n FROM documents${docWhere}`, isAdmin ? [] : docParams);
   const summaries = await count(`SELECT COUNT(*) AS n FROM documents WHERE summary IS NOT NULL AND summary != ''${isAdmin ? "" : ` AND ${docClause}`}`, isAdmin ? [] : docParams);
-  const openTasks = await count("SELECT COUNT(*) AS n FROM tasks WHERE done = 0");
+  // 0021: 할 일은 GET /api/tasks와 같은 범위 — hr_admin 전체, 그 외 본인 + 미지정(owner_id NULL).
+  const tc = taskOwnerClause(viewer);
+  const openTasks = await count(`SELECT COUNT(*) AS n FROM tasks t WHERE t.done = 0${tc.clause ? ` AND ${tc.clause}` : ""}`, tc.params);
   const reflections = await count("SELECT COUNT(*) AS n FROM reflections");
+  // 0021: 최근 문서·리플렉션·할 일에 소유자/참여자 이름을 붙인다 (NULL → 화면에서 공용/미지정).
+  const docCols = "documents.id, documents.title, documents.kind, documents.created_at, u.name AS owner_name";
   const recentDocuments = isAdmin
-    ? (await c.env.DB.prepare("SELECT id, title, kind, created_at FROM documents ORDER BY created_at DESC LIMIT 5").all()).results || []
-    : (await c.env.DB.prepare(`SELECT id, title, kind, created_at FROM documents WHERE ${docClause} ORDER BY created_at DESC LIMIT 5`).bind(...docParams).all()).results || [];
-  const tasks = (await c.env.DB.prepare("SELECT id, title, source, created_at FROM tasks WHERE done = 0 ORDER BY created_at DESC LIMIT 5").all()).results || [];
-  const recentReflections = (await c.env.DB.prepare("SELECT id, patterns, created_at FROM reflections ORDER BY created_at DESC LIMIT 3").all()).results || [];
-  return c.json({ ok: true, counts: { documents, summaries, openTasks, reflections }, recentDocuments, openTasks: tasks, recentReflections });
+    ? (await c.env.DB.prepare(`SELECT ${docCols} FROM documents LEFT JOIN users u ON u.id = documents.owner_id ORDER BY documents.created_at DESC LIMIT 5`).all()).results || []
+    : (await c.env.DB.prepare(`SELECT ${docCols} FROM documents LEFT JOIN users u ON u.id = documents.owner_id WHERE ${docClause} ORDER BY documents.created_at DESC LIMIT 5`).bind(...docParams).all()).results || [];
+  const tasks = (await c.env.DB.prepare(`SELECT t.id, t.title, t.source, t.created_at, t.owner_id, COALESCE(u.name, '미지정') AS owner_name FROM tasks t LEFT JOIN users u ON u.id = t.owner_id WHERE t.done = 0${tc.clause ? ` AND ${tc.clause}` : ""} ORDER BY t.created_at DESC LIMIT 5`).bind(...tc.params).all()).results || [];
+  const recentReflections = (await c.env.DB.prepare("SELECT r.id, r.patterns, r.created_at, uc.name AS coach_name, ue.name AS coachee_name FROM reflections r LEFT JOIN users uc ON uc.id = r.coach_id LEFT JOIN users ue ON ue.id = r.coachee_id ORDER BY r.created_at DESC LIMIT 3").all()).results || [];
+  // 0021: hr_admin 전용 사용자별 집계 (문서 = 소유 문서, 할 일 = 소유 할 일, 리플렉션 = 코치 또는 코칭 대상).
+  let byUser: Array<{ userId: string; name: string; email: string; documents: number; tasks: number; reflections: number }> | undefined;
+  if (isAdmin) {
+    const rows = await c.env.DB.prepare(
+      `SELECT u.id AS userId, u.name, u.email,
+         (SELECT COUNT(*) FROM documents d WHERE d.owner_id = u.id) AS documents,
+         (SELECT COUNT(*) FROM tasks t WHERE t.owner_id = u.id) AS tasks,
+         (SELECT COUNT(*) FROM reflections r WHERE r.coach_id = u.id OR r.coachee_id = u.id) AS reflections
+       FROM users u WHERE u.status = 'active' ORDER BY u.name, u.email`
+    ).all<{ userId: string; name: string; email: string; documents: number; tasks: number; reflections: number }>();
+    byUser = rows.results || [];
+  }
+  return c.json({ ok: true, counts: { documents, summaries, openTasks, reflections }, recentDocuments, openTasks: tasks, recentReflections, ...(byUser ? { byUser } : {}) });
 });
 
+// 0021: 할 일 읽기 범위. hr_admin은 전체(조건 없음), 로그인 사용자는 본인 + 미지정, 익명은 미지정만.
+function taskOwnerClause(viewer: { id: string; role: string } | null): { clause: string; params: string[] } {
+  if (viewer?.role === "hr_admin") return { clause: "", params: [] };
+  if (!viewer) return { clause: "(t.owner_id IS NULL)", params: [] };
+  return { clause: "(t.owner_id IS NULL OR t.owner_id = ?)", params: [viewer.id] };
+}
+
 // ---- tasks (할 일 체크리스트) ----
+// 0021: 소유자 이름(owner_name, NULL → "미지정")을 함께 돌려준다.
+// hr_admin: 전체 + ?owner=<userId> | ?owner=unassigned 필터. 그 외: 본인 + 미지정만 (필터 무시).
 app.get("/api/tasks", async (c) => {
   await ensureSeeded(c.env.DB);
-  const rows = await c.env.DB.prepare("SELECT id, title, source, done, created_at, done_at FROM tasks ORDER BY done ASC, created_at DESC").all();
-  return c.json({ ok: true, tasks: rows.results || [] });
+  const viewer = await getSessionUser(c.env, c.req.header("cookie"));
+  const tc = taskOwnerClause(viewer);
+  const conds: string[] = tc.clause ? [tc.clause] : [];
+  const params: string[] = [...tc.params];
+  const owner = (c.req.query("owner") || "").trim();
+  if (viewer?.role === "hr_admin" && owner) {
+    if (owner === "unassigned") conds.push("t.owner_id IS NULL");
+    else { conds.push("t.owner_id = ?"); params.push(owner); }
+  }
+  const where = conds.length ? ` WHERE ${conds.join(" AND ")}` : "";
+  const rows = await c.env.DB.prepare(`SELECT t.id, t.title, t.source, t.done, t.created_at, t.done_at, t.owner_id, COALESCE(u.name, '미지정') AS owner_name FROM tasks t LEFT JOIN users u ON u.id = t.owner_id${where} ORDER BY t.done ASC, t.created_at DESC`).bind(...params).all();
+  return c.json({ ok: true, tasks: rows.results || [], isAdmin: viewer?.role === "hr_admin" }, 200, { "cache-control": "no-store" });
 });
 
 app.post("/api/tasks", async (c) => {
   await ensureSeeded(c.env.DB);
-  const body = await c.req.json().catch(() => ({})) as { title?: string; source?: string };
+  const body = await c.req.json().catch(() => ({})) as { title?: string; source?: string; ownerId?: unknown };
   if (!body.title || body.title.trim().length < 1) return c.json({ ok: false, error: "title is required" }, 400);
+  // 0021: 소유자 = 만든 사람 (익명은 NULL = 미지정). hr_admin은 ownerId로 다른 사용자의 할 일을 만든다.
+  const viewer = await getSessionUser(c.env, c.req.header("cookie"));
+  const as = await resolveAsUser(c.env, viewer, body.ownerId);
+  if (as.error) return c.json({ ok: false, error: "ownerId: 존재하지 않는 사용자입니다" }, 400);
+  const ownerId = as.target ? as.target.id : (viewer?.id ?? null);
+  const ownerName = as.target ? as.target.name : (viewer?.name ?? "미지정");
   const id = uid("task");
-  await c.env.DB.prepare("INSERT INTO tasks (id, title, source) VALUES (?, ?, ?)").bind(id, body.title.trim().slice(0, 200), body.source || null).run();
-  return c.json({ ok: true, id, title: body.title.trim().slice(0, 200), source: body.source || null }, 201);
+  await c.env.DB.prepare("INSERT INTO tasks (id, title, source, owner_id) VALUES (?, ?, ?, ?)").bind(id, body.title.trim().slice(0, 200), body.source || null, ownerId).run();
+  return c.json({ ok: true, id, title: body.title.trim().slice(0, 200), source: body.source || null, owner_id: ownerId, owner_name: ownerName }, 201);
 });
 
 app.patch("/api/tasks/:id", async (c) => {
@@ -1197,12 +1431,137 @@ app.get("/api/library", async (c) => {
   const viewer = await getSessionUser(c.env, c.req.header("cookie"));
   const isAdmin = viewer?.role === "hr_admin";
   const { clause, params } = docOwnerClause(viewer, "documents");
+  const dcl = docOwnerClause(viewer, "decks");
+  const docCols = "documents.id, documents.title, documents.kind, documents.summary, documents.actions, documents.created_at, documents.extract_status, documents.extract_error, documents.owner_id, documents.is_coaching, u.email AS owner_email, u.name AS owner_name, LENGTH(CAST(documents.content AS BLOB)) AS size, (documents.source_r2_key IS NOT NULL) AS has_source";
   const docs = isAdmin
-    ? await c.env.DB.prepare("SELECT id, title, kind, summary, actions, created_at, extract_status, extract_error FROM documents ORDER BY created_at DESC LIMIT 20").all()
-    : await c.env.DB.prepare(`SELECT id, title, kind, summary, actions, created_at, extract_status, extract_error FROM documents WHERE ${clause} ORDER BY created_at DESC LIMIT 20`).bind(...params).all();
+    ? await c.env.DB.prepare(`SELECT ${docCols} FROM documents LEFT JOIN users u ON u.id = documents.owner_id ORDER BY documents.created_at DESC LIMIT 100`).all()
+    : await c.env.DB.prepare(`SELECT ${docCols} FROM documents LEFT JOIN users u ON u.id = documents.owner_id WHERE ${clause} ORDER BY documents.created_at DESC LIMIT 100`).bind(...params).all();
+  const deckCols = "decks.id, decks.title, decks.bytes AS size, decks.slides, decks.created_at, decks.owner_id, u.email AS owner_email, u.name AS owner_name";
+  const decks = isAdmin
+    ? await c.env.DB.prepare(`SELECT ${deckCols} FROM decks LEFT JOIN users u ON u.id = decks.owner_id ORDER BY decks.created_at DESC LIMIT 100`).all()
+    : await c.env.DB.prepare(`SELECT ${deckCols} FROM decks LEFT JOIN users u ON u.id = decks.owner_id WHERE ${dcl.clause} ORDER BY decks.created_at DESC LIMIT 100`).bind(...dcl.params).all();
   const pols = await c.env.DB.prepare("SELECT id, title, section FROM policies ORDER BY id").all();
-  const refls = await c.env.DB.prepare("SELECT id, session_id, patterns, next_questions, created_at FROM reflections ORDER BY created_at DESC LIMIT 10").all();
-  return c.json({ ok: true, documents: docs.results || [], policies: pols.results || [], reflections: refls.results || [] });
+  const refls = await c.env.DB.prepare("SELECT r.id, r.session_id, r.patterns, r.next_questions, r.mode, r.created_at, uc.name AS coach_name, ue.name AS coachee_name FROM reflections r LEFT JOIN users uc ON uc.id = r.coach_id LEFT JOIN users ue ON ue.id = r.coachee_id ORDER BY r.created_at DESC LIMIT 20").all();
+  // canDelete: 소유자 본인 또는 hr_admin (공용 owner_id NULL은 hr_admin만). owner_id 자체는 내보내지 않는다.
+  // HR admin에게는 소유자 표시를 위해 owner(표시 이름)를 함께 보낸다. 공용이면 null → 화면에 '공용'.
+  const mark = (r: any) => ({ ...r, owner_id: undefined, owner_email: undefined, owner_name: undefined, canDelete: !!viewer && (isAdmin || r.owner_id === viewer.id), owner: isAdmin ? (r.owner_id ? (r.owner_name || r.owner_email || r.owner_id) : null) : undefined });
+  return c.json({ ok: true, documents: (docs.results || []).map(mark), decks: (decks.results || []).map(mark), policies: pols.results || [], reflections: refls.results || [] });
+});
+
+// 라이브러리 파일 접근 게이트: R2 URL은 노출하지 않고 항상 Worker가 D1 owner_id를 확인한다.
+// 읽기: 공용(owner NULL) 또는 소유자 또는 hr_admin. 삭제: 소유자 또는 hr_admin (공용은 hr_admin만).
+type Viewer = { id: string; role: string } | null;
+function canRead(viewer: Viewer, ownerId: string | null) {
+  return !ownerId || (!!viewer && (viewer.id === ownerId || viewer.role === "hr_admin"));
+}
+function canWrite(viewer: Viewer, ownerId: string | null) {
+  return !!viewer && (viewer.role === "hr_admin" || (!!ownerId && viewer.id === ownerId));
+}
+function attachment(title: string, ext: string) {
+  const safe = title.replace(/[^\w.-]+/g, "_").slice(0, 60) || "file";
+  return `attachment; filename="${safe}.${ext}"; filename*=UTF-8''${encodeURIComponent(`${title}.${ext}`)}`;
+}
+
+// 코칭 전사본 후보 목록 (0020 → 2026-11-16): 전사본 전부(코칭 지정 먼저), 공용 또는 본인 것. hr_admin은 전체. 익명은 공용만.
+// 리플렉션 탭 드롭다운에서 고른 문서로 전사본 칸을 채우므로 content를 함께 돌려준다
+// (읽기 범위는 canRead·라이브러리 목록과 같다).
+app.get("/api/documents/coaching", async (c) => {
+  await ensureSeeded(c.env.DB);
+  const viewer = await getSessionUser(c.env, c.req.header("cookie"));
+  const isAdmin = viewer?.role === "hr_admin";
+  const { clause, params } = docOwnerClause(viewer, "documents");
+  // 2026-11-16 변경: 코칭 플래그 문서만이 아니라 #upload에 올린 전사본 전부(kind='transcript',
+  // 공용 + 본인, hr_admin 전체)를 돌려준다. 코칭 지정(is_coaching=1)을 먼저, 그 안에서 최신순.
+  // is_coaching은 목록 필터가 아니라 표시용 표식("코칭" 배지)이다.
+  const cols = "documents.id, documents.title, documents.kind, documents.content, documents.created_at, documents.is_coaching, u.name AS owner_name";
+  const order = "ORDER BY documents.is_coaching DESC, documents.created_at DESC LIMIT 100";
+  const rows = isAdmin
+    ? await c.env.DB.prepare(`SELECT ${cols} FROM documents LEFT JOIN users u ON u.id = documents.owner_id WHERE documents.kind = 'transcript' ${order}`).all()
+    : await c.env.DB.prepare(`SELECT ${cols} FROM documents LEFT JOIN users u ON u.id = documents.owner_id WHERE documents.kind = 'transcript' AND ${clause} ${order}`).bind(...params).all();
+  const documents = (rows.results || []).map((r: any) => ({ ...r, is_coaching: r.is_coaching === 1, owner_name: isAdmin ? (r.owner_name ?? null) : undefined }));
+  return c.json({ ok: true, documents }, 200, { "cache-control": "no-store" });
+});
+
+// 코칭 지정/해제 (0020): DELETE와 같은 게이트 — 소유자 또는 hr_admin (공용은 hr_admin만). 익명 401.
+app.patch("/api/documents/:id", async (c) => {
+  await ensureSeeded(c.env.DB);
+  const viewer = await getSessionUser(c.env, c.req.header("cookie"));
+  if (!viewer) return c.json({ ok: false, error: "로그인이 필요합니다." }, 401);
+  const id = c.req.param("id");
+  const body = await c.req.json().catch(() => ({})) as { is_coaching?: unknown };
+  if (typeof body.is_coaching !== "boolean") return c.json({ ok: false, error: "is_coaching (boolean) is required" }, 400);
+  const row = await c.env.DB.prepare("SELECT id, owner_id FROM documents WHERE id = ?").bind(id).first<{ id: string; owner_id: string | null }>();
+  if (!row) return c.json({ ok: false, error: "document not found" }, 404);
+  if (!canWrite(viewer, row.owner_id)) return c.json({ ok: false, error: "forbidden" }, 403);
+  await c.env.DB.prepare("UPDATE documents SET is_coaching = ? WHERE id = ?").bind(body.is_coaching ? 1 : 0, id).run();
+  return c.json({ ok: true, id, is_coaching: body.is_coaching });
+});
+
+// 코칭 상대방 목록 (0020): 로그인 사용자 누구나. 활성 사용자의 id/name/email/coaching_role만 (비밀 없음).
+app.get("/api/users/coaching", async (c) => {
+  const viewer = await getSessionUser(c.env, c.req.header("cookie"));
+  if (!viewer) return c.json({ ok: false, error: "로그인이 필요합니다." }, 401);
+  const rows = await c.env.DB.prepare("SELECT id, name, email, coaching_role FROM users WHERE status = 'active' ORDER BY name, email")
+    .all<{ id: string; name: string; email: string; coaching_role: string | null }>();
+  return c.json({ ok: true, users: rows.results || [] }, 200, { "cache-control": "no-store" });
+});
+
+app.get("/api/documents/:id/download", async (c) => {
+  await ensureSeeded(c.env.DB);
+  const row = await c.env.DB.prepare("SELECT id, title, kind, content, r2_key, source_r2_key, owner_id FROM documents WHERE id = ?").bind(c.req.param("id"))
+    .first<{ id: string; title: string; kind: string; content: string; r2_key: string | null; source_r2_key: string | null; owner_id: string | null }>();
+  if (!row) return c.json({ ok: false, error: "document not found" }, 404);
+  const viewer = await getSessionUser(c.env, c.req.header("cookie"));
+  if (!canRead(viewer, row.owner_id)) return c.json({ ok: false, error: "forbidden" }, 403);
+  const headers = { "Cache-Control": "private, no-store" };
+  // 업로드 원본이 있으면 원본을, 없으면 텍스트(전사본·붙여넣기)를 내려준다.
+  if (row.source_r2_key) {
+    const obj = await c.env.FILES.get(row.source_r2_key);
+    if (obj) {
+      const ext = row.source_r2_key.split(".").pop() || "bin";
+      return new Response(obj.body, { headers: { ...headers, "Content-Type": obj.httpMetadata?.contentType || "application/octet-stream", "Content-Disposition": attachment(row.title, ext) } });
+    }
+  }
+  return new Response(row.content, { headers: { ...headers, "Content-Type": "text/plain; charset=utf-8", "Content-Disposition": attachment(row.title, "txt") } });
+});
+
+// 문서 삭제: D1 문서 + R2 객체 + D1 chunks + Vectorize 벡터. 소유자 또는 hr_admin만.
+app.delete("/api/documents/:id", async (c) => {
+  await ensureSeeded(c.env.DB);
+  const id = c.req.param("id");
+  const row = await c.env.DB.prepare("SELECT id, r2_key, source_r2_key, owner_id FROM documents WHERE id = ?").bind(id)
+    .first<{ id: string; r2_key: string | null; source_r2_key: string | null; owner_id: string | null }>();
+  if (!row) return c.json({ ok: false, error: "document not found" }, 404);
+  const viewer = await getSessionUser(c.env, c.req.header("cookie"));
+  if (!canWrite(viewer, row.owner_id)) return c.json({ ok: false, error: "forbidden" }, 403);
+  const errors: string[] = [];
+  const chunkRows = await c.env.DB.prepare("SELECT id FROM chunks WHERE doc_id = ?").bind(id).all<{ id: string }>();
+  const ids = (chunkRows.results || []).map((r) => r.id);
+  for (let i = 0; i < ids.length; i += 100) {
+    try { await c.env.VECTOR.deleteByIds(ids.slice(i, i + 100)); }
+    catch (e) { errors.push(`vectors: ${e instanceof Error ? e.message : String(e)}`); break; }
+  }
+  for (const key of [row.r2_key, row.source_r2_key]) {
+    if (!key) continue;
+    try { await c.env.FILES.delete(key); } catch (e) { errors.push(`r2: ${e instanceof Error ? e.message : String(e)}`); }
+  }
+  await c.env.DB.prepare("DELETE FROM chunks WHERE doc_id = ?").bind(id).run();
+  await c.env.DB.prepare("UPDATE recordings SET doc_id = NULL WHERE doc_id = ?").bind(id).run();
+  await c.env.DB.prepare("DELETE FROM documents WHERE id = ?").bind(id).run();
+  return c.json({ ok: true, id, vectorsDeleted: ids.length, errors });
+});
+
+app.delete("/api/decks/:id", async (c) => {
+  await ensureSeeded(c.env.DB);
+  const id = c.req.param("id");
+  const row = await c.env.DB.prepare("SELECT id, r2_key, owner_id FROM decks WHERE id = ?").bind(id).first<{ id: string; r2_key: string; owner_id: string | null }>();
+  if (!row) return c.json({ ok: false, error: "deck not found" }, 404);
+  const viewer = await getSessionUser(c.env, c.req.header("cookie"));
+  if (!canWrite(viewer, row.owner_id)) return c.json({ ok: false, error: "forbidden" }, 403);
+  const errors: string[] = [];
+  try { await c.env.FILES.delete(row.r2_key); } catch (e) { errors.push(`r2: ${e instanceof Error ? e.message : String(e)}`); }
+  await c.env.DB.prepare("DELETE FROM decks WHERE id = ?").bind(id).run();
+  return c.json({ ok: true, id, errors });
 });
 
 // 디버그용: 임베딩·Vectorize 조회·LLM 호출을 직접 돌려 원인을 확인한다.
@@ -1283,6 +1642,19 @@ app.post("/api/admin/reindex", async (c) => {
   const list = rows.results || [];
   const errors: string[] = [];
   let upserted = 0;
+  // 고아 벡터 정리 (2026-11-16): 이번 페이지의 chunk id를 먼저 지우고 다시
+  // 올린다. 청크 수가 줄었을 때 남는 고아 벡터가 검색에 새는 것을 막는다.
+  // D1에서 이미 지워진 chunk의 벡터는 이 페이지에 없어 못 지운다
+  // (Vectorize에 전체 id 열람 API가 없음) — 그 경우는 별도 정리가 필요하다.
+  let deleted = 0;
+  try {
+    if (list.length > 0) {
+      await c.env.VECTOR.deleteByIds(list.map((ch) => ch.id));
+      deleted = list.length;
+    }
+  } catch (e) {
+    errors.push(`deleteByIds: ${e instanceof Error ? e.message : String(e)}`);
+  }
   const BATCH = 20; // 임베딩 배치 크기: 20개씩 Workers AI 호출
   for (let i = 0; i < list.length; i += BATCH) {
     const batch = list.slice(i, i + BATCH);
@@ -1314,7 +1686,71 @@ app.post("/api/admin/reindex", async (c) => {
   const ok = list.length === 0 || upserted > 0;
   await c.env.DB.prepare("INSERT OR REPLACE INTO meta (key, value, updated_at) VALUES (?, ?, datetime('now'))")
     .bind("vector_reindexed_v2", JSON.stringify({ upserted, at: new Date().toISOString() })).run();
-  return c.json({ ok, upserted, total, chunks: list.length, errors });
+  return c.json({ ok, upserted, total, chunks: list.length, deleted, errors });
+});
+
+// ---- 트리 백필 (2026-11-16) ----
+// 트리가 없는 전사본·파일 문서를 찾아 build-tree 작업을 Queue에 넣는다.
+// 멱등 — tree_hash가 이미 맞는 문서는 소비자가 건너뛴다.
+// ?force=1이면 tree_hash가 있는 문서도 다시 넣는다. ?limit= (기본 200, 최대 1000).
+app.post("/api/admin/build-trees", async (c) => {
+  if (!(await isAdminRequest(c.env, c.req.header("cookie"), c.req.header("x-admin-secret")))) {
+    return c.json({ ok: false, error: "unauthorized" }, 401);
+  }
+  const force = c.req.query("force") === "1";
+  const limit = Math.max(1, Math.min(1000, Number(c.req.query("limit") ?? 200) || 200));
+  const rows = await c.env.DB.prepare(
+    "SELECT id, title, kind FROM documents WHERE kind IN ('transcript', 'file') AND (? OR tree_hash IS NULL) ORDER BY created_at LIMIT ?",
+  ).bind(force ? 1 : 0, limit)
+    .all<{ id: string; title: string; kind: string }>();
+  const list = rows.results || [];
+  let enqueued = 0;
+  const errors: string[] = [];
+  for (const doc of list) {
+    try {
+      await c.env.PIPELINE.send({ type: "build-tree", docId: doc.id, enqueuedAt: new Date().toISOString() } as BuildTreeMessage);
+      enqueued++;
+    } catch (e) {
+      errors.push(`${doc.id}: ${e instanceof Error ? e.message : String(e)}`);
+    }
+  }
+  return c.json({ ok: true, enqueued, total: list.length, force, errors });
+});
+
+// ---- 문서 재색인 (chunk 재생성, 2026-11-16) ----
+// D1 documents.content는 있는데 chunks 행이 없는 문서(전사본 대부분이 사전에
+// chunk 없이 저장돼 있었다)를 다시 색인한다. indexDocument가 chunk 생성 +
+// 벡터 upsert + build-tree 큐 전송까지 한다. 멱등 — 이미 chunk가 있는 문서는
+// 건너뛴다 (?all=1이면 전부 다시 색인). 트리 백필의 전제 조건이다.
+// ?limit= (기본 50, 최대 200).
+app.post("/api/admin/reindex-docs", async (c) => {
+  if (!(await isAdminRequest(c.env, c.req.header("cookie"), c.req.header("x-admin-secret")))) {
+    return c.json({ ok: false, error: "unauthorized" }, 401);
+  }
+  const all = c.req.query("all") === "1";
+  const limit = Math.max(1, Math.min(200, Number(c.req.query("limit") ?? 50) || 50));
+  const rows = await c.env.DB.prepare(
+    `SELECT d.id, d.title, d.kind, d.content, d.owner_id FROM documents d
+     WHERE d.kind IN ('transcript', 'file')
+     AND (? OR NOT EXISTS (SELECT 1 FROM chunks c WHERE c.doc_id = d.id))
+     ORDER BY d.created_at LIMIT ?`,
+  ).bind(all ? 1 : 0, limit)
+    .all<{ id: string; title: string; kind: string; content: string; owner_id: string | null }>();
+  const list = rows.results || [];
+  let indexed = 0;
+  let chunks = 0;
+  const errors: string[] = [];
+  for (const doc of list) {
+    try {
+      const r = await indexDocument(c.env, { id: doc.id, title: doc.title, markdown: doc.content, kind: doc.kind, ownerId: doc.owner_id });
+      if (r.indexError) throw new Error(r.indexError);
+      indexed++;
+      chunks += r.chunks;
+    } catch (e) {
+      errors.push(`${doc.id}: ${e instanceof Error ? e.message : String(e)}`);
+    }
+  }
+  return c.json({ ok: true, indexed, chunks, total: list.length, errors });
 });
 
 // ---- digest (아침 다이제스트, C9) ----
@@ -1399,6 +1835,12 @@ export default {
         if (body && body.type === "eval-item") {
           // S4: 평가 항목 1건 (M4). 멱등 — 재전달돼도 eval_results는 1행. throw하면 재시도.
           await processEvalItem(env, msg.body as EvalItemMessage, { runAsk, traceSink, ctx });
+        } else if (body && body.type === "build-tree") {
+          // 트리 빌드 (2026-11-16): 문서 구조 트리(doc_nodes) + 전사본 digest.
+          // 멱등 — tree_hash가 같으면 건너뛴다. LLM 실패는 fail-open으로 건너뛴다
+          // (검색은 청크·벡터로 정상 동작). D1 오류만 throw해 재시도한다.
+          const r = await buildTreeForDoc(env, (msg.body as BuildTreeMessage).docId);
+          console.log(`[tree] build-tree ${(msg.body as BuildTreeMessage).docId}:`, JSON.stringify(r));
         } else {
           // 기존 전사 파이프라인 (S1) — 그대로.
           await processPipelineMessage(env, msg.body as PipelineMessage);

@@ -223,15 +223,15 @@ export type ProcessResult =
 
 type ResultDraft = {
   eventId: string | null; answer: string | null; grounded: boolean | null; retrievedIds: string[]; retrievalHit: boolean | null;
-  judgeScore: number | null; judgeDims: JudgeResult["dimensions"] | null; judgeReason: string | null; judgeSnapped: boolean; judgeSkipped: string | null;
-  verdict: Verdict | null; verdictEngine: string | null; passed: boolean | null; error: string | null; latencyMs: number | null;
+  judgeScore: number | null; judgeDims: JudgeResult["dimensions"] | null; judgeReason: string | null; judgeComment: string | null; judgeSnapped: boolean; judgeSkipped: string | null;
+  verdict: Verdict | null; verdictEngine: string | null; verdictReason: string | null; passed: boolean | null; error: string | null; latencyMs: number | null;
   costUsd: number; judgeLevel?: string;
 };
 
 function emptyDraft(): ResultDraft {
   return {
-    eventId: null, answer: null, grounded: null, retrievedIds: [], retrievalHit: null, judgeScore: null, judgeDims: null, judgeReason: null,
-    judgeSnapped: false, judgeSkipped: null, verdict: null, verdictEngine: null, passed: null, error: null, latencyMs: null, costUsd: 0,
+    eventId: null, answer: null, grounded: null, retrievedIds: [], retrievalHit: null, judgeScore: null, judgeDims: null, judgeReason: null, judgeComment: null,
+    judgeSnapped: false, judgeSkipped: null, verdict: null, verdictEngine: null, verdictReason: null, passed: null, error: null, latencyMs: null, costUsd: 0,
   };
 }
 
@@ -267,12 +267,12 @@ export async function processEvalItem(env: EvalEnv, msg: EvalItemMessage, deps: 
   const resultId = newId("res");
   const ins = await env.DB.prepare(
     `INSERT INTO eval_results (id, run_id, item_id, event_id, answer, grounded, retrieved_ids, retrieval_hit, judge_score, judge_dims_json, judge_reason,
-       judge_snapped, judge_skipped, verdict, verdict_engine, passed, error, latency_ms)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+       judge_comment, judge_snapped, judge_skipped, verdict, verdict_engine, passed, error, latency_ms)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
      ON CONFLICT(run_id, item_id) DO NOTHING`
   ).bind(
     resultId, msg.runId, msg.itemId, draft.eventId, draft.answer, boolToInt(draft.grounded), JSON.stringify(draft.retrievedIds), boolToInt(draft.retrievalHit),
-    draft.judgeScore, draft.judgeDims ? JSON.stringify(draft.judgeDims) : null, draft.judgeReason, draft.judgeSnapped ? 1 : 0, draft.judgeSkipped,
+    draft.judgeScore, draft.judgeDims ? JSON.stringify(draft.judgeDims) : null, draft.judgeReason, draft.judgeComment, draft.judgeSnapped ? 1 : 0, draft.judgeSkipped,
     draft.verdict, draft.verdictEngine, boolToInt(draft.passed), draft.error, draft.latencyMs,
   ).run();
   const inserted = (ins.meta?.changes ?? 0) === 1;
@@ -376,6 +376,9 @@ async function evaluateItem(env: EvalEnv, msg: EvalItemMessage, item: EvalItem, 
   }
   if (!v.ok) { d.error = `${v.error}: ${v.detail}`.slice(0, 500); return; }
   d.verdict = v.verdict;
+  // 앙상블 상세 (2026-11-16): 두 모델의 판정·확신도를 trace_scores comment에
+  // 남긴다 (구조 변경 없음 — comment 필드만 채운다).
+  d.verdictReason = (v.reason ?? v.engine).slice(0, 500);
 
   const j = await judgeAnswer(env, { question: item.question, expectedAnswer: item.expectedAnswer, expectedSources: item.expectedSources, answer: body.answer, evidence });
   d.costUsd += estimateCallUsd(
@@ -388,6 +391,8 @@ async function evaluateItem(env: EvalEnv, msg: EvalItemMessage, item: EvalItem, 
   d.judgeSnapped = j.result.snapped;
   d.judgeLevel = j.result.level;
   d.judgeReason = `${j.jsonMode === "prompt" ? "[json_mode=prompt] " : ""}${j.result.level} — ${j.result.reasoning}`.slice(0, 2000);
+  // 개선 코멘트 (judge-v2). 비어 있으면 NULL — 지어내지 않는다.
+  d.judgeComment = j.result.improvement ? j.result.improvement.slice(0, 2000) : null;
   d.passed = decidePass(j.result.score, v.verdict);
 }
 
@@ -398,7 +403,7 @@ async function writeTraceScores(env: EvalEnv, runId: string, d: ResultDraft): Pr
     stmts.push(env.DB.prepare("INSERT INTO trace_scores (id, event_id, name, value, label, source, eval_run_id, comment) VALUES (?, ?, ?, ?, ?, ?, ?, ?)")
       .bind(newId("sc"), d.eventId, name, value, label, source, runId, comment));
   if (d.judgeScore != null) add("judge_score", d.judgeScore, d.judgeLevel ?? null, d.judgeSkipped ? "rule" : "judge", d.judgeReason);
-  if (d.verdict) add("verdict", null, d.verdict, "verdict", d.verdictEngine);
+  if (d.verdict) add("verdict", null, d.verdict, "verdict", d.verdictReason ?? d.verdictEngine);
   if (d.retrievalHit != null) add("retrieval_hit", d.retrievalHit ? 1 : 0, null, "rule", null);
   if (!stmts.length) return;
   try { await env.DB.batch(stmts); } catch (e) { console.log("[eval] trace_scores insert failed:", e instanceof Error ? e.message : String(e)); }
@@ -564,7 +569,7 @@ async function judgeOneTrace(env: EvalEnv, eventId: string, engine: VerdictEngin
   const v = await classifyVerdict(env, { question: ev.question, answer: ev.answer, evidence }, engine);
   const j = await judgeAnswer(env, { question: ev.question, expectedAnswer: null, answer: ev.answer, evidence });
   const stmts: D1PreparedStatement[] = [];
-  if (v.ok) stmts.push(env.DB.prepare("INSERT INTO trace_scores (id, event_id, name, value, label, source, comment) VALUES (?, ?, 'verdict', NULL, ?, 'verdict', ?)").bind(newId("sc"), eventId, v.verdict, v.engine));
+  if (v.ok) stmts.push(env.DB.prepare("INSERT INTO trace_scores (id, event_id, name, value, label, source, comment) VALUES (?, ?, 'verdict', NULL, ?, 'verdict', ?)").bind(newId("sc"), eventId, v.verdict, (v.reason ?? v.engine).slice(0, 500)));
   // 실패 시도 표지: 'verdict' 점수처럼 보이지 않는 별도 이름. 표본 판정이 같은 트레이스를 (KST 당일) 다시 뽑지 않게 한다.
   if (!v.ok) stmts.push(env.DB.prepare("INSERT INTO trace_scores (id, event_id, name, value, label, source, comment) VALUES (?, ?, 'verdict_attempt', NULL, 'failed', 'verdict', ?)").bind(newId("sc"), eventId, `${v.error}: ${v.detail}`.slice(0, 500)));
   if (j.ok) stmts.push(env.DB.prepare("INSERT INTO trace_scores (id, event_id, name, value, label, source, comment) VALUES (?, ?, 'judge_score', ?, ?, 'judge', ?)").bind(newId("sc"), eventId, j.result.score, j.result.level, `[ref-free ${JUDGE_VERSION}] ${j.result.reasoning}`.slice(0, 2000)));
@@ -626,7 +631,7 @@ export async function listRuns(env: Pick<ObsEnv, "DB">, opts: { datasetId?: stri
 
 type ResultDetailRow = {
   id: string; run_id: string; item_id: string; event_id: string | null; answer: string | null; grounded: number | null; retrieved_ids: string;
-  retrieval_hit: number | null; judge_score: number | null; judge_dims_json: string | null; judge_reason: string | null; judge_snapped: number;
+  retrieval_hit: number | null; judge_score: number | null; judge_dims_json: string | null; judge_reason: string | null; judge_comment: string | null; judge_snapped: number;
   judge_skipped: string | null; verdict: string | null; verdict_engine: string | null; passed: number | null; error: string | null;
   latency_ms: number | null; created_at: string; question: string | null; expected_verdict: string | null; expected_answer: string | null;
 };
@@ -660,7 +665,7 @@ export async function getRunDetail(env: Pick<ObsEnv, "DB">, runId: string) {
     return {
       id: r.id, itemId: r.item_id, eventId: r.event_id, question: r.question, expectedVerdict: r.expected_verdict, expectedAnswer: r.expected_answer,
       answer: r.answer, grounded: intToBool(r.grounded), retrievedIds: parseJson<string[]>(r.retrieved_ids, []), retrievalHit: intToBool(r.retrieval_hit),
-      judgeScore: r.judge_score, judgeDims: parseJson<JudgeResult["dimensions"] | null>(r.judge_dims_json, null), judgeReason: r.judge_reason,
+      judgeScore: r.judge_score, judgeDims: parseJson<JudgeResult["dimensions"] | null>(r.judge_dims_json, null), judgeReason: r.judge_reason, judgeComment: r.judge_comment ?? null,
       judgeSnapped: r.judge_snapped === 1, judgeSkipped: r.judge_skipped, verdict: r.verdict, verdictEngine: r.verdict_engine,
       passed: intToBool(r.passed), error: r.error, latencyMs: r.latency_ms, createdAt: r.created_at,
       result: r.error ? "error" : r.passed === 1 ? "pass" : "fail", comparison, prevPassed: p ? intToBool(p.passed) : null,

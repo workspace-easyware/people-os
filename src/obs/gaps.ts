@@ -64,7 +64,13 @@ async function latestFinishedRuns(env: DB): Promise<Array<{ id: string; base_run
 
 /** 통합 공백 목록. status 필터는 동작 상태를 반영한 최종 상태 기준. */
 /** GapRow(M1 계약) + 화면용 부가 필드 (judge 사유 요약, 회귀 기준 실행). */
-export type GapListRow = GapRow & { judgeScore?: number; judgeReason?: string | null; baseRunId?: string };
+export type GapListRow = GapRow & { judgeScore?: number; judgeReason?: string | null; judgeComment?: string | null; baseRunId?: string };
+
+/** 0021: 질문자 표시 이름. 기록된 사용자가 없으면 "익명" (기존 행은 모두 NULL). */
+function userLabel(userId: string | null, name: string | null): string {
+  if (!userId) return "익명";
+  return name || "알 수 없는 사용자";
+}
 
 export async function listGaps(env: DB, filter: { status?: string; kind?: string } = {}): Promise<GapListRow[]> {
   const rows: GapListRow[] = [];
@@ -72,12 +78,13 @@ export async function listGaps(env: DB, filter: { status?: string; kind?: string
 
   if (want("no_evidence") || want("downvote")) {
     const { results } = await env.DB.prepare(
-      "SELECT id, question, asked_at, status, doc_id, count, source FROM knowledge_gaps ORDER BY asked_at DESC LIMIT ?"
-    ).bind(GAP_LIST_MAX).all<{ id: string; question: string; asked_at: number; status: string; doc_id: string | null; count: number; source: string }>();
+      // 0021: 질문자 이름 (user_id NULL → "익명").
+      "SELECT g.id, g.question, g.asked_at, g.status, g.doc_id, g.count, g.source, g.user_id, u.name AS user_name FROM knowledge_gaps g LEFT JOIN users u ON u.id = g.user_id ORDER BY g.asked_at DESC LIMIT ?"
+    ).bind(GAP_LIST_MAX).all<{ id: string; question: string; asked_at: number; status: string; doc_id: string | null; count: number; source: string; user_id: string | null; user_name: string | null }>();
     for (const g of results || []) {
       const kind: GapKind | null = g.source === "downvote" ? "downvote" : g.source === "no-evidence" ? "no_evidence" : null;
       if (!kind || !want(kind)) continue; // low-score/regression에서 게시용으로 만든 행은 원래 키로 보인다
-      rows.push({ key: `${kind}:${g.id}`, kind, question: g.question, status: kgStatus(g.status), count: g.count || 1, gapId: g.id, docId: g.doc_id ?? undefined, lastSeenAt: new Date(g.asked_at).toISOString() });
+      rows.push({ key: `${kind}:${g.id}`, kind, question: g.question, status: kgStatus(g.status), count: g.count || 1, gapId: g.id, docId: g.doc_id ?? undefined, lastSeenAt: new Date(g.asked_at).toISOString(), askerName: userLabel(g.user_id, g.user_name) });
     }
   }
 
@@ -85,40 +92,43 @@ export async function listGaps(env: DB, filter: { status?: string; kind?: string
   if (want("low_score")) {
     for (const run of runs) {
       const { results } = await env.DB.prepare(
-        `SELECT r.id, r.item_id, r.event_id, r.judge_score, r.judge_reason, r.created_at, i.question FROM eval_results r JOIN eval_items i ON i.id = r.item_id
+        `SELECT r.id, r.item_id, r.event_id, r.judge_score, r.judge_reason, r.judge_comment, r.created_at, i.question FROM eval_results r JOIN eval_items i ON i.id = r.item_id
          WHERE r.run_id = ? AND r.error IS NULL AND r.judge_score IS NOT NULL AND r.judge_score < ?`
-      ).bind(run.id, LOW_SCORE_THRESHOLD).all<{ id: string; item_id: string; event_id: string | null; judge_score: number; judge_reason: string | null; created_at: string; question: string }>();
+      ).bind(run.id, LOW_SCORE_THRESHOLD).all<{ id: string; item_id: string; event_id: string | null; judge_score: number; judge_reason: string | null; judge_comment: string | null; created_at: string; question: string }>();
       for (const r of results || []) {
-        rows.push({ key: `low_score:${r.id}`, kind: "low_score", question: r.question, status: "open", count: 1, resultId: r.id, itemId: r.item_id, eventId: r.event_id ?? undefined, lastSeenAt: r.created_at, judgeScore: r.judge_score, judgeReason: r.judge_reason });
+        rows.push({ key: `low_score:${r.id}`, kind: "low_score", question: r.question, status: "open", count: 1, resultId: r.id, itemId: r.item_id, eventId: r.event_id ?? undefined, lastSeenAt: r.created_at, judgeScore: r.judge_score, judgeReason: r.judge_reason, judgeComment: r.judge_comment, askerName: "평가" });
       }
     }
+    // 사용자 트레이스 표본 채점에서 나온 저점수 — 질문자 = 그 트레이스의 사용자.
     const { results: tr } = await env.DB.prepare(
-      `SELECT s.event_id, MIN(s.value) AS v, MAX(s.created_at) AS at, e.question FROM trace_scores s JOIN ask_events e ON e.id = s.event_id
+      `SELECT s.event_id, MIN(s.value) AS v, MAX(s.created_at) AS at, e.question, e.user_id, u.name AS user_name FROM trace_scores s JOIN ask_events e ON e.id = s.event_id
+       LEFT JOIN users u ON u.id = e.user_id
        WHERE s.name = 'judge_score' AND s.eval_run_id IS NULL AND s.value < ? AND COALESCE(e.origin, 'user') = 'user'
        GROUP BY s.event_id ORDER BY at DESC LIMIT ?`
-    ).bind(LOW_SCORE_THRESHOLD, GAP_LIST_MAX).all<{ event_id: string; v: number; at: string; question: string }>();
-    for (const t of tr || []) rows.push({ key: `low_score:${t.event_id}`, kind: "low_score", question: t.question, status: "open", count: 1, eventId: t.event_id, lastSeenAt: t.at, judgeScore: t.v });
+    ).bind(LOW_SCORE_THRESHOLD, GAP_LIST_MAX).all<{ event_id: string; v: number; at: string; question: string; user_id: string | null; user_name: string | null }>();
+    for (const t of tr || []) rows.push({ key: `low_score:${t.event_id}`, kind: "low_score", question: t.question, status: "open", count: 1, eventId: t.event_id, lastSeenAt: t.at, judgeScore: t.v, askerName: userLabel(t.user_id, t.user_name) });
   }
 
   if (want("hallucination_risk")) {
     const { results } = await env.DB.prepare(
-      `SELECT e.id, e.question, MAX(s.created_at) AS at FROM ask_events e JOIN trace_scores s ON s.event_id = e.id AND s.name = 'verdict'
+      `SELECT e.id, e.question, MAX(s.created_at) AS at, e.user_id, u.name AS user_name FROM ask_events e JOIN trace_scores s ON s.event_id = e.id AND s.name = 'verdict'
+       LEFT JOIN users u ON u.id = e.user_id
        WHERE e.grounded = 1 AND s.label IN ('ungrounded','off_topic') AND COALESCE(e.origin, 'user') = 'user'
        GROUP BY e.id ORDER BY at DESC LIMIT ?`
-    ).bind(GAP_LIST_MAX).all<{ id: string; question: string; at: string }>();
-    for (const e of results || []) rows.push({ key: `hallucination_risk:${e.id}`, kind: "hallucination_risk", question: e.question, status: "open", count: 1, eventId: e.id, lastSeenAt: e.at });
+    ).bind(GAP_LIST_MAX).all<{ id: string; question: string; at: string; user_id: string | null; user_name: string | null }>();
+    for (const e of results || []) rows.push({ key: `hallucination_risk:${e.id}`, kind: "hallucination_risk", question: e.question, status: "open", count: 1, eventId: e.id, lastSeenAt: e.at, askerName: userLabel(e.user_id, e.user_name) });
   }
 
   if (want("regression")) {
     for (const run of runs) {
       if (!run.base_run_id) continue;
       const { results } = await env.DB.prepare(
-        `SELECT cur.id, cur.item_id, cur.event_id, cur.judge_reason, cur.created_at, i.question FROM eval_results cur
+        `SELECT cur.id, cur.item_id, cur.event_id, cur.judge_reason, cur.judge_comment, cur.created_at, i.question FROM eval_results cur
          JOIN eval_results prev ON prev.item_id = cur.item_id AND prev.run_id = ?
          JOIN eval_items i ON i.id = cur.item_id
          WHERE cur.run_id = ? AND cur.error IS NULL AND cur.passed = 0 AND prev.error IS NULL AND prev.passed = 1`
-      ).bind(run.base_run_id, run.id).all<{ id: string; item_id: string; event_id: string | null; judge_reason: string | null; created_at: string; question: string }>();
-      for (const r of results || []) rows.push({ key: `regression:${r.id}`, kind: "regression", question: r.question, status: "open", count: 1, resultId: r.id, itemId: r.item_id, eventId: r.event_id ?? undefined, lastSeenAt: r.created_at, judgeReason: r.judge_reason, baseRunId: run.base_run_id ?? undefined });
+      ).bind(run.base_run_id, run.id).all<{ id: string; item_id: string; event_id: string | null; judge_reason: string | null; judge_comment: string | null; created_at: string; question: string }>();
+      for (const r of results || []) rows.push({ key: `regression:${r.id}`, kind: "regression", question: r.question, status: "open", count: 1, resultId: r.id, itemId: r.item_id, eventId: r.event_id ?? undefined, lastSeenAt: r.created_at, judgeReason: r.judge_reason, judgeComment: r.judge_comment, baseRunId: run.base_run_id ?? undefined, askerName: "평가" });
     }
   }
 
@@ -289,8 +299,13 @@ export async function applyGapAction(env: DB, key: string, body: ActionBody): Pr
     if (open) gapId = open.id;
     else {
       gapId = newId("gap");
-      await env.DB.prepare("INSERT INTO knowledge_gaps (id, question, asked_at, status, doc_id, count, source) VALUES (?, ?, ?, 'open', NULL, 1, ?)")
-        .bind(gapId, q, Date.now(), ctx.kind.replace("_", "-")).run();
+      // 0021: 질문자 = 원래 질문한 사용자 (트레이스가 있으면 ask_events.user_id). 평가 실행에서
+      // 온 건(eval 트레이스·트레이스 없음)은 NULL → 목록에서 "평가"로 보인다.
+      const asker = ctx.eventId
+        ? await env.DB.prepare("SELECT user_id FROM ask_events WHERE id = ?").bind(ctx.eventId).first<{ user_id: string | null }>().catch(() => null)
+        : null;
+      await env.DB.prepare("INSERT INTO knowledge_gaps (id, question, asked_at, status, doc_id, count, source, user_id) VALUES (?, ?, ?, 'open', NULL, 1, ?, ?)")
+        .bind(gapId, q, Date.now(), ctx.kind.replace("_", "-"), asker?.user_id ?? null).run();
     }
   }
 

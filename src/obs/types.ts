@@ -4,7 +4,7 @@
 // ---- §7.1 수집 계약 ---------------------------------------------------------
 
 export type TraceSpan = {
-  name: "cache" | "session" | "topic_guard" | "embed" | "vectorize" | "gate" | "d1_merge" | "llm" | "session_save";
+  name: "cache" | "session" | "router" | "topic_guard" | "embed" | "vectorize" | "gate" | "d1_merge" | "rerank" | "llm" | "session_save";
   product: "kv" | "durable-objects" | "workers-ai" | "vectorize" | "d1";
   startMs: number;
   durationMs: number;
@@ -27,7 +27,7 @@ export type RetrievalCandidate = {
 export type AskTrace = {
   eventId: string;
   sessionId: string;
-  origin: "user" | "eval";
+  origin: "user" | "eval" | "personal" | "metadata";
   evalRunId?: string;
   question: string;
   searchQuestion: string;
@@ -47,6 +47,8 @@ export type AskTrace = {
   rawResponse?: unknown;
   usage?: { promptTokens?: number; completionTokens?: number };
   aigLogIds: string[];
+  // 0021: 질문한 사용자 (viewer id). 익명·평가는 null.
+  userId?: string | null;
 };
 
 export interface TraceSink {
@@ -115,6 +117,8 @@ export type JudgeResult = {
   level: string;
   dimensions: { diagnosis: JudgeDimension; evidence: JudgeDimension; fix: JudgeDimension };
   reasoning: string;
+  /** judge-v2: 다음 실행을 더 좋게 하려면 무엇을 어떻게 바꿀지 (개선 코멘트). 없으면 "". */
+  improvement: string;
   /** score가 11개 값에 없어 아래 단계로 내려 맞췄는가. */
   snapped: boolean;
   judgeVersion?: string;
@@ -132,6 +136,8 @@ export type EvalResult = {
   judgeScore: number | null;
   judgeDims: JudgeResult["dimensions"] | null;
   judgeReason: string | null;
+  /** judge-v2 개선 코멘트. 규칙 판정·judge-v2 이전 실행이면 null. */
+  judgeComment: string | null;
   judgeSnapped: boolean;
   /** 'rule' | 'no_evidence' | ... — judge를 건너뛴 이유. */
   judgeSkipped: string | null;
@@ -160,6 +166,8 @@ export type GapRow = {
   docId?: string;
   lastSeenAt?: string;
   actions?: ImprovementAction[];
+  // 0021: 질문자 표시 이름 (사용자 이름 | "익명" | "평가").
+  askerName?: string;
 };
 
 export type ImprovementActionType = "publish_tacit" | "fix_document" | "adjust_prompt" | "promote" | "dismiss";

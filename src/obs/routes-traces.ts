@@ -58,6 +58,7 @@ type ListRow = {
   latency_ms: number | null; timings_json: string; prompt_tokens: number | null; completion_tokens: number | null;
   source_ids: string; engine: string; search_engine: string; feedback: string | null; verdict: string | null;
   top_vector: number | null; top_keyword: number | null; kept_count: number | null; eval_run_id: string | null;
+  user_id: string | null; user_name: string | null;
 };
 
 tracesApp.get("/traces", async (c) => {
@@ -66,10 +67,10 @@ tracesApp.get("/traces", async (c) => {
   const where: string[] = [];
   const binds: unknown[] = [];
 
-  // origin: 기본 user (§3.1). 'all'이면 전체.
+  // origin: 기본 user (§3.1). 'all'이면 전체. metadata·personal도 구분해 볼 수 있다.
   const origin = q.origin || "user";
   if (origin !== "all") {
-    if (origin !== "user" && origin !== "eval") return c.json({ ok: false, error: "origin must be user | eval | all" }, 400);
+    if (origin !== "user" && origin !== "eval" && origin !== "personal" && origin !== "metadata") return c.json({ ok: false, error: "origin must be user | eval | personal | metadata | all" }, 400);
     where.push("e.origin = ?"); binds.push(origin);
   }
   if (q.status) {
@@ -84,6 +85,14 @@ tracesApp.get("/traces", async (c) => {
   if (q.risk === "1" || q.risk === "true") {
     where.push(`${STATUS_EXPR} = 'grounded' AND ${LATEST_VERDICT_EXPR} IN (${RISK_VERDICTS.map(() => "?").join(",")})`);
     binds.push(...RISK_VERDICTS);
+  }
+  // 0021: 사용자 필터 (hr_admin 전용): ?user=<userId> | ?user=anon (기록된 사용자 없음).
+  // 관리자가 아니면 조용히 무시한다 (목록 자체는 공개).
+  let userFilter: string | null = null;
+  if (q.user && (await isAdminRequest(c.env, c.req.header("cookie"), c.req.header("x-admin-secret")))) {
+    userFilter = q.user.slice(0, 80);
+    if (userFilter === "anon") where.push("e.user_id IS NULL");
+    else { where.push("e.user_id = ?"); binds.push(userFilter); }
   }
   if (q.q) {
     // LIKE 특수문자 이스케이프
@@ -106,7 +115,8 @@ tracesApp.get("/traces", async (c) => {
       ${LATEST_VERDICT_EXPR} AS verdict,
       (SELECT MAX(r.vector_score) FROM trace_retrievals r WHERE r.event_id = e.id AND r.outcome = 'kept') AS top_vector,
       (SELECT MAX(r.keyword_score) FROM trace_retrievals r WHERE r.event_id = e.id AND r.outcome = 'kept') AS top_keyword,
-      (SELECT COUNT(*) FROM trace_retrievals r WHERE r.event_id = e.id AND r.outcome = 'kept') AS kept_count
+      (SELECT COUNT(*) FROM trace_retrievals r WHERE r.event_id = e.id AND r.outcome = 'kept') AS kept_count,
+      e.user_id, (SELECT u.name FROM users u WHERE u.id = e.user_id) AS user_name
     FROM ask_events e
     ${where.length ? `WHERE ${where.join(" AND ")}` : ""}
     ORDER BY e.created_at DESC, e.id DESC LIMIT ?`;
@@ -114,7 +124,7 @@ tracesApp.get("/traces", async (c) => {
   const { items, nextCursor } = paginate(rows, limit);
   return c.json({
     ok: true,
-    filters: { origin, status: q.status || null, feedback: q.feedback || null, risk: q.risk === "1" || q.risk === "true", q: q.q || null, from, to },
+    filters: { origin, status: q.status || null, feedback: q.feedback || null, risk: q.risk === "1" || q.risk === "true", q: q.q || null, from, to, user: userFilter },
     traces: items.map((r) => {
       const sourceIds = parseJson<string[]>(r.source_ids, []);
       const tokens = r.prompt_tokens == null && r.completion_tokens == null ? null : (r.prompt_tokens ?? 0) + (r.completion_tokens ?? 0);
@@ -133,6 +143,8 @@ tracesApp.get("/traces", async (c) => {
         searchEngine: r.search_engine,
         verdict: r.verdict,
         feedback: r.feedback,
+        // 0021: 질문한 사용자. 기록 없음 → 평가 트레이스는 "평가", 그 외 "익명".
+        userName: r.user_id ? (r.user_name || "알 수 없는 사용자") : r.origin === "eval" ? "평가" : "익명",
       };
     }),
     nextCursor,

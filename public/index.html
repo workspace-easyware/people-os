@@ -78,8 +78,9 @@
   <div class="side-head"><button class="logo" type="button" onclick="switchTab('home')"><b>일</b><span>일잇 <i>People OS</i></span></button></div>
   <nav class="tabs">
     <button class="nav-active" data-tab="home"><span class="nav-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg></span><span class="nav-label">홈</span></button>
-    <button data-tab="upload"><span class="nav-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="2" width="6" height="12" rx="3"/><path d="M5 10v1a7 7 0 0 0 14 0v-1"/><line x1="12" y1="19" x2="12" y2="23"/><line x1="8" y1="23" x2="16" y2="23"/></svg></span><span class="nav-label">전사·요약</span></button>
+    <button data-tab="upload"><span class="nav-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="2" width="6" height="12" rx="3"/><path d="M5 10v1a7 7 0 0 0 14 0v-1"/><line x1="12" y1="19" x2="12" y2="23"/><line x1="8" y1="23" x2="16" y2="23"/></svg></span><span class="nav-label">녹음전사.문서저장</span></button>
     <button data-tab="ask"><span class="nav-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg></span><span class="nav-label">HR 규정 검색</span></button>
+    <button data-tab="personal"><span class="nav-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg></span><span class="nav-label">개인 업무 검색</span></button>
     <button data-tab="coaching"><span class="nav-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polygon points="16.24 7.76 14.12 14.12 7.76 16.24 9.88 9.88 16.24 7.76"/></svg></span><span class="nav-label">코칭 리플렉션</span></button>
     <button data-tab="tasks"><span class="nav-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 11 12 14 22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg></span><span class="nav-label">할 일</span></button>
     <button data-tab="library"><span class="nav-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/></svg></span><span class="nav-label">라이브러리</span></button>
@@ -109,7 +110,7 @@
     <div class="card home-card">
       <h2>최근 문서</h2>
       <div id="homeDocs"></div>
-      <div class="btnrow"><button class="secondary" onclick="switchTab('upload')">새 문서 업로드 →</button></div>
+      <div class="btnrow"><button class="secondary" onclick="switchTab('upload');setUpPane('doc')">새 문서 업로드 →</button></div>
     </div>
     <div class="card home-card">
       <h2>열린 할 일</h2>
@@ -120,26 +121,47 @@
       <h2>최근 리플렉션</h2>
       <div id="homeRefl"></div>
     </div>
+    <div class="card home-card" id="homeByUserCard" style="display:none">
+      <h2>사용자별</h2>
+      <p class="small">HR 관리자 전용 — 사용자마다 소유 문서·할 일, 코치 또는 코칭 대상으로 참여한 리플렉션 수입니다.</p>
+      <div id="homeByUser"></div>
+    </div>
   </section>
 
   <section id="tab-upload">
+    <div class="card perspective-bar">
+      <label for="upPerspective"><b>관점</b></label>
+      <span id="upPerspectiveBox"><span class="badge">내 개인 공간</span></span>
+      <p class="small" id="upPerspectiveNote">올린 전사본·음성·문서는 내 개인 공간에 저장되고, 개인 업무 검색에서 찾을 수 있습니다.</p>
+    </div>
+    <div class="obs-subtabs" role="tablist" aria-label="녹음전사·문서저장">
+      <button type="button" role="tab" id="upTab-voice" aria-selected="true" onclick="setUpPane('voice')">음성파일 전사</button>
+      <button type="button" role="tab" id="upTab-doc" aria-selected="false" onclick="setUpPane('doc')">문서 업로드</button>
+    </div>
+    <div id="upPane-voice">
     <div class="card">
-      <h2>음성 파일 전사</h2>
-      <p class="small">음성 파일(mp3/m4a/wav 등, 최대 25MB)을 올리면 전사본이 아래에 채워집니다.</p>
-      <div class="btnrow">
-        <input type="file" id="audioFile" accept="audio/*,.mp3,.m4a,.wav,.ogg,.webm,.flac" />
-        <button class="primary" id="transcribeBtn">전사하기</button>
-      </div>
-      <div id="audioResult"></div>
-      <h3 style="margin-top:16px">최근 음성 녹음</h3>
+      <h2>최근 음성 녹음</h2>
       <div id="recList"><p class="loading">불러오는 중…</p></div>
     </div>
     <div class="card">
+      <h2>음성 파일 전사</h2>
+      <p class="small">음성 파일(mp3/m4a/wav 등, 최대 25MB)을 올리면 전사본이 문서 업로드 탭의 텍스트 칸에 채워집니다.</p>
+      <div class="btnrow">
+        <input type="file" id="audioFile" accept="audio/*,.mp3,.m4a,.wav,.ogg,.webm,.flac" />
+        <label><input type="checkbox" id="audioIsCoaching" /> 코칭 세션으로 표시 — 코칭 리플렉션 전사본 목록 맨 위에 [코칭]으로 나타납니다</label>
+        <button class="primary" id="transcribeBtn">전사하기</button>
+      </div>
+      <div id="audioResult"></div>
+    </div>
+    </div>
+    <div id="upPane-doc" style="display:none">
+    <div class="card">
       <h2>문서 업로드</h2>
-      <p><button class="secondary" id="loadSample">샘플 전사본 불러오기</button></p>
+      <p><span class="badge warn">데모용 샘플</span> <button class="secondary" id="loadSample">데모용 샘플 전사본 불러오기</button> <span class="small">데모용 샘플입니다. 실제로는 업로드되지 않고 텍스트만 채워집니다.</span></p>
       <input type="text" id="docTitle" placeholder="제목 (예: 11월 팀 회의 전사본)" />
       <p></p>
       <textarea id="docContent" placeholder="회의 전사본 / 문서 텍스트를 붙여넣으세요"></textarea>
+      <p><label><input type="checkbox" id="docIsCoaching" /> 코칭 세션으로 표시 — 코칭 리플렉션 전사본 목록 맨 위에 [코칭]으로 나타납니다</label></p>
       <div class="btnrow">
         <button class="primary" id="uploadBtn">업로드</button>
         <button class="primary" id="summarizeBtn" disabled>요약하기</button>
@@ -148,9 +170,13 @@
       <p class="small" style="margin-top:12px">또는 파일로 올리기 — PDF, DOCX, XLSX, HWPX, 이미지, 텍스트 (최대 10MB). HWP 5.0은 HWPX·PDF로 저장해 올려 주세요.</p>
       <div class="btnrow">
         <input type="file" id="docFile" accept=".pdf,.docx,.xlsx,.xls,.hwpx,.hwp,.txt,.md,.csv,.png,.jpg,.jpeg,.webp,.gif,.bmp,.svg,.html,.htm,.xml,.odt,.ods,.numbers" />
+        <label><input type="checkbox" id="docFileIsCoaching" /> 코칭 세션으로 표시 — 코칭 리플렉션 전사본 목록 맨 위에 [코칭]으로 나타납니다</label>
         <button class="primary" id="docFileBtn">파일로 업로드</button>
       </div>
       <div id="docFileResult"></div>
+      <h3 style="margin-top:16px">업로드한 문서</h3>
+      <div id="upDocList"><p class="loading">불러오는 중…</p></div>
+    </div>
     </div>
   </section>
 
@@ -161,14 +187,31 @@
       <div id="turnstileBox"></div>
       <div class="btnrow"><button class="primary" id="askBtn">질문하기</button></div>
       <div id="askResult"></div>
-      <p class="small">HR 규정 7건에서 근거를 찾습니다.</p>
+      <p class="small">HR 규정 7건에서 근거를 찾습니다. 개인 전사본·업로드 문서는 검색하지 않습니다.</p>
+    </div>
+  </section>
+
+  <section id="tab-personal">
+    <div class="card">
+      <h2>개인 업무 검색</h2>
+      <p class="perspective-bar"><label for="personalPerspective"><b>관점</b></label> <span id="personalPerspectiveBox"><span class="badge">내 개인 공간</span></span></p>
+      <p id="personalScopeLabel" class="muted">내 개인 업무에서 검색</p>
+      <input type="text" id="personalQuestion" placeholder="내 전사본·업로드 문서에서 찾아요. 예) 지난 코칭에서 연차 얘기 뭐였지?" />
+      <div class="btnrow"><button class="primary" id="personalAskBtn">질문하기</button></div>
+      <div id="personalResult"></div>
+      <p class="small">내 전사본·업로드 문서에서만 근거를 찾습니다. HR 규정 내용은 나오지 않습니다. 로그인해야 합니다.</p>
     </div>
   </section>
 
   <section id="tab-coaching">
     <div class="card">
-      <h2>코칭 리플렉션</h2>
-      <p><button class="secondary" id="loadCoaching">샘플 코칭 전사본 불러오기</button></p>
+      <h2 id="coachingTitle">코칭 리플렉션</h2>
+      <p class="muted" id="coachingModeDesc">코치용: 세션 전사본에서 핵심 질문·반복 패턴·다음 세션 질문을 뽑습니다.</p>
+      <p><span class="badge warn">데모용 샘플</span> <button class="secondary" id="loadCoaching">데모용 샘플 코칭 전사본 불러오기</button> <span class="small">데모용 샘플입니다. 실제로는 업로드되지 않고 텍스트만 채워집니다.</span></p>
+      <div class="btnrow">
+        <span><label for="coachingDocPick">코칭 전사본 선택</label><br><select id="coachingDocPick"><option value="">직접 붙여넣기</option></select></span>
+        <span><label for="coachingCounterpart" id="coachingCounterpartLabel">상대방</label><br><select id="coachingCounterpart"><option value="">지정 안 함</option></select></span>
+      </div>
       <textarea id="coachingText" placeholder="코칭 세션 전사본을 붙여넣으세요"></textarea>
       <div class="btnrow"><button class="primary" id="reflectBtn">리플렉션 생성</button></div>
       <div id="coachingResult"></div>
@@ -178,6 +221,10 @@
   <section id="tab-tasks">
     <div class="card">
       <h2>할 일</h2>
+      <div class="btnrow" id="taskAdminBar" style="display:none">
+        <span><label for="taskOwnerFilter">사용자 필터</label><br><select id="taskOwnerFilter"><option value="">전체 사용자</option><option value="unassigned">미지정</option></select></span>
+        <span><label for="newTaskOwner">새 할 일 담당자</label><br><select id="newTaskOwner"><option value="">— 사용자를 선택하세요 —</option></select></span>
+      </div>
       <div class="btnrow">
         <input type="text" id="newTaskTitle" placeholder="할 일을 입력하세요" style="flex:1" />
         <button class="primary" id="addTaskBtn">추가</button>
@@ -221,6 +268,7 @@
         <span><label for="adminNewEmail">이메일</label><br><input id="adminNewEmail" type="email" required style="width:220px" /></span>
         <span><label for="adminNewName">이름</label><br><input id="adminNewName" type="text" required style="width:120px" /></span>
         <span><label for="adminNewRole">역할</label><br><select id="adminNewRole"><option value="user">일반 사용자</option><option value="hr_admin">HR 관리자</option></select></span>
+        <span><label for="adminNewCoachingRole">코칭 역할</label><br><select id="adminNewCoachingRole"><option value="coachee">코칭 대상</option><option value="coach">코치</option></select></span>
         <button class="primary" type="submit">계정 만들기</button>
       </form>
       <div class="ok" id="adminCreateMsg" style="color:#166534;font-size:13px;min-height:18px;word-break:break-all"></div>
@@ -295,11 +343,24 @@
 <script>
 let docId = null, sessionId = null, lastSummaryText = '', lastSummary = [], lastActions = [], lastDocTitle = '';
 let lastAnswer = '', lastQuestion = '', turnstileToken = null, turnstileWidgetId = null;
+let personalSessionId = null, lastPersonalAnswer = '', lastPersonalQuestion = '';
 const $ = (id) => document.getElementById(id);
-const TABS = ['home','upload','ask','coaching','tasks','library','obs','admin','about'];
+const TABS = ['home','upload','ask','personal','coaching','tasks','library','obs','admin','about'];
 // 로그인 (2026-11-15): 현재 사용자. null이면 미로그인. 역할이 'user'면 obs·admin 탭을 숨긴다.
 let currentUser = null;
 const ADMIN_TABS = ['obs', 'admin'];
+// 코치 / 코칭 대상 (2026-11-16): 코칭 대상도 회사 직원이라 본인 업무 문서가 있다
+// (예: 영업부 Mercer의 업무 문서). 그래서 코칭 대상도 코치와 같은 일반 메뉴를 본다.
+// 메뉴 차이는 코칭 리플렉션 모드(코치용 vs 코칭 대상 자기 성찰+액션 플랜)이다.
+// hr_admin의 관리자 탭(obs·admin)은 coaching_role과 무관하게 보인다.
+const COACHEE_TABS = ['home', 'upload', 'ask', 'personal', 'coaching', 'tasks', 'library', 'about'];
+function isCoachee() { return !!currentUser && currentUser.coaching_role !== 'coach'; }
+function tabAllowed(name) {
+  if (!currentUser) return true;
+  if (ADMIN_TABS.includes(name)) return currentUser.role === 'hr_admin';
+  if (isCoachee()) return COACHEE_TABS.includes(name);
+  return true;
+}
 // S4: 해시는 '<최상위 탭>' 또는 'obs/<하위 경로>' (최상위 탭 = 첫 세그먼트).
 function switchTab(name, fromHash) {
   name = String(name || '');
@@ -309,6 +370,8 @@ function switchTab(name, fromHash) {
   if (!TABS.includes(name)) { name = 'home'; sub = ''; }
   // 로그인: 일반 사용자는 HR admin 탭(obs·admin)에 못 들어간다.
   if (currentUser && currentUser.role !== 'hr_admin' && ADMIN_TABS.includes(name)) { name = 'home'; sub = ''; }
+  // 코칭 대상: 숨긴 탭(홈·녹음전사·개인 업무 검색·할 일·라이브러리)은 HR 규정 검색으로.
+  if (!tabAllowed(name)) { name = 'ask'; sub = ''; }
   if (name !== 'obs') sub = '';
   else if (!sub) sub = 'traces';
   const full = name === 'obs' ? 'obs/' + sub : name;
@@ -321,9 +384,11 @@ function switchTab(name, fromHash) {
   document.querySelector(`.tabs button[data-tab="${name}"]`).classList.add('nav-active');
   $('tab-' + name).classList.add('active');
   if (name === 'home') loadHome();
-  if (name === 'upload') loadRecordings();
+  if (name === 'upload') { setUpPane('voice'); loadRecordings(); renderPerspectives(); }
+  if (name === 'personal') renderPerspectives();
   if (name === 'tasks') loadTasks();
   if (name === 'library') refreshLib();
+  if (name === 'coaching') loadCoachingPickers();
   if (name === 'admin') loadAdminUsers();
   if (name === 'obs') renderObs(sub); else unmountObs();
 }
@@ -388,6 +453,26 @@ document.querySelectorAll('[data-obs-sub]').forEach(b => {
     location.hash = 'obs/' + OBS_SUBS[j];
   };
 });
+// 녹음전사.문서저장: 하위 탭 전환 (voice = 음성파일 전사, doc = 문서 업로드).
+function setUpPane(p) {
+  for (const k of ['voice', 'doc']) {
+    $('upPane-' + k).style.display = k === p ? '' : 'none';
+    $('upTab-' + k).setAttribute('aria-selected', k === p ? 'true' : 'false');
+  }
+  if (p === 'voice') loadRecordings(); else loadUploadedDocs();
+}
+async function loadUploadedDocs() {
+  const j = await api('/api/library');
+  if (!j.ok) { $('upDocList').innerHTML = '<p class="err">문서 목록을 불러오지 못했습니다.</p>'; return; }
+  const files = (j.documents || []).filter(d => d.kind === 'file');
+  $('upDocList').innerHTML = files.length ? files.map(d =>
+    `<div class="taskrow"><span class="t-title">${esc(d.title)}</span>${d.extract_status === 'failed' ? '<span class="badge warn">변환 실패</span>' : '<span class="badge ok">변환 완료</span>'}<span class="t-src">${fmtDate(d.created_at)} · ${fmtSize(d.size)}</span><a class="btn-link" href="/api/documents/${esc(d.id)}/download">다운로드</a></div>`
+  ).join('') + '<p class="small"><a href="#library" onclick="switchTab(\'library\');return false">라이브러리에서 전체 보기 →</a></p>' : '<p class="empty">아직 업로드한 파일이 없습니다.</p>';
+}
+function fmtSize(n) {
+  n = Number(n) || 0;
+  return n >= 1048576 ? (n / 1048576).toFixed(1) + 'MB' : n >= 1024 ? Math.round(n / 1024) + 'KB' : n + 'B';
+}
 async function loadRecordings() {
   const j = await api('/api/recordings');
   if (!j.ok) { $('recList').innerHTML = '<p class="err">녹음 목록을 불러오지 못했습니다.</p>'; return; }
@@ -507,6 +592,7 @@ async function loadRecording(id) {
   if (!j.ok) { alert('전사본이 없습니다.'); return; }
   if (j.recording.transcript_status === 'processing') { $('audioResult').innerHTML = '<p class="loading">전사하는 중입니다…</p>'; pollRecording(id); return; }
   if (!j.recording.transcript) { alert('전사본이 없습니다.'); return; }
+  setUpPane('doc');
   docId = j.recording.doc_id; lastDocTitle = j.recording.title.replace(/\.[^.]+$/, '');
   $('docTitle').value = lastDocTitle;
   $('docContent').value = j.recording.transcript;
@@ -528,16 +614,97 @@ async function api(path, opts) {
   const r = await fetch(path, { headers: { 'content-type': 'application/json' }, ...opts });
   return r.json();
 }
+// ---- 관점 선택 (2026-11-16, 사용자 식별) ----
+// 일반 사용자: 관점은 항상 "내 개인 공간" (읽기 전용 표시). HR 관리자: 활성 사용자 드롭다운에서
+// 반드시 직접 고른다 (관리자 본인을 기본값으로 두지 않는다 — 관리자는 고른 사용자 대신 처리한다).
+let perspectiveUsers = null;
+function isAdminUser() { return !!(currentUser && currentUser.role === 'hr_admin'); }
+async function getPerspectiveUsers() {
+  if (perspectiveUsers) return perspectiveUsers;
+  try { const u = await api('/api/users/coaching'); perspectiveUsers = u.ok ? (u.users || []) : []; }
+  catch { perspectiveUsers = []; }
+  return perspectiveUsers;
+}
+function perspectiveName(id) {
+  const u = (perspectiveUsers || []).find(x => x.id === id);
+  return u ? (u.name || u.email) : '';
+}
+function userOptions(users, placeholder) {
+  return `<option value="">${esc(placeholder)}</option>` + users.map(u => `<option value="${esc(u.id)}">${esc(u.name || u.email)} (${esc(u.email)})</option>`).join('');
+}
+async function renderPerspectives() {
+  const admin = isAdminUser();
+  const users = admin ? await getPerspectiveUsers() : [];
+  const boxes = [
+    ['upPerspectiveBox', 'upPerspective', '<option value="__shared__">공용 문서 (모든 사용자 · 파일 업로드만)</option>'],
+    ['personalPerspectiveBox', 'personalPerspective', ''],
+  ];
+  for (const [box, id, extra] of boxes) {
+    const keep = $(id) ? $(id).value : '';
+    $(box).innerHTML = admin
+      ? `<select id="${id}">${userOptions(users, '— 사용자를 선택하세요 —')}${extra}</select>`
+      : `<span class="badge">${currentUser ? '내 개인 공간' : '로그인 안 함 · 공용'}</span>`;
+    if (admin && keep && (users.some(u => u.id === keep) || keep === '__shared__')) $(id).value = keep;
+  }
+  if (admin) {
+    $('upPerspective').onchange = updatePerspectiveNotes;
+    // 다른 사용자 관점으로 바꾸면 대화 문맥이 섞이지 않게 개인 검색 세션을 새로 시작한다.
+    $('personalPerspective').onchange = () => { personalSessionId = null; $('personalResult').innerHTML = ''; updatePerspectiveNotes(); };
+  }
+  updatePerspectiveNotes();
+}
+function updatePerspectiveNotes() {
+  const admin = isAdminUser();
+  const up = admin && $('upPerspective') ? $('upPerspective').value : '';
+  $('upPerspectiveNote').textContent = !admin
+    ? '올린 전사본·음성·문서는 내 개인 공간에 저장되고, 개인 업무 검색에서 찾을 수 있습니다.'
+    : up === '__shared__' ? '공용 문서로 올립니다 (파일 업로드만 — 모든 사용자가 봅니다). 전사본·음성 전사는 사용자를 골라야 합니다.'
+    : up ? `${perspectiveName(up)}의 개인 공간에 저장합니다 (HR 관리자가 대신 올림).`
+    : 'HR 관리자: 누구의 개인 공간에 올릴지 먼저 사용자를 선택하세요. 관리자 본인 계정에는 쌓지 않습니다.';
+  const ps = admin && $('personalPerspective') ? $('personalPerspective').value : '';
+  $('personalScopeLabel').textContent = !admin
+    ? '내 개인 업무에서 검색'
+    : ps ? `${perspectiveName(ps)}의 개인 업무에서 검색` : 'HR 관리자: 누구의 개인 업무에서 검색할지 사용자를 선택하세요.';
+}
+// 업로드 대상. kind: 'transcript' | 'voice' | 'file'. 반환 { ok, asUserId?, shared? }.
+function uploadTarget(kind) {
+  if (!isAdminUser()) return { ok: true };
+  const v = $('upPerspective') ? $('upPerspective').value : '';
+  if (!v) { alert('관점: 누구의 개인 공간에 올릴지 사용자를 먼저 선택하세요.'); return { ok: false }; }
+  if (v === '__shared__') {
+    if (kind !== 'file') { alert('전사본·음성 전사는 공용으로 올릴 수 없습니다. 관점에서 사용자를 선택하세요.'); return { ok: false }; }
+    return { ok: true, shared: true };
+  }
+  return { ok: true, asUserId: v };
+}
+function ownerNote(j) { return j && j.asUser ? ` · <b>${esc(j.asUser)}</b>의 개인 공간에 저장` : ''; }
 // ---- 로그인 (2026-11-15) ----
 function applyRole() {
   const isAdmin = currentUser && currentUser.role === 'hr_admin';
   document.querySelectorAll('.tabs button[data-tab="obs"], .tabs button[data-tab="admin"]').forEach(b => {
     b.style.display = isAdmin ? '' : 'none';
   });
+  // 개인 업무 검색은 로그인 사용자만 (익명은 탭을 숨긴다).
+  document.querySelectorAll('.tabs button[data-tab="personal"]').forEach(b => {
+    b.style.display = currentUser ? '' : 'none';
+  });
+  // 코칭 대상: COACHEE_TABS + (hr_admin이면) 관리자 탭만 렌더링한다.
+  if (currentUser) {
+    document.querySelectorAll('.tabs button[data-tab]').forEach(b => {
+      if (!tabAllowed(b.dataset.tab)) b.style.display = 'none';
+      else if (!ADMIN_TABS.includes(b.dataset.tab)) b.style.display = '';
+    });
+  }
+  applyCoachingMode();
+  // 관점 선택·할 일 관리자 막대: 로그인 사용자가 바뀌면 다시 그린다.
+  perspectiveUsers = null;
+  renderPerspectives();
+  $('taskAdminBar').style.display = isAdmin ? '' : 'none';
+  $('homeByUserCard').style.display = isAdmin ? '' : 'none';
   const chip = $('userChip');
   if (currentUser) {
     $('userChipName').textContent = currentUser.name;
-    $('userChipMeta').textContent = currentUser.email + (isAdmin ? ' · HR 관리자' : ' · 일반 사용자');
+    $('userChipMeta').textContent = currentUser.email + (isAdmin ? ' · HR 관리자' : ' · 일반 사용자') + (isCoachee() ? ' · 코칭 대상' : ' · 코치');
     chip.style.display = 'flex';
   } else {
     chip.style.display = 'none';
@@ -618,8 +785,15 @@ async function loadAdminUsers() {
   const j = await api('/api/admin/users');
   if (!j.ok) { box.innerHTML = '<p class="err">사용자 목록을 불러오지 못했습니다. ' + esc(j.error || '') + '</p>'; return; }
   if (!j.users.length) { box.innerHTML = '<p class="empty">등록된 사용자가 없습니다.</p>'; return; }
-  box.innerHTML = '<table class="admin-table"><thead><tr><th>이메일</th><th>이름</th><th>역할</th><th>상태</th><th>동작</th></tr></thead><tbody>' +
-    j.users.map(u => `<tr><td>${esc(u.email)}</td><td>${esc(u.name)}</td><td>${roleLabel(u.role)}</td><td>${statusLabel(u.status)}</td>` +
+  // 코칭 역할 드롭다운 (2026-11-16): PATCH /api/admin/users/:id {coaching_role}. 자기 계정은 서버가 막으므로 비활성화한다.
+  const coachingCell = (u) => {
+    const self = currentUser && currentUser.id === u.id;
+    const v = u.coaching_role === 'coach' ? 'coach' : 'coachee';
+    return `<select aria-label="코칭 역할" ${self ? 'disabled title="자기 계정의 코칭 역할은 바꿀 수 없습니다"' : ''} onchange="setUserCoachingRole('${u.id}', this.value)">` +
+      `<option value="coach"${v === 'coach' ? ' selected' : ''}>코치</option><option value="coachee"${v === 'coachee' ? ' selected' : ''}>코칭 대상</option></select>`;
+  };
+  box.innerHTML = '<table class="admin-table"><thead><tr><th>이메일</th><th>이름</th><th>역할</th><th>코칭 역할</th><th>상태</th><th>동작</th></tr></thead><tbody>' +
+    j.users.map(u => `<tr><td>${esc(u.email)}</td><td>${esc(u.name)}</td><td>${roleLabel(u.role)}</td><td>${coachingCell(u)}</td><td>${statusLabel(u.status)}</td>` +
       `<td><div class="rowbtns">` +
       (u.status !== 'inactive' ? `<button type="button" onclick="issueUserLink('${u.id}')">설정 링크</button>` : '') +
       (u.status !== 'inactive' ? `<button type="button" onclick="resetUser('${u.id}')">초기화</button>` : '') +
@@ -634,7 +808,7 @@ async function loadAdminUsers() {
 async function createAdminUser(e) {
   e.preventDefault();
   $('adminCreateMsg').textContent = '';
-  const j = await api('/api/admin/users', { method: 'POST', body: JSON.stringify({ email: $('adminNewEmail').value, name: $('adminNewName').value, role: $('adminNewRole').value }) });
+  const j = await api('/api/admin/users', { method: 'POST', body: JSON.stringify({ email: $('adminNewEmail').value, name: $('adminNewName').value, role: $('adminNewRole').value, coaching_role: $('adminNewCoachingRole').value }) });
   if (!j.ok) { $('adminCreateMsg').textContent = '계정을 만들지 못했습니다. ' + (j.error || ''); return; }
   $('adminCreateMsg').textContent = '계정을 만들었습니다. 이 설정 링크를 ' + j.user.email + '님께 전달하세요 (1회용, 24시간): ' + location.origin + j.setupPath;
   $('adminNewEmail').value = ''; $('adminNewName').value = '';
@@ -655,6 +829,11 @@ async function resetUser(id) {
 async function setUserRole(id, role) {
   const j = await api('/api/admin/users/' + id, { method: 'PATCH', body: JSON.stringify({ role }) });
   if (!j.ok) { alert('역할을 바꾸지 못했습니다. ' + (j.error || '')); return; }
+  loadAdminUsers();
+}
+async function setUserCoachingRole(id, coaching_role) {
+  const j = await api('/api/admin/users/' + id, { method: 'PATCH', body: JSON.stringify({ coaching_role }) });
+  if (!j.ok) alert('코칭 역할을 바꾸지 못했습니다. ' + (j.error || ''));
   loadAdminUsers();
 }
 async function setUserStatus(id, status) {
@@ -702,7 +881,9 @@ function renderDigestBody(md) {
 }
 function fmtDate(s) { return s ? String(s).slice(0, 10) : ''; }
 function taskRow(t) {
-  return `<div class="taskrow${t.done ? ' done' : ''}"><input type="checkbox" ${t.done ? 'checked' : ''} onchange="toggleTask('${t.id}')" /><span class="t-title">${esc(t.title)}</span>${t.source ? `<span class="t-src">${esc(t.source)}</span>` : ''}<button class="iconbtn" title="삭제" onclick="deleteTask('${t.id}')">×</button></div>`;
+  // 0021: 담당자 이름 (owner_id NULL → "미지정").
+  const owner = `<span class="badge${t.owner_id ? '' : ' warn'}" title="담당자">${esc(t.owner_name || '미지정')}</span>`;
+  return `<div class="taskrow${t.done ? ' done' : ''}"><input type="checkbox" ${t.done ? 'checked' : ''} onchange="toggleTask('${t.id}')" />${owner}<span class="t-title">${esc(t.title)}</span>${t.source ? `<span class="t-src">${esc(t.source)}</span>` : ''}<button class="iconbtn" title="삭제" onclick="deleteTask('${t.id}')">×</button></div>`;
 }
 async function loadHome() {
   const j = await api('/api/home');
@@ -713,9 +894,19 @@ async function loadHome() {
     `<div class="stat"><b>${c.summaries}</b><span>요약 완료</span></div>` +
     `<div class="stat"><b>${c.openTasks}</b><span>열린 할 일</span></div>` +
     `<div class="stat"><b>${c.reflections}</b><span>리플렉션</span></div>`;
+  const adminHome = isAdminUser();
   $('homeDocs').innerHTML = j.recentDocuments.length
-    ? j.recentDocuments.map(d => `<div class="taskrow"><span class="t-title">${esc(d.title)}</span><span class="badge">${esc(d.kind)}</span><span class="t-src">${fmtDate(d.created_at)}</span></div>`).join('')
+    ? j.recentDocuments.map(d => `<div class="taskrow"><span class="t-title">${esc(d.title)}</span><span class="badge">${esc(d.kind)}</span>${adminHome ? `<span class="badge" title="소유자">${esc(d.owner_name || '공용')}</span>` : ''}<span class="t-src">${fmtDate(d.created_at)}</span></div>`).join('')
     : '<p class="empty">아직 문서가 없습니다.</p>';
+  // 0021: 사용자별 집계 (hr_admin 전용 — 서버가 byUser를 hr_admin에게만 준다).
+  $('homeByUserCard').style.display = j.byUser ? '' : 'none';
+  if (j.byUser) {
+    $('homeByUser').innerHTML = j.byUser.length
+      ? '<table class="obs-table"><thead><tr><th>사용자</th><th>문서</th><th>할 일</th><th>리플렉션</th></tr></thead><tbody>' +
+        j.byUser.map(u => `<tr><td><b>${esc(u.name || u.email)}</b> <span class="small">${esc(u.email)}</span></td><td>${u.documents}</td><td>${u.tasks}</td><td>${u.reflections}</td></tr>`).join('') +
+        '</tbody></table>'
+      : '<p class="empty">활성 사용자가 없습니다.</p>';
+  }
   $('homeTasks').innerHTML = j.openTasks.length
     ? j.openTasks.map(taskRow).join('')
     : '<p class="empty">열린 할 일이 없습니다.</p>';
@@ -723,7 +914,8 @@ async function loadHome() {
     ? j.recentReflections.map(r => {
         let pats = [];
         try { pats = JSON.parse(r.patterns || '[]'); } catch { pats = []; }
-        return `<div class="taskrow"><span class="t-title">${esc(pats[0] || '리플렉션')}</span><span class="t-src">${fmtDate(r.created_at)}</span></div>`;
+        const who = adminHome ? `<span class="badge" title="코치 → 코칭 대상">${esc(r.coach_name || '미지정')} → ${esc(r.coachee_name || '미지정')}</span>` : '';
+        return `<div class="taskrow"><span class="t-title">${esc(pats[0] || '리플렉션')}</span>${who}<span class="t-src">${fmtDate(r.created_at)}</span></div>`;
       }).join('')
     : '<p class="empty">아직 리플렉션이 없습니다.</p>';
   try {
@@ -734,16 +926,37 @@ async function loadHome() {
   } catch { $('homeDigest').innerHTML = '<p class="empty">다이제스트를 불러오지 못했습니다.</p>'; }
 }
 async function loadTasks() {
-  const j = await api('/api/tasks');
+  const admin = isAdminUser();
+  $('taskAdminBar').style.display = admin ? '' : 'none';
+  if (admin) {
+    // 사용자 필터·담당자 드롭다운 (관리자 본인을 기본값으로 두지 않는다).
+    const users = await getPerspectiveUsers();
+    const keepF = $('taskOwnerFilter').value, keepO = $('newTaskOwner').value;
+    $('taskOwnerFilter').innerHTML = '<option value="">전체 사용자</option><option value="unassigned">미지정</option>' + users.map(u => `<option value="${esc(u.id)}">${esc(u.name || u.email)} (${esc(u.email)})</option>`).join('');
+    $('newTaskOwner').innerHTML = userOptions(users, '— 사용자를 선택하세요 —');
+    if (keepF === 'unassigned' || users.some(u => u.id === keepF)) $('taskOwnerFilter').value = keepF;
+    if (users.some(u => u.id === keepO)) $('newTaskOwner').value = keepO;
+  }
+  const f = admin ? $('taskOwnerFilter').value : '';
+  const j = await api('/api/tasks' + (f ? '?owner=' + encodeURIComponent(f) : ''));
   if (!j.ok) return;
   $('taskList').innerHTML = j.tasks.length
     ? j.tasks.map(taskRow).join('')
     : '<p class="empty">할 일이 없습니다.</p>';
 }
+$('taskOwnerFilter').onchange = () => loadTasks();
 async function addTask() {
   const title = $('newTaskTitle').value.trim();
   if (!title) return;
-  await api('/api/tasks', { method: 'POST', body: JSON.stringify({ title }) });
+  const body = { title };
+  if (isAdminUser()) {
+    // 관리자는 담당자를 직접 골라 그 사용자의 할 일로 만든다 (본인 계정에 쌓지 않는다).
+    const owner = $('newTaskOwner').value;
+    if (!owner) { alert('새 할 일 담당자를 선택하세요.'); return; }
+    body.ownerId = owner;
+  }
+  const j = await api('/api/tasks', { method: 'POST', body: JSON.stringify(body) });
+  if (!j.ok) { alert('할 일을 만들지 못했습니다: ' + (j.error || '')); return; }
   $('newTaskTitle').value = '';
   loadTasks(); loadHome();
 }
@@ -757,9 +970,16 @@ async function deleteTask(id) {
 }
 async function saveActionsAsTasks() {
   if (!lastActions.length) { alert('저장할 액션이 없습니다.'); return; }
+  // 관리자: 업로드 관점에서 고른 사용자의 할 일로 저장한다.
+  let ownerId;
+  if (isAdminUser()) {
+    const v = $('upPerspective') ? $('upPerspective').value : '';
+    if (!v || v === '__shared__') { alert('관점에서 할 일을 맡을 사용자를 선택하세요.'); return; }
+    ownerId = v;
+  }
   let n = 0;
   for (const a of lastActions) {
-    const j = await api('/api/tasks', { method: 'POST', body: JSON.stringify({ title: a, source: lastDocTitle }) });
+    const j = await api('/api/tasks', { method: 'POST', body: JSON.stringify({ title: a, source: lastDocTitle, ownerId }) });
     if (j.ok) n++;
   }
   alert(`액션 ${n}건을 할 일로 저장했습니다.`);
@@ -840,7 +1060,7 @@ function gapsSection(gaps) {
   const openN = gaps.filter(g => g.status === 'open').length;
   const cards = gaps.map(gap => {
     const srcBadge = gap.source === 'downvote' ? '<span class="badge">👎 피드백</span>' : '<span class="badge warn">근거 없음</span>';
-    const meta = `<div class="meta">${srcBadge} ${fmtMs(gap.asked_at)} · ${gap.count}회 질문됨</div>`;
+    const meta = `<div class="meta">${srcBadge} ${fmtMs(gap.asked_at)} · ${gap.count}회 질문됨 · 질문자: <b>${esc(gap.asker_name || '익명')}</b></div>`;
     if (gap.status === 'open') {
       return `<div class="libcard"><h3>${esc(gap.question)}</h3><p class="small">담당자가 답을 달면 같은 질문에 암묵지 출처로 답변합니다.</p>${meta}<textarea id="gap-answer-${gap.id}" placeholder="이유와 예외 조건을 포함해 주세요" style="min-height:90px;margin-top:8px"></textarea><div class="btnrow"><input type="text" id="gap-author-${gap.id}" value="인사팀" style="width:140px" /><button class="primary" onclick="publishGap('${gap.id}')">게시하기</button></div><div id="gap-result-${gap.id}"></div></div>`;
     }
@@ -884,38 +1104,87 @@ function restorePublishNotice() {
     try { sessionStorage.removeItem('people-os-publish-notice'); } catch {}
   }
 }
+let libTab = 'files';
+function setLibTab(t) {
+  libTab = t;
+  document.querySelectorAll('#libResult [data-libtab]').forEach(b => b.setAttribute('aria-selected', String(b.dataset.libtab === t)));
+  document.querySelectorAll('#libResult [data-libpanel]').forEach(p => { p.style.display = p.dataset.libpanel === t ? '' : 'none'; });
+}
 async function refreshLib() {
   const j = await api('/api/library');
-  // 답변 대기 질문 섹션 (C5-b) — 기존 문서·규정·리플렉션 렌더링은 그대로 두고 앞에 붙인다.
+  // 답변 대기 질문 섹션 (C5-b) — 탭으로 분리해 한 번에 하나씩만 보인다.
   let gapsHtml = '';
+  let gaps = [];
   try {
     const g = await api('/api/gaps');
-    if (g.ok) gapsHtml = gapsSection(g.gaps || []);
+    if (g.ok) { gaps = g.gaps || []; gapsHtml = gapsSection(gaps); }
   } catch { gapsHtml = ''; }
-  const docs = j.documents.map(d => {
-    let sum = '';
-    try { const s = JSON.parse(d.summary || '[]'); sum = (s[0] || '').slice(0, 120); } catch { sum = ''; }
-    let actN = 0;
-    try { actN = JSON.parse(d.actions || '[]').length; } catch { actN = 0; }
-    const failed = d.extract_status === 'failed';
-    const body = failed
-      ? `<span class="err">${esc(d.extract_error || '변환에 실패한 문서입니다.')}</span>`
-      : (sum ? esc(sum) : '요약 전 문서입니다.');
-    return `<div class="libcard"><h3>${esc(d.title)}</h3><p>${body}</p><div class="meta"><span class="badge">${esc(d.kind)}</span> ${fmtDate(d.created_at)}${actN ? ` · 액션 ${actN}개` : ''}</div></div>`;
-  }).join('');
+  // 파일 목록(리스트 뷰): 문서 + 덱을 한 목록으로 합쳐 유형 필터·날짜 정렬로 보여준다.
+  // 기존 문서 카드 뷰는 이 리스트로 대체했다 (규정·리플렉션 카드는 그대로).
+  libItems = [
+    ...j.documents.map(d => ({ id: d.id, title: d.title, type: d.kind === 'transcript' ? 'transcript' : 'upload', created_at: d.created_at, size: d.size, canDelete: d.canDelete, owner: d.owner, failed: d.extract_status === 'failed', err: d.extract_error, isCoaching: !!d.is_coaching })),
+    ...(j.decks || []).map(d => ({ id: d.id, title: d.title, type: 'deck', created_at: d.created_at, size: d.size, canDelete: d.canDelete, owner: d.owner })),
+  ];
   const pols = j.policies.map(p => `<div class="libcard"><h3>${esc(p.title)}</h3><p>${esc(p.section)}</p><div class="meta">HR 규정</div></div>`).join('');
   const refls = j.reflections.map(r => {
     let pats = [];
     try { pats = JSON.parse(r.patterns || '[]'); } catch { pats = []; }
-    return `<div class="libcard"><h3>코칭 리플렉션</h3><p>${esc(pats[0] || '')}</p><div class="meta">${fmtDate(r.created_at)}</div></div>`;
+    // 참여자 (0020): 둘 다 NULL(기존·익명 리플렉션)이면 날짜만.
+    const who = (r.coach_name || r.coachee_name) ? `코치: ${esc(r.coach_name || '—')} · 코칭 대상: ${esc(r.coachee_name || '—')} · ` : '';
+    return `<div class="libcard"><h3>${r.mode === 'coachee' ? '코칭 대상 자기 성찰' : '코칭 리플렉션'}</h3><p>${esc(pats[0] || '')}</p><div class="meta">${who}${fmtDate(r.created_at)}</div></div>`;
   }).join('');
+  const openGaps = gaps.filter(g => g.status === 'open').length;
   $('libResult').innerHTML =
-    gapsHtml +
-    `<h3>문서 ${j.documents.length}건</h3><div class="libgrid">${docs || '<p class="empty">문서가 없습니다.</p>'}</div>` +
-    `<h3>규정 ${j.policies.length}건</h3><div class="libgrid">${pols}</div>` +
-    `<h3>리플렉션 ${j.reflections.length}건</h3><div class="libgrid">${refls || '<p class="empty">리플렉션이 없습니다.</p>'}</div>`;
+    `<div class="obs-subtabs" role="tablist" aria-label="라이브러리">
+      <button type="button" role="tab" data-libtab="files" aria-selected="true" onclick="setLibTab('files')">파일 목록</button>
+      <button type="button" role="tab" data-libtab="policies" aria-selected="false" onclick="setLibTab('policies')">규정 ${j.policies.length}건</button>
+      <button type="button" role="tab" data-libtab="reflections" aria-selected="false" onclick="setLibTab('reflections')">리플렉션 ${j.reflections.length}건</button>
+      <button type="button" role="tab" data-libtab="gaps" aria-selected="false" onclick="setLibTab('gaps')">답변 대기${openGaps ? ' (' + openGaps + ')' : ''}</button>
+    </div>` +
+    `<div data-libpanel="files"><h3>파일 목록</h3><div id="libFiles"></div></div>` +
+    `<div data-libpanel="policies" style="display:none"><h3>규정 ${j.policies.length}건</h3><div class="libgrid">${pols}</div></div>` +
+    `<div data-libpanel="reflections" style="display:none"><h3>리플렉션 ${j.reflections.length}건</h3><div class="libgrid">${refls || '<p class="empty">리플렉션이 없습니다.</p>'}</div></div>` +
+    `<div data-libpanel="gaps" style="display:none">${gapsHtml}</div>`;
+  setLibTab(libTab);
+  renderLibFiles();
   // 게시 확인 문구는 다시 그릴 때마다 복원한다 (없으면 비워둔다).
   restorePublishNotice();
+}
+let libItems = [], libFilter = 'all';
+const LIB_TYPES = { transcript: '전사본', upload: '업로드 문서', deck: '덱' };
+function setLibFilter(f) { libFilter = f; renderLibFiles(); }
+function renderLibFiles() {
+  const el = $('libFiles'); if (!el) return;
+  const rows = libItems.filter(x => libFilter === 'all' || x.type === libFilter)
+    .sort((a, b) => String(b.created_at).localeCompare(String(a.created_at))); // 최신순
+  const filters = [['all', '전체'], ['transcript', '전사본'], ['upload', '업로드'], ['deck', '덱']]
+    .map(([k, l]) => `<button class="${libFilter === k ? 'primary' : 'secondary'}" onclick="setLibFilter('${k}')">${l}</button>`).join(' ');
+  const showOwner = !!(currentUser && currentUser.role === 'hr_admin');
+  const body = rows.map(x => {
+    const dl = x.type === 'deck' ? `/api/deck/${esc(x.id)}` : `/api/documents/${esc(x.id)}/download`;
+    const del = x.canDelete ? `<button class="secondary" onclick="deleteLibItem('${x.type}','${esc(x.id)}')">삭제</button>` : '';
+    const warn = (x.failed ? ' <span class="badge warn">변환 실패</span>' : '') + (x.isCoaching ? ' <span class="badge ok">코칭</span>' : '');
+    // 코칭 지정/해제 (0020): 삭제와 같은 권한(canDelete)일 때만. 덱은 문서가 아니라 제외.
+    const coachBtn = x.type !== 'deck' && x.canDelete ? `<button class="secondary" onclick="toggleCoaching('${esc(x.id)}', ${x.isCoaching ? 'false' : 'true'})">${x.isCoaching ? '코칭 해제' : '코칭 지정'}</button> ` : '';
+    const ownerCell = showOwner ? `<td>${esc(x.owner || '공용')}</td>` : '';
+    return `<tr><td>${esc(x.title)}${warn}</td><td><span class="badge">${LIB_TYPES[x.type]}</span></td>${ownerCell}<td>${fmtDate(x.created_at)}</td><td>${x.size ? fmtSize(x.size) : '-'}</td><td><a href="${dl}">다운로드</a> ${coachBtn}${del}</td></tr>`;
+  }).join('');
+  el.innerHTML = `<div class="btnrow">${filters}</div>` + (rows.length
+    ? `<table class="liblist" style="width:100%;border-collapse:collapse"><thead><tr style="text-align:left"><th>이름</th><th>유형</th>${showOwner ? '<th>소유자</th>' : ''}<th>날짜 ▼</th><th>크기</th><th>작업</th></tr></thead><tbody>${body}</tbody></table>`
+    : '<p class="empty">해당하는 파일이 없습니다.</p>');
+}
+async function toggleCoaching(id, on) {
+  const j = await api('/api/documents/' + id, { method: 'PATCH', body: JSON.stringify({ is_coaching: on }) });
+  if (!j.ok) { alert('코칭 지정을 바꾸지 못했습니다: ' + (j.error || '')); return; }
+  const it = libItems.find(x => x.id === id);
+  if (it) it.isCoaching = !!j.is_coaching;
+  renderLibFiles();
+}
+async function deleteLibItem(type, id) {
+  if (!confirm('이 파일을 삭제할까요? 검색 색인도 함께 지워지며 되돌릴 수 없습니다.')) return;
+  const j = await api((type === 'deck' ? '/api/decks/' : '/api/documents/') + id, { method: 'DELETE' });
+  if (!j.ok) { alert('삭제하지 못했습니다: ' + (j.error || '')); return; }
+  refreshLib();
 }
 function toggleSidebar() {
   const sb = $('sidebar');
@@ -938,10 +1207,14 @@ $('loadSample').onclick = async () => {
 $('transcribeBtn').onclick = async () => {
   const f = $('audioFile').files[0];
   if (!f) { alert('음성 파일을 선택하세요.'); return; }
+  const target = uploadTarget('voice');
+  if (!target.ok) return;
   $('transcribeBtn').disabled = true;
   $('audioResult').innerHTML = '<p class="loading">전사하는 중입니다…</p>';
   const fd = new FormData();
   fd.append('file', f);
+  if ($('audioIsCoaching').checked) fd.append('is_coaching', 'true');
+  if (target.asUserId) fd.append('asUserId', target.asUserId);
   const r = await fetch('/api/transcribe', { method: 'POST', body: fd });
   const j = await r.json();
   $('transcribeBtn').disabled = false;
@@ -951,8 +1224,10 @@ $('transcribeBtn').onclick = async () => {
   loadRecordings(); loadHome();
 };
 $('uploadBtn').onclick = async () => {
-  const j = await api('/api/documents', { method: 'POST', body: JSON.stringify({ title: $('docTitle').value, content: $('docContent').value, kind: 'transcript' }) });
-  if (j.ok) { docId = j.id; lastDocTitle = j.title; $('summarizeBtn').disabled = false; $('docResult').innerHTML = `<div class="card">업로드됨 · id <code>${j.id}</code> · R2 저장: ${j.r2Stored ? '예' : '아니오 (D1 폴백)'}</div>`; }
+  const target = uploadTarget('transcript');
+  if (!target.ok) return;
+  const j = await api('/api/documents', { method: 'POST', body: JSON.stringify({ title: $('docTitle').value, content: $('docContent').value, kind: 'transcript', is_coaching: $('docIsCoaching').checked, asUserId: target.asUserId }) });
+  if (j.ok) { docId = j.id; lastDocTitle = j.title; $('summarizeBtn').disabled = false; $('docResult').innerHTML = `<div class="card">업로드됨 · id <code>${j.id}</code>${ownerNote(j)} · R2 저장: ${j.r2Stored ? '예' : '아니오 (D1 폴백)'}</div>`; }
   else $('docResult').innerHTML = `<div class="card">오류: ${j.error}</div>`;
 };
 // 문서 파일 업로드 (C5 Phase 3): PDF·DOCX·XLSX·HWPX·이미지·텍스트.
@@ -960,10 +1235,16 @@ $('uploadBtn').onclick = async () => {
 $('docFileBtn').onclick = async () => {
   const f = $('docFile').files[0];
   if (!f) { alert('문서 파일을 선택하세요.'); return; }
+  const target = uploadTarget('file');
+  if (!target.ok) return;
   $('docFileBtn').disabled = true;
   $('docFileResult').innerHTML = '<p class="loading">파일을 변환하고 색인하는 중입니다…</p>';
   const fd = new FormData();
   fd.append('file', f);
+  if ($('docFileIsCoaching').checked) fd.append('is_coaching', 'true');
+  // 관점: 관리자는 고른 사용자(asUserId) 또는 공용, 로그인 사용자는 본인 개인 공간(personal).
+  if (target.asUserId) fd.append('asUserId', target.asUserId);
+  else if (!target.shared && currentUser) fd.append('personal', 'true');
   let j;
   try {
     const r = await fetch('/api/documents', { method: 'POST', body: fd });
@@ -978,7 +1259,7 @@ $('docFileBtn').onclick = async () => {
     return;
   }
   docId = j.id; lastDocTitle = j.title; $('summarizeBtn').disabled = false;
-  $('docFileResult').innerHTML = `<div class="card"><b>${esc(j.title)}</b> · 형식: ${esc(j.format)} · 근거 chunk ${j.chunks}개${j.indexError ? ` · <span class="err">색인 실패: ${esc(j.indexError)}</span>` : ''}</div>`;
+  $('docFileResult').innerHTML = `<div class="card"><b>${esc(j.title)}</b> · 형식: ${esc(j.format)} · 근거 chunk ${j.chunks}개${ownerNote(j)}${j.indexError ? ` · <span class="err">색인 실패: ${esc(j.indexError)}</span>` : ''}</div>`;
   loadHome();
 };
 $('summarizeBtn').onclick = async () => {
@@ -1023,10 +1304,20 @@ function timingsPanel(t) {
   const items = rows.map(([name, prod, ms]) => `<li><b>${name}</b> · ${prod} · ${ms}ms${name === '답변 생성' ? llmNote : ''}</li>`).join('');
   return `<details class="timings"><summary>처리 과정 (전체 ${t.total ?? '?'}ms)</summary><ul>${items}</ul></details>`;
 }
-function renderAsk(j) {
-  sessionId = j.sessionId;
-  lastAnswer = j.answer; lastQuestion = j.question;
-  const fb = j.eventId ? `<div class="btnrow"><button class="secondary" onclick="sendFeedback('${j.eventId}','up',this)">👍 도움이 됐어요</button><button class="secondary" onclick="sendFeedback('${j.eventId}','down',this)">👎 아쉬워요</button><button class="secondary" onclick="copyAnswer()">답변 복사</button><button class="secondary" onclick="regenAnswer()">다시 생성</button></div><div id="fbMsg" class="small"></div>` : '';
+function renderAsk(j, targetId) {
+  targetId = targetId || 'askResult';
+  const isPersonal = targetId === 'personalResult';
+  if (isPersonal) {
+    personalSessionId = j.sessionId;
+    lastPersonalAnswer = j.answer; lastPersonalQuestion = j.question;
+  } else {
+    sessionId = j.sessionId;
+    lastAnswer = j.answer; lastQuestion = j.question;
+  }
+  const copyBtn = isPersonal
+    ? `<button class="secondary" onclick="copyPersonalAnswer()">답변 복사</button>`
+    : `<button class="secondary" onclick="copyAnswer()">답변 복사</button><button class="secondary" onclick="regenAnswer()">다시 생성</button>`;
+  const fb = j.eventId ? `<div class="btnrow"><button class="secondary" onclick="sendFeedback('${j.eventId}','up',this)">👍 도움이 됐어요</button><button class="secondary" onclick="sendFeedback('${j.eventId}','down',this)">👎 아쉬워요</button>${copyBtn}</div><div id="fbMsg" class="small"></div>` : '';
   // 근거 없음이면 공백 큐 기록 안내를, 암묵지 근거면 출처 배지를 단다 (C5-b).
   const gapNote = j.grounded === false ? '<p class="small">답변 대기 목록에 기록됐습니다.</p>' : '';
   const srcList = j.sources.map(s => {
@@ -1034,7 +1325,7 @@ function renderAsk(j) {
     const tacit = s.kind === 'tacit' ? ` <span class="badge">사내 암묵지 · ${esc(s.author || '인사팀')} · ${esc(s.publishedAt || '')}</span>` : '';
     return `<li>${esc(s.title)} (${esc(s.section)})${poolBadge}${tacit} — ${esc(s.snippet)}${typeof s.score === 'number' && s.score <= 1 ? ` · <span class="sim">유사도 ${s.score.toFixed(2)}</span>` : ''}</li>`;
   }).join('');
-  $('askResult').innerHTML = `<div class="card"><b>답변</b> <span class="badge">엔진: ${j.engine} · 검색: ${j.searchEngine} · 세션: ${j.sessionVia}${j.cached ? ' · 캐시됨' : ''}</span><p>${esc(j.answer)}</p>${gapNote}<b>근거</b><ul>${srcList}</ul>${fb}${timingsPanel(j.timings)}</div>`;
+  $(targetId).innerHTML = `<div class="card"><b>답변</b> <span class="badge">엔진: ${j.engine} · 검색: ${j.searchEngine} · 세션: ${j.sessionVia}${j.cached ? ' · 캐시됨' : ''}</span><p>${esc(j.answer)}</p>${gapNote}<b>근거</b><ul>${srcList}</ul>${fb}${timingsPanel(j.timings)}</div>`;
 }
 async function sendFeedback(eventId, rating, btn) {
   const row = btn.closest('.btnrow');
@@ -1048,6 +1339,10 @@ async function sendFeedback(eventId, rating, btn) {
 }
 function copyAnswer() {
   const text = lastAnswer || '답변이 없습니다.';
+  if (navigator.clipboard) navigator.clipboard.writeText(text).then(() => alert('답변을 복사했습니다.'));
+}
+function copyPersonalAnswer() {
+  const text = lastPersonalAnswer || '답변이 없습니다.';
   if (navigator.clipboard) navigator.clipboard.writeText(text).then(() => alert('답변을 복사했습니다.'));
 }
 let asking = false; // 질문 중복 전송 방지 (동시 요청이면 KV 카운터 read-modify-write 경합으로 제한이 1회 늦게 걸림)
@@ -1073,12 +1368,93 @@ async function doAsk(force) {
 }
 function regenAnswer() { doAsk(true); }
 $('askBtn').onclick = () => doAsk(false);
+// ---- 개인 업무 검색 (2026-11-16) ----
+// 개인 풀만 검색한다. HR 창과 세션을 분리한다 (personalSessionId 별도 관리).
+// 미로그인이면 서버가 401을 주고 안내를 보여준다.
+let personalAsking = false;
+async function doPersonalAsk() {
+  if (personalAsking) return;
+  const q = $('personalQuestion').value;
+  if (!q || !q.trim()) return;
+  // 관점: 관리자는 검색할 사용자를 직접 골라야 한다 (기본값 없음).
+  let asUserId;
+  if (isAdminUser()) {
+    asUserId = $('personalPerspective') ? $('personalPerspective').value : '';
+    if (!asUserId) { $('personalResult').innerHTML = '<div class="card"><p class="err">관점: 누구의 개인 업무에서 검색할지 사용자를 먼저 선택하세요.</p></div>'; return; }
+  }
+  personalAsking = true;
+  $('personalAskBtn').disabled = true;
+  try {
+    const who = asUserId ? perspectiveName(asUserId) + '의 문서' : '내 문서';
+    $('personalResult').innerHTML = `<div class="card"><p class="loading">${esc(who)}에서 찾고 있습니다…</p></div>`;
+    const j = await api('/api/personal/ask', { method: 'POST', body: JSON.stringify({ question: q.trim(), sessionId: personalSessionId, asUserId }) });
+    if (j.ok) {
+      renderAsk(j, 'personalResult');
+      if (j.asUser) $('personalResult').insertAdjacentHTML('afterbegin', `<p class="small">검색 범위: <b>${esc(j.asUser)}</b>의 개인 업무</p>`);
+    }
+    else $('personalResult').innerHTML = `<div class="card">오류: ${esc(j.error === 'login required' ? '로그인해야 합니다. 로그인 후 다시 물어봐 주세요.' : j.error)}</div>`;
+  } finally {
+    personalAsking = false;
+    $('personalAskBtn').disabled = false;
+  }
+}
+$('personalAskBtn').onclick = () => doPersonalAsk();
+$('personalQuestion').addEventListener('keydown', (e) => { if (e.key === 'Enter') doPersonalAsk(); });
 $('loadCoaching').onclick = async () => {
   const j = await api('/api/seed');
   $('coachingText').value = j.coachingTranscript;
 };
+// 코칭 리플렉션 모드는 서버가 세션의 coaching_role로 정한다. 프론트는 응답의 mode로 렌더링만 바꾼다.
+function applyCoachingMode() {
+  const coachee = isCoachee();
+  $('coachingTitle').textContent = coachee ? '코칭 리플렉션 — 나의 자기 성찰' : '코칭 리플렉션';
+  $('coachingModeDesc').textContent = coachee
+    ? '코칭 대상용: 코칭 세션 전사본을 붙여넣으면 나의 자기 성찰 포인트와 액션 플랜(실천 행동 + 권장 기한)을 정리합니다.'
+    : '코치용: 세션 전사본에서 핵심 질문·반복 패턴·다음 세션 질문을 뽑습니다.';
+}
+// 코칭 전사본 선택 + 상대방 (0020). 탭을 열 때마다 다시 불러온다.
+let coachingDocs = [];
+async function loadCoachingPickers() {
+  const coachee = isCoachee();
+  $('coachingCounterpartLabel').textContent = coachee ? '코치' : '코칭 대상';
+  try {
+    const d = await api('/api/documents/coaching');
+    coachingDocs = d.ok ? (d.documents || []) : [];
+  } catch { coachingDocs = []; }
+  const keepDoc = $('coachingDocPick').value;
+  // 2026-11-16: #upload의 전사본 전부 (코칭 지정 먼저, 최신순). 코칭 지정 문서는 [코칭] 배지,
+  // 관리자에게는 소유자 이름도 보인다. <option> 안에는 HTML을 못 넣어 글자 배지로 표시한다.
+  $('coachingDocPick').innerHTML = '<option value="">직접 붙여넣기</option>' +
+    coachingDocs.map(x => `<option value="${esc(x.id)}">${x.is_coaching ? '[코칭] ' : ''}${esc(x.title)} · ${fmtDate(x.created_at)}${x.owner_name ? ' · ' + esc(x.owner_name) : ''}</option>`).join('');
+  if (coachingDocs.some(x => x.id === keepDoc)) $('coachingDocPick').value = keepDoc;
+  let users = [];
+  try {
+    const u = await api('/api/users/coaching');
+    users = u.ok ? (u.users || []) : [];
+  } catch { users = []; }
+  const me = currentUser ? currentUser.id : null;
+  const keepCp = $('coachingCounterpart').value;
+  // 반대 역할을 먼저, 같은 역할은 뒤에 (역할이 바뀐 경우도 고를 수 있게 모두 보여준다).
+  const want = coachee ? 'coach' : 'coachee';
+  const others = users.filter(x => x.id !== me).sort((a, b) => (a.coaching_role === want ? 0 : 1) - (b.coaching_role === want ? 0 : 1));
+  $('coachingCounterpart').innerHTML = '<option value="">지정 안 함</option>' +
+    others.map(x => `<option value="${esc(x.id)}">${esc(x.name || x.email)} (${esc(x.email)}) · ${x.coaching_role === 'coach' ? '코치' : '코칭 대상'}</option>`).join('');
+  if (others.some(x => x.id === keepCp)) $('coachingCounterpart').value = keepCp;
+}
+$('coachingDocPick').onchange = () => {
+  const d = coachingDocs.find(x => x.id === $('coachingDocPick').value);
+  if (d) $('coachingText').value = d.content || '';
+};
 $('reflectBtn').onclick = async () => {
-  const j = await api('/api/coaching/reflect', { method: 'POST', body: JSON.stringify({ transcript: $('coachingText').value, sessionId }) });
+  const counterpartId = $('coachingCounterpart').value || undefined;
+  const j = await api('/api/coaching/reflect', { method: 'POST', body: JSON.stringify({ transcript: $('coachingText').value, sessionId, counterpartId }) });
+  if (!j.ok) { $('coachingResult').innerHTML = `<p class="err">${esc(j.error || '리플렉션을 만들지 못했습니다.')}</p>`; return; }
+  if (j.mode === 'coachee') {
+    $('coachingResult').innerHTML = `<div class="card"><p class="small">코칭 대상(나)의 자기 성찰 + 액션 플랜 <span class="badge">엔진: ${esc(j.engine)}</span></p>` +
+      `<b>자기 성찰 포인트</b><ul>${j.reflection_points.map(s => `<li>${esc(s)}</li>`).join('')}</ul>` +
+      `<b>액션 플랜</b><ol>${j.action_plan.map(a => `<li>${esc(a.action)}${a.timeframe ? ` <span class="badge">${esc(a.timeframe)}</span>` : ''}</li>`).join('')}</ol></div>`;
+    return; // 코칭 대상에게는 홈 탭이 없다
+  }
   $('coachingResult').innerHTML = `<div class="card"><b>핵심 질문</b> <span class="badge">엔진: ${j.engine}</span><ul>${j.questions.map(s => `<li>${esc(s)}</li>`).join('')}</ul><b>패턴</b><ul>${j.patterns.map(s => `<li>${esc(s)}</li>`).join('')}</ul><b>다음 세션 질문</b><ul>${j.next_questions.map(s => `<li>${esc(s)}</li>`).join('')}</ul></div>`;
   loadHome();
 };

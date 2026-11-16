@@ -9,7 +9,8 @@ import type { ExpectedSource, ExpectedVerdict, JudgeDimension, JudgeResult, Verd
 // llama-4-scout = src/ask-pipeline.ts LLM_MODEL과 같은 값이지만 judge 모듈은 자기 상수를 둔다.
 export const JUDGE_MODEL = "@cf/meta/llama-4-scout-17b-16e-instruct";
 // rubric 문구(아래 RUBRIC_* · 프롬프트 규칙)를 바꾸면 +1 한다. 추이 차트 표식에 나온다.
-export const JUDGE_VERSION = "judge-v1";
+// judge-v2 (2026-11-16): 개선 코멘트(improvement) 필드 추가 — 재귀적 자기개선 근거.
+export const JUDGE_VERSION = "judge-v2";
 // 통과 기준 (grounded 항목): judge >= 0.7 그리고 verdict ∈ {grounded, partial}. config_json에 남긴다.
 export const PASS_THRESHOLD = 0.7;
 // O2 결과 (notes/S4-M4-findings.md): workers-types에 response_format(json_object|json_schema)이
@@ -94,8 +95,9 @@ export const JUDGE_JSON_SCHEMA = {
       required: ["diagnosis", "evidence", "fix"],
     },
     reasoning: { type: "string" },
+    improvement: { type: "string" },
   },
-  required: ["score", "level", "dimensions", "reasoning"],
+  required: ["score", "level", "dimensions", "reasoning", "improvement"],
 } as const;
 
 export function buildJudgeMessages(input: JudgeInput): Array<{ role: string; content: string }> {
@@ -116,7 +118,9 @@ export function buildJudgeMessages(input: JudgeInput): Array<{ role: string; con
     refFree
       ? "4. 기대 답이 없다. 실제 답이 채택 근거에 없는 내용을 지어냈으면 evidence 차원에서 감점한다 (근거 충실도 중심)."
       : "4. 기대 답에 없는 내용을 실제 답이 지어냈으면 evidence 차원에서 감점한다.",
-    '출력 형식: {"score": 0.8, "level": "0.8 핵심 근거 항목 1개 누락", "dimensions": {"diagnosis": {"level": 1.0, "reason": "..."}, "evidence": {"level": 0.8, "reason": "..."}, "fix": {"level": 0.9, "reason": "..."}}, "reasoning": "종합: ..."}',
+    "5. improvement: 이 결과를 다음에 더 좋게 하려면 시스템·코드·데이터·프롬프트 중 무엇을 어떻게 바꿔야 하는지, 구체적이고 실행 가능하게 1–3문장으로 적는다. 점수가 이미 높아서 바꿀 게 없으면 '없음 — 현 상태를 유지한다'고 적는다. 채점 사유(reasoning/dimensions)를 반복하지 말고, 바꿀 대상과 방법을 적는다.",
+    "   improvement 예: \"검색이 제12조를 못 찾았다 — '연차' 동의어(휴가)를 쿼리 확장에 추가하면 된다\" / \"답이 '근속 2년마다 1일 가산'을 빠뜨렸다 — 시스템 프롬프트에 '가산 조항을 빠뜨리지 말 것'을 명시하면 된다\" / \"청크가 조문을 반으로 잘랐다 — 조문 경계에서 청킹하도록 수정하면 된다\"",
+    '출력 형식: {"score": 0.8, "level": "0.8 핵심 근거 항목 1개 누락", "dimensions": {"diagnosis": {"level": 1.0, "reason": "..."}, "evidence": {"level": 0.8, "reason": "..."}, "fix": {"level": 0.9, "reason": "..."}}, "reasoning": "종합: ...", "improvement": "무엇을 — 어떻게 바꾼다"}',
   ].join("\n");
   const user = [
     `질문: ${input.question}`,
@@ -182,6 +186,8 @@ export function parseJudgeOutput(raw: unknown): JudgeParse {
       level: levelLabel(score.value),
       dimensions: dims,
       reasoning: typeof obj.reasoning === "string" ? obj.reasoning : "",
+      // 개선 코멘트가 없거나 문자열이 아니어도 채점은 깨지지 않는다 ("" 기본값).
+      improvement: typeof obj.improvement === "string" ? obj.improvement.trim() : "",
       snapped,
       judgeVersion: JUDGE_VERSION,
     },
@@ -220,7 +226,7 @@ export async function judgeAnswer(env: { AI: unknown }, input: JudgeInput): Prom
   for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
     let out: unknown;
     try {
-      const inputs: Record<string, unknown> = { messages, temperature: 0, max_tokens: 700 };
+      const inputs: Record<string, unknown> = { messages, temperature: 0, max_tokens: 900 };
       if (mode === "json_schema") inputs.response_format = { type: "json_schema", json_schema: JUDGE_JSON_SCHEMA };
       out = await ai.run(JUDGE_MODEL, inputs, aiGatewayOptions({ tag: "eval-judge" }));
     } catch (e) {

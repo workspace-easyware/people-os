@@ -148,12 +148,33 @@ export function vectorUserFilter(viewer: RagViewer): Record<string, unknown> {
   return { user_id: { $in: [SHARED_USER_ID, viewer.id] } };
 }
 /**
+ * 풀 전용 Vectorize 조회 필터 (2026-11-16, HR/개인 창 분리).
+ * shared: 공용 벡터만. personal: 본인 개인 벡터만 (viewer 없으면
+ * 아무것도 안 맞는 필터 — 익명이 개인 벡터를 볼 수 없게 fail-closed).
+ */
+export function vectorPoolFilter(viewer: RagViewer, pool: RagPool): Record<string, unknown> {
+  if (pool === "shared") return { user_id: SHARED_USER_ID };
+  if (!viewer) return { user_id: "__none__" };
+  return { user_id: viewer.id };
+}
+/**
  * D1 문서 소유자 범위 조건. alias는 documents/recordings/decks 테이블 별칭.
  * 로그인 사용자: 공용(owner_id IS NULL) 또는 본인. 익명/평가: 공용만.
  */
 export function docOwnerClause(viewer: RagViewer, alias: string): { clause: string; params: string[] } {
   if (!viewer) return { clause: `(${alias}.owner_id IS NULL)`, params: [] };
   return { clause: `(${alias}.owner_id IS NULL OR ${alias}.owner_id = ?)`, params: [viewer.id] };
+}
+/**
+ * 풀 전용 D1 소유자 범위 조건 (2026-11-16, HR/개인 창 분리).
+ * shared: 공용 문서만 (owner_id IS NULL — policies chunk는 documents 행이
+ * 없어 d.owner_id가 NULL이라 공용으로 취급된다).
+ * personal: 본인 소유 문서만 (viewer 없으면 1=0 — 아무것도 안 맞음).
+ */
+export function docOwnerClauseForPool(viewer: RagViewer, alias: string, pool: RagPool): { clause: string; params: string[] } {
+  if (pool === "shared") return { clause: `(${alias}.owner_id IS NULL)`, params: [] };
+  if (!viewer) return { clause: "(1 = 0)", params: [] };
+  return { clause: `(${alias}.owner_id = ?)`, params: [viewer.id] };
 }
 
 const TOKEN_SUFFIXES = ["입니다", "이에요", "에서", "으로", "부터", "까지", "하면", "해요", "돼요", "나요", "에는", "에게", "하고", "이고", "는", "은", "이", "가", "을", "를", "에", "와", "과", "의", "도", "만", "로", "해", "돼", "되"];

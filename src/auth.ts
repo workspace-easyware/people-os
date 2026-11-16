@@ -4,12 +4,19 @@
 // 세션 쿠키: HttpOnly · Secure · SameSite=Strict, 7일 (일잇과 동일).
 
 export type UserRole = "hr_admin" | "user";
+/** 코칭 역할 (migration 0018). role(관리자 권한)과 직교한다. */
+export type CoachingRole = "coach" | "coachee";
+
+export function normalizeCoachingRole(v: unknown): CoachingRole {
+  return v === "coach" ? "coach" : "coachee";
+}
 
 export type SessionUser = {
   id: string;
   email: string;
   name: string;
   role: UserRole;
+  coaching_role: CoachingRole;
 };
 
 /** auth가 쓰는 바인딩. index.ts의 Env는 이를 포함한다(구조적 타이핑). */
@@ -107,13 +114,16 @@ export async function getSessionUser(
   const token = sessionTokenFromCookie(cookieHeader);
   if (!token) return null;
   const row = await env.DB.prepare(
-    "SELECT u.id, u.email, u.name, u.role FROM auth_sessions s JOIN users u ON u.id = s.user_id " +
+    "SELECT u.id, u.email, u.name, u.role, u.coaching_role FROM auth_sessions s JOIN users u ON u.id = s.user_id " +
       "WHERE s.token_hash = ? AND s.expires_at > ? AND u.status = 'active'",
   )
     .bind(await sha256hex(token), Date.now())
-    .first<{ id: string; email: string; name: string; role: string }>();
+    .first<{ id: string; email: string; name: string; role: string; coaching_role: string | null }>();
   if (!row || (row.role !== "hr_admin" && row.role !== "user")) return null;
-  return { id: row.id, email: row.email, name: row.name, role: row.role as UserRole };
+  return {
+    id: row.id, email: row.email, name: row.name, role: row.role as UserRole,
+    coaching_role: normalizeCoachingRole(row.coaching_role),
+  };
 }
 
 /** 세션을 만들고 쿠키 문자열을 돌려준다. */

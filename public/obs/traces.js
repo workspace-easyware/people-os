@@ -19,6 +19,11 @@
   };
   function outcomeBadge(o) { var s = OUTCOME[o] || [o, '']; return O.badge(s[0], s[1], o); }
 
+  // 출처(origin)를 한글 라벨로: user=HR 규정, personal=개인 RAG, metadata=메타데이터 생성, eval=평가.
+  function originLabel(o) {
+    return o === 'user' ? 'HR 규정' : o === 'personal' ? '개인 RAG' : o === 'metadata' ? '메타데이터 생성' : o === 'eval' ? '평가' : (o || '—');
+  }
+
   function nav(opts, route) {
     if (opts && typeof opts.navigate === 'function') opts.navigate(route);
     else global.location.hash = '#obs/' + route;
@@ -26,12 +31,15 @@
 
   // ---- 목록 ------------------------------------------------------------------
   function renderList(el, opts) {
-    var state = { origin: 'user', status: '', feedback: '', risk: false, q: '', cursor: null, rows: [], next: null, loading: false };
+    var state = { origin: 'user', status: '', feedback: '', risk: false, q: '', user: '', cursor: null, rows: [], next: null, loading: false };
+    // 0021: 사용자 필터는 hr_admin만 (서버도 관리자가 아니면 무시한다).
+    var isAdmin = (typeof currentUser !== 'undefined') && currentUser && currentUser.role === 'hr_admin';
     el.innerHTML =
       '<div class="obs-root">' +
       '<div class="obs-kpis" data-kpis></div>' +
       '<form class="obs-toolbar" data-filters>' +
-      '<label>출처<select name="origin"><option value="user">user</option><option value="eval">eval</option><option value="all">전체</option></select></label>' +
+      '<label>출처<select name="origin"><option value="user">HR 규정</option><option value="personal">개인 RAG</option><option value="metadata">메타데이터 생성</option><option value="eval">평가</option><option value="all">전체</option></select></label>' +
+      (isAdmin ? '<label>사용자<select name="user"><option value="">전체 사용자</option><option value="anon">익명·평가 (기록 없음)</option></select></label>' : '') +
       '<label>상태<select name="status"><option value="">전체</option><option value="grounded">근거 있음</option><option value="no_evidence">근거 없음</option><option value="off_topic">업무 외</option><option value="error">오류</option></select></label>' +
       '<label>피드백<select name="feedback"><option value="">전체</option><option value="down">👎만</option><option value="up">👍만</option><option value="none">없음</option></select></label>' +
       '<label class="obs-check"><input type="checkbox" name="risk"> 판정 위험(환각 의심)</label>' +
@@ -53,6 +61,7 @@
       if (state.feedback) p.set('feedback', state.feedback);
       if (state.risk) p.set('risk', '1');
       if (state.q) p.set('q', state.q);
+      if (state.user) p.set('user', state.user);
       if (state.cursor) p.set('cursor', state.cursor);
       return p.toString();
     }
@@ -64,6 +73,8 @@
       var fb = t.feedback === 'up' ? '👍' : t.feedback === 'down' ? '👎' : '—';
       return '<tr class="obs-row-link" tabindex="0" data-id="' + escAttr(t.id) + '">' +
         '<td class="obs-num">' + esc(O.kst(t.createdAt)) + '</td>' +
+        // 0021: 질문한 사용자 — 툴팁이 아니라 칸에 굵게 바로 보인다 (기록 없음: 평가/익명).
+        '<td class="obs-user"><b>' + esc(t.userName || '익명') + '</b></td>' +
         '<td class="obs-q" title="' + escAttr(t.question) + '">' + esc(t.question) + '</td>' +
         '<td>' + O.statusBadge(t.status) + gap + '</td>' +
         '<td class="obs-num">' + esc(O.fmtMs(t.latencyMs)) + '</td>' +
@@ -71,14 +82,14 @@
         '<td class="obs-num" title="채택 근거 수 · 1위 점수(' + escAttr(src.topScoreKind || '') + ')">' + esc(srcTxt) + '</td>' +
         '<td class="obs-engv" title="엔진 / 검색 · 판정"><div class="obs-mono obs-engv-eng">' + esc(t.engine || '—') + ' / ' + esc(t.searchEngine || '—') + '</div><div>' + O.verdictBadge(t.verdict) + '</div></td>' +
         '<td>' + fb + '</td>' +
-        '<td class="obs-col-origin">' + O.badge(t.origin, t.origin === 'eval' ? 'info' : '') + '</td>' +
+        '<td class="obs-col-origin">' + O.badge(originLabel(t.origin), t.origin === 'eval' ? 'info' : t.origin === 'metadata' ? 'warn' : t.origin === 'personal' ? 'ok' : '') + '</td>' +
         '</tr>';
     }
 
     function draw() {
       if (!state.rows.length) { body.innerHTML = '<div class="obs-empty">조건에 맞는 트레이스가 없습니다.</div>'; pager.innerHTML = ''; return; }
       body.innerHTML = '<div class="obs-table-wrap"><table class="obs-table obs-traces-table"><thead><tr>' +
-        '<th>시각</th><th>질문</th><th>상태</th><th>지연</th><th>토큰</th><th>근거</th><th>엔진 · 판정</th><th>피드백</th><th class="obs-col-origin">출처</th>' +
+        '<th>시각</th><th>사용자</th><th>질문</th><th>상태</th><th>지연</th><th>토큰</th><th>근거</th><th>엔진 · 판정</th><th>피드백</th><th class="obs-col-origin">출처</th>' +
         '</tr></thead><tbody>' + state.rows.map(rowHtml).join('') + '</tbody></table></div>';
       pager.innerHTML = state.next ? '<button type="button" class="secondary" data-more>더 보기</button>' : '';
     }
@@ -116,7 +127,18 @@
       ev.preventDefault();
       state.origin = form.origin.value; state.status = form.status.value; state.feedback = form.feedback.value;
       state.risk = form.risk.checked; state.q = form.q.value.trim();
+      state.user = form.user ? form.user.value : '';
       load(true);
+    }
+    // 사용자 필터 옵션: GET /api/users/coaching (로그인 필요). 실패하면 기본 옵션만 남긴다.
+    if (isAdmin && form.user) {
+      global.fetch('/api/users/coaching').then(function (r) { return r.json(); }).then(function (u) {
+        (u && u.ok ? u.users || [] : []).forEach(function (x) {
+          var o = document.createElement('option');
+          o.value = x.id; o.textContent = (x.name || x.email) + ' (' + x.email + ')';
+          form.user.appendChild(o);
+        });
+      }).catch(function () {});
     }
     function onClick(ev) {
       if (ev.target.closest('[data-more]')) { state.cursor = state.next; load(false); return; }
@@ -227,7 +249,7 @@
       var meta = [
         ['상태', O.statusBadge(t.status) + (t.gapId ? ' ' + O.badge('공백 큐 등록', 'warn', t.gapId) : '')],
         ['시각 (KST)', esc(O.kst(t.createdAt, true))],
-        ['출처', O.badge(t.origin, t.origin === 'eval' ? 'info' : '') + (t.evalRunId ? ' <span class="obs-mono">' + esc(t.evalRunId) + '</span>' : '')],
+        ['출처', O.badge(originLabel(t.origin), t.origin === 'eval' ? 'info' : t.origin === 'metadata' ? 'warn' : t.origin === 'personal' ? 'ok' : '') + (t.evalRunId ? ' <span class="obs-mono">' + esc(t.evalRunId) + '</span>' : '')],
         ['세션', '<span class="obs-mono">' + esc(t.sessionId || '—') + '</span>'],
         ['엔진 / 검색', '<span class="obs-mono">' + esc(t.engine || '—') + ' / ' + esc(t.searchEngine || '—') + '</span>'],
         ['모델', '<span class="obs-mono">' + esc(t.model || '—') + '</span>'],

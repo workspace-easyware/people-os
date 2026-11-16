@@ -104,7 +104,7 @@ function intOrNull(n: unknown): number | null {
 }
 
 /** 단계 이름 순서 — 같은 시작 오프셋일 때 파이프라인 순서로 정렬한다. */
-const SPAN_ORDER: Record<string, number> = { cache: 0, session: 1, embed: 2, vectorize: 3, gate: 4, d1_merge: 5, llm: 6, session_save: 7 };
+const SPAN_ORDER: Record<string, number> = { cache: 0, session: 1, router: 1, topic_guard: 1, embed: 2, vectorize: 3, gate: 4, d1_merge: 5, rerank: 5, llm: 6, session_save: 7 };
 
 export function sortSpans(spans: TraceSpan[]): TraceSpan[] {
   return [...spans].sort((a, b) => a.startMs - b.startMs || (SPAN_ORDER[a.name] ?? 99) - (SPAN_ORDER[b.name] ?? 99));
@@ -115,7 +115,8 @@ export function baseInsertStatement(db: D1Database, trace: AskTrace): D1Prepared
   const grounded = trace.status === "grounded";
   return db
     .prepare(
-      "INSERT INTO ask_events (id, session_id, question, answer, source_ids, grounded, engine, search_engine, timings_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+      // 0021: user_id = 질문한 사용자 (익명·평가는 NULL).
+      "INSERT INTO ask_events (id, session_id, question, answer, source_ids, grounded, engine, search_engine, timings_json, user_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
     )
     .bind(
       trace.eventId,
@@ -127,6 +128,7 @@ export function baseInsertStatement(db: D1Database, trace: AskTrace): D1Prepared
       trace.engine,
       trace.searchEngine,
       JSON.stringify(trace.timings),
+      trace.userId ?? null,
     );
 }
 
@@ -142,7 +144,7 @@ export function traceStatements(db: D1Database, trace: AskTrace, r2Key: string |
          WHERE id = ?`,
       )
       .bind(
-        trace.origin === "eval" ? "eval" : "user",
+        trace.origin,
         trace.status,
         trace.gapId ?? null,
         trace.evalRunId ?? null,
@@ -279,6 +281,69 @@ export async function recordTrace(env: SinkEnv, trace: AskTrace, ctx?: Execution
     log(`[trace] record failed: ${errMsg(e)}`);
   }
   return out;
+}
+
+/**
+ * 메타데이터 생성 트레이스 (2026-11-16) — AI가 들어가는 모든 곳을 관측 대상으로.
+ * 트리 빌더의 LLM 호출(전사본 주제 구간 + 구조화 요약) 직후, 성공/실패 모두 부른다.
+ * ask_events에 origin='metadata' 행 1개를 남기고, R2 원문은 간단한 JSON
+ * (문서 id, operation, 세그먼트 수, digest 유무, 에러)이다. 가시성 규칙은
+ * 질문 트레이스와 같다 (목록·상세 마스킹 공개, R2 원문은 관리자만).
+ * 절대 throw하지 않는다 (트리 빌드는 fail-open).
+ */
+export type MetadataTraceInput = {
+  docId: string;
+  operation: string; // 예: "build-transcript-tree"
+  model: string;
+  promptTokens?: number;
+  completionTokens?: number;
+  latencyMs: number;
+  ok: boolean;
+  segments?: number;
+  digest?: boolean;
+  error?: string;
+};
+
+export async function recordMetadataTrace(env: SinkEnv, input: MetadataTraceInput): Promise<void> {
+  try {
+    const eventId = newId("ev");
+    const summary = input.ok
+      ? `segments: ${input.segments ?? 0}, digest: ${input.digest ? "있음" : "없음"}`
+      : `error: ${(input.error || "unknown").slice(0, 200)}`;
+    const trace: AskTrace = {
+      eventId,
+      sessionId: `metadata:${input.docId}`,
+      origin: "metadata",
+      question: `[metadata] ${input.operation} doc:${input.docId}`,
+      searchQuestion: `[metadata] ${input.operation} doc:${input.docId}`,
+      answer: summary,
+      status: input.ok ? "grounded" : "error",
+      engine: "tree",
+      searchEngine: "tree",
+      promptVersion: "tree-v1",
+      model: input.model,
+      knowledgeEpoch: 0,
+      timings: { total: Math.max(0, Math.round(input.latencyMs)) },
+      spans: [{ name: "llm", product: "workers-ai", startMs: 0, durationMs: Math.max(0, Math.round(input.latencyMs)), ok: input.ok }],
+      retrieval: [],
+      sources: [],
+      usage: {
+        ...(typeof input.promptTokens === "number" ? { promptTokens: input.promptTokens } : {}),
+        ...(typeof input.completionTokens === "number" ? { completionTokens: input.completionTokens } : {}),
+      },
+      aigLogIds: [],
+      rawResponse: {
+        operation: input.operation,
+        docId: input.docId,
+        segments: input.segments ?? null,
+        digest: input.digest ?? null,
+        error: input.error ?? null,
+      },
+    };
+    await recordTrace(env, trace);
+  } catch (e) {
+    console.log(`[trace] recordMetadataTrace failed: ${errMsg(e)}`);
+  }
 }
 
 /**

@@ -320,6 +320,9 @@
       '</div>' +
       '<div class="obs-detail-h">judge 사유' + (it.judgeSnapped ? ' <span class="small obs-muted">(* 점수를 아래 단계로 내려 맞춤)</span>' : '') + '</div>' +
       '<p>' + esc(it.judgeReason || '—') + '</p>' + dimsHtml(it.judgeDims) +
+      '<div class="obs-detail-h">개선 코멘트 (재귀적 자기개선 근거)</div>' +
+      (it.judgeComment ? '<p class="obs-judge-comment">' + esc(it.judgeComment) + '</p>'
+        : '<p class="small obs-muted">이 실행에는 개선 코멘트가 없습니다 (judge-v2 이전 실행).</p>') +
       '<p class="small obs-muted">verdict 엔진: ' + esc(it.verdictEngine || '—') + ' · 검색된 근거 ' + esc((it.retrievedIds || []).length) + '건</p>' +
       '</td></tr>';
     return main + detail;
