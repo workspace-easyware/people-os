@@ -1,0 +1,135 @@
+{
+  "llama-4-scout-17b-16e-instruct": {
+    "model": "llama-4-scout-17b-16e-instruct",
+    "latencyMs": 15532,
+    "error": null,
+    "raw": "{\"choices\": [{\"finish_reason\": \"stop\", \"index\": 0, \"logprobs\": null, \"message\": {\"annotations\": null, \"audio\": null, \"content\": \"{\\\"questions\\\":[\\\"지난주 팀장 역할을 맡으면서 가장 어려웠던 순간은 언제였나요?\\\",\\\"그 눈치를 볼 때, 당신의 마음속에서는 무슨 말이 들렸나요?\\\",\\\"그 연결을 어떻게 풀고 싶으세요?\\\"],\\\"patterns\\\":[\\\"팀장의 책임감\\\",\\\"연차 사용에 대한 부담감\\\",\\\"솔선수범\\\"],\\\"next_questions\\\":[\\\"팀원들에게 연차 사용을 장려하기 위해 어떤 구체적인 계획을 세우고 계신가요?\\\",\\\"연차를 사용할 때 죄책감을 느끼는 이유는 무엇일까요?\\\",\\\"팀장으로서의 책임감과 개인의 needs를 어떻게 균형잡을 수 있을까요?\\\"]}\", \"function_call\": null, \"reasoning\": null, \"refusal\": null, \"role\": \"assistant\"}, \"routed_experts\": null, \"stop_reason\": null, \"token_ids\": null}], \"created\": 1794758260, \"ec_transfer_params\": null, \"id\": \"chatcmpl-99d95bdd-fa1c-42b0-bd35-aa0b45df4dbc\", \"kv_transfer_params\": null, \"metrics\": null, \"model\": \"@cf/meta/llama-4-scout-17b-16e-instruct\", \"object\": \"chat.completion\", \"prompt_logprobs\": null, \"prompt_text\": null, \"prompt_token_ids\": null, \"response\": {\"next_questions\": [\"팀원들에게 연차 사용을 장려하기 위해 어떤 구체적인 계획을 세우고 계신가요?\", \"연차를 사용할 때 죄책감을 느끼는 이유는 무엇일까요?\", \"팀장으로서의 책임감과 개인의 needs를 어떻게 균형잡을 수 있을까요?\"], \"patterns\": [\"팀장의 책임감\", \"연차 사용에 대한 부담감\", \"솔선수범\"], \"questions\": [\"지난주 팀장 역할을 맡으면서 가장 어려웠던 순간은 언제였나요?\", \"그 눈치를 볼 때, 당신의 마음속에서는 무슨 말이 들렸나요?\", \"그 연결을 어떻게 풀고 싶으세요?\"]}, \"service_tier\": null, \"tool_calls\": [], \"usage\": {\"prompt_tokens\": 286, \"completion_tokens\": 129, \"total_tokens\": 415, \"prompt_tokens_details\": {\"cached_tokens\": 0}, \"neurons\": 16.988182067871094}}",
+    "parsed": {
+      "choices": [
+        {
+          "finish_reason": "stop",
+          "index": 0,
+          "logprobs": null,
+          "message": {
+            "annotations": null,
+            "audio": null,
+            "content": "{\"questions\":[\"지난주 팀장 역할을 맡으면서 가장 어려웠던 순간은 언제였나요?\",\"그 눈치를 볼 때, 당신의 마음속에서는 무슨 말이 들렸나요?\",\"그 연결을 어떻게 풀고 싶으세요?\"],\"patterns\":[\"팀장의 책임감\",\"연차 사용에 대한 부담감\",\"솔선수범\"],\"next_questions\":[\"팀원들에게 연차 사용을 장려하기 위해 어떤 구체적인 계획을 세우고 계신가요?\",\"연차를 사용할 때 죄책감을 느끼는 이유는 무엇일까요?\",\"팀장으로서의 책임감과 개인의 needs를 어떻게 균형잡을 수 있을까요?\"]}",
+            "function_call": null,
+            "reasoning": null,
+            "refusal": null,
+            "role": "assistant"
+          },
+          "routed_experts": null,
+          "stop_reason": null,
+          "token_ids": null
+        }
+      ],
+      "created": 1794758260,
+      "ec_transfer_params": null,
+      "id": "chatcmpl-99d95bdd-fa1c-42b0-bd35-aa0b45df4dbc",
+      "kv_transfer_params": null,
+      "metrics": null,
+      "model": "@cf/meta/llama-4-scout-17b-16e-instruct",
+      "object": "chat.completion",
+      "prompt_logprobs": null,
+      "prompt_text": null,
+      "prompt_token_ids": null,
+      "response": {
+        "next_questions": [
+          "팀원들에게 연차 사용을 장려하기 위해 어떤 구체적인 계획을 세우고 계신가요?",
+          "연차를 사용할 때 죄책감을 느끼는 이유는 무엇일까요?",
+          "팀장으로서의 책임감과 개인의 needs를 어떻게 균형잡을 수 있을까요?"
+        ],
+        "patterns": [
+          "팀장의 책임감",
+          "연차 사용에 대한 부담감",
+          "솔선수범"
+        ],
+        "questions": [
+          "지난주 팀장 역할을 맡으면서 가장 어려웠던 순간은 언제였나요?",
+          "그 눈치를 볼 때, 당신의 마음속에서는 무슨 말이 들렸나요?",
+          "그 연결을 어떻게 풀고 싶으세요?"
+        ]
+      },
+      "service_tier": null,
+      "tool_calls": [],
+      "usage": {
+        "prompt_tokens": 286,
+        "completion_tokens": 129,
+        "total_tokens": 415,
+        "prompt_tokens_details": {
+          "cached_tokens": 0
+        },
+        "neurons": 16.988182067871094
+      }
+    },
+    "valid": false
+  },
+  "qwen3-30b-a3b-fp8": {
+    "model": "qwen3-30b-a3b-fp8",
+    "latencyMs": 4646,
+    "error": null,
+    "raw": "{\"id\": \"chatcmpl-c51175c8-86dc-4ae0-b26b-9b378fce67dd\", \"object\": \"chat.completion\", \"created\": 1794758276, \"model\": \"@cf/qwen/qwen3-30b-a3b-fp8\", \"choices\": [{\"index\": 0, \"message\": {\"role\": \"assistant\", \"content\": \"\\n\\n{\\n  \\\"questions\\\": [\\n    \\\"팀원의 연차 사용과 자신의 연차 사용 사이의 연결을 어떻게 풀고자 하는가?\\\",\\n    \\\"팀장으로서의 역할이 개인의 휴식 권리에 어떻게 영향을 미치는지에 대한 인식은 무엇인가?\\\",\\n    \\\"행동으로 연차는 권리임을 보여주기 위해 구체적으로 어떤 계획을 세웠는가?\\\"\\n  ],\\n  \\\"patterns\\\": [\\n    \\\"팀장으로서의 책임감이 팀원의 행동에 대한 영향을 인식하는 경향\\\",\\n    \\\"자신의 연차 사용과 팀원의 연차 사용 간의 상호연관성을 느끼는 패턴\\\",\\n    \\\"행동을 통해 가치를 전달하려는 의도가 언어적 표현보다 우선시되는 경향\\\"\\n  ],\\n  \\\"next_questions\\\": [\\n    \\\"다음 주 금요일 연차 사용을 계획했지만, 예상되는 장애물은 무엇인가?\\\",\\n    \\\"팀원이 여전히 연차 사용에 부담을 느낄 경우 대응 전략은 무엇인가?\\\",\\n    \\\"팀 내 연차 사용 문화를 바꾸기 위해 다른 구성원에게 전달하고 싶은 메시지는 무엇인가?\\\"\\n  ]\\n}\", \"refusal\": null, \"annotations\": null, \"audio\": null, \"function_call\": null, \"reasoning\": \"\\nOkay, let's see. I need to analyze the coaching session transcript and come up with three key questions, three patterns, and three next questions in JSON format. Let me start by reading through the conversation carefully.\\n\\nThe coach asked the coachee about the hardest moment when they took on the team leader role. The coachee mentioned a team member feeling burdened about taking annual leave, and the coachee felt the pressure of being the approver. Then the coachee talked about their own burden of needing to set the tone, even though they couldn't use their own leave, which expired last year. The coach asked how they want to untangl",
+    "parsed": {
+      "id": "chatcmpl-c51175c8-86dc-4ae0-b26b-9b378fce67dd",
+      "object": "chat.completion",
+      "created": 1794758276,
+      "model": "@cf/qwen/qwen3-30b-a3b-fp8",
+      "choices": [
+        {
+          "index": 0,
+          "message": {
+            "role": "assistant",
+            "content": "\n\n{\n  \"questions\": [\n    \"팀원의 연차 사용과 자신의 연차 사용 사이의 연결을 어떻게 풀고자 하는가?\",\n    \"팀장으로서의 역할이 개인의 휴식 권리에 어떻게 영향을 미치는지에 대한 인식은 무엇인가?\",\n    \"행동으로 연차는 권리임을 보여주기 위해 구체적으로 어떤 계획을 세웠는가?\"\n  ],\n  \"patterns\": [\n    \"팀장으로서의 책임감이 팀원의 행동에 대한 영향을 인식하는 경향\",\n    \"자신의 연차 사용과 팀원의 연차 사용 간의 상호연관성을 느끼는 패턴\",\n    \"행동을 통해 가치를 전달하려는 의도가 언어적 표현보다 우선시되는 경향\"\n  ],\n  \"next_questions\": [\n    \"다음 주 금요일 연차 사용을 계획했지만, 예상되는 장애물은 무엇인가?\",\n    \"팀원이 여전히 연차 사용에 부담을 느낄 경우 대응 전략은 무엇인가?\",\n    \"팀 내 연차 사용 문화를 바꾸기 위해 다른 구성원에게 전달하고 싶은 메시지는 무엇인가?\"\n  ]\n}",
+            "refusal": null,
+            "annotations": null,
+            "audio": null,
+            "function_call": null,
+            "reasoning": "\nOkay, let's see. I need to analyze the coaching session transcript and come up with three key questions, three patterns, and three next questions in JSON format. Let me start by reading through the conversation carefully.\n\nThe coach asked the coachee about the hardest moment when they took on the team leader role. The coachee mentioned a team member feeling burdened about taking annual leave, and the coachee felt the pressure of being the approver. Then the coachee talked about their own burden of needing to set the tone, even though they couldn't use their own leave, which expired last year. The coach asked how they want to untangle the connection between the team member's leave and their own. The coachee plans to take a day off and share their leave plan in the meeting.\n\nNow, for the key questions. The main themes here are the pressure of leadership, the connection between the coachee's and team member's leave, and the coachee's own leave usage. So the key questions might be about the pressure of being a leader, the connection between their leave and the team member's, and how to model the behavior they want to see.\n\nPatterns: The coachee feels responsible for the team's atmosphere, there's a pattern of linking their own leave to the team's, and they're using action (taking leave) to address the issue.\n\nNext questions: Maybe ask about potential obstacles in taking leave, how to communicate the importance of leave to the team, and what to do if the team member still feels pressured after the coachee's actions.\n\nI need to make sure the JSON is correctly formatted with the three sections. Let me check again to ensure I didn't miss anything. Also, the questions should be in Korean, and the patterns should reflect recurring themes. Alright, I think that's covered.\n",
+            "reasoning_content": "\nOkay, let's see. I need to analyze the coaching session transcript and come up with three key questions, three patterns, and three next questions in JSON format. Let me start by reading through the conversation carefully.\n\nThe coach asked the coachee about the hardest moment when they took on the team leader role. The coachee mentioned a team member feeling burdened about taking annual leave, and the coachee felt the pressure of being the approver. Then the coachee talked about their own burden of needing to set the tone, even though they couldn't use their own leave, which expired last year. The coach asked how they want to untangle the connection between the team member's leave and their own. The coachee plans to take a day off and share their leave plan in the meeting.\n\nNow, for the key questions. The main themes here are the pressure of leadership, the connection between the coachee's and team member's leave, and the coachee's own leave usage. So the key questions might be about the pressure of being a leader, the connection between their leave and the team member's, and how to model the behavior they want to see.\n\nPatterns: The coachee feels responsible for the team's atmosphere, there's a pattern of linking their own leave to the team's, and they're using action (taking leave) to address the issue.\n\nNext questions: Maybe ask about potential obstacles in taking leave, how to communicate the importance of leave to the team, and what to do if the team member still feels pressured after the coachee's actions.\n\nI need to make sure the JSON is correctly formatted with the three sections. Let me check again to ensure I didn't miss anything. Also, the questions should be in Korean, and the patterns should reflect recurring themes. Alright, I think that's covered.\n"
+          },
+          "logprobs": null,
+          "finish_reason": "stop",
+          "stop_reason": null,
+          "token_ids": null,
+          "routed_experts": null
+        }
+      ],
+      "service_tier": null,
+      "usage": {
+        "prompt_tokens": 365,
+        "completion_tokens": 667,
+        "total_tokens": 1032,
+        "prompt_tokens_details": {
+          "cached_tokens": 0
+        },
+        "neurons": 22.014644622802734
+      },
+      "prompt_logprobs": null,
+      "prompt_token_ids": null,
+      "prompt_text": null,
+      "kv_transfer_params": null,
+      "ec_transfer_params": null,
+      "metrics": null,
+      "response": {
+        "questions": [
+          "팀원의 연차 사용과 자신의 연차 사용 사이의 연결을 어떻게 풀고자 하는가?",
+          "팀장으로서의 역할이 개인의 휴식 권리에 어떻게 영향을 미치는지에 대한 인식은 무엇인가?",
+          "행동으로 연차는 권리임을 보여주기 위해 구체적으로 어떤 계획을 세웠는가?"
+        ],
+        "patterns": [
+          "팀장으로서의 책임감이 팀원의 행동에 대한 영향을 인식하는 경향",
+          "자신의 연차 사용과 팀원의 연차 사용 간의 상호연관성을 느끼는 패턴",
+          "행동을 통해 가치를 전달하려는 의도가 언어적 표현보다 우선시되는 경향"
+        ],
+        "next_questions": [
+          "다음 주 금요일 연차 사용을 계획했지만, 예상되는 장애물은 무엇인가?",
+          "팀원이 여전히 연차 사용에 부담을 느낄 경우 대응 전략은 무엇인가?",
+          "팀 내 연차 사용 문화를 바꾸기 위해 다른 구성원에게 전달하고 싶은 메시지는 무엇인가?"
+        ]
+      },
+      "tool_calls": []
+    },
+    "valid": false
+  }
+}

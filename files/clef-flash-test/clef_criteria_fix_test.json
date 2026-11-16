@@ -1,0 +1,54 @@
+{
+  "OLD": {
+    "verdict": "grounded",
+    "confidence": 0.198,
+    "latencyMs": 1076,
+    "error": null,
+    "raw": {
+      "model": "clef",
+      "answers": {
+        "verdict": {
+          "type": "choice",
+          "choice": "grounded",
+          "probabilities": {
+            "grounded": 0.5293,
+            "partial": 0.3229,
+            "ungrounded": 0.1136,
+            "off_topic": 0.0342
+          },
+          "confidence": 0.198
+        }
+      },
+      "usage": {
+        "input_tokens": 602,
+        "output_tokens": 0
+      }
+    }
+  },
+  "NEW": {
+    "verdict": "grounded",
+    "confidence": 0.255,
+    "latencyMs": 682,
+    "error": null,
+    "raw": {
+      "model": "clef",
+      "answers": {
+        "verdict": {
+          "type": "choice",
+          "choice": "grounded",
+          "probabilities": {
+            "grounded": 0.6012,
+            "partial": 0.2612,
+            "ungrounded": 0.101,
+            "off_topic": 0.0366
+          },
+          "confidence": 0.255
+        }
+      },
+      "usage": {
+        "input_tokens": 650,
+        "output_tokens": 0
+      }
+    }
+  }
+}

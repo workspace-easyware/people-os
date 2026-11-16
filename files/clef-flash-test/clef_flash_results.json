@@ -1,0 +1,390 @@
+{
+  "verdict": [
+    {
+      "model": "clef",
+      "itemId": "gi_s03_leave_3days",
+      "verdict": "grounded",
+      "how": "via choice conf=0.361",
+      "latencyMs": 713,
+      "clef_verdict": "grounded",
+      "match": true,
+      "raw_keys": [
+        "model",
+        "answers",
+        "usage"
+      ]
+    },
+    {
+      "model": "clef",
+      "itemId": "gi_s04_leave_accrual",
+      "verdict": "grounded",
+      "how": "via choice conf=0.8614",
+      "latencyMs": 700,
+      "clef_verdict": "grounded",
+      "match": true,
+      "raw_keys": [
+        "model",
+        "answers",
+        "usage"
+      ]
+    },
+    {
+      "model": "clef",
+      "itemId": "gi_s05_tacit_maternity_remote",
+      "verdict": "grounded",
+      "how": "via choice conf=0.757",
+      "latencyMs": 1202,
+      "clef_verdict": "grounded",
+      "match": true,
+      "raw_keys": [
+        "model",
+        "answers",
+        "usage"
+      ]
+    },
+    {
+      "model": "clef",
+      "itemId": "gi_s07_hwpx_scope",
+      "verdict": "grounded",
+      "how": "via choice conf=0.8418",
+      "latencyMs": 710,
+      "clef_verdict": "grounded",
+      "match": true,
+      "raw_keys": [
+        "model",
+        "answers",
+        "usage"
+      ]
+    },
+    {
+      "model": "clef",
+      "itemId": "gi_s10_training_support",
+      "verdict": "grounded",
+      "how": "via choice conf=0.821",
+      "latencyMs": 683,
+      "clef_verdict": "grounded",
+      "match": true,
+      "raw_keys": [
+        "model",
+        "answers",
+        "usage"
+      ]
+    },
+    {
+      "model": "clef",
+      "itemId": "gi_s11_travel_expense",
+      "verdict": "grounded",
+      "how": "via choice conf=0.856",
+      "latencyMs": 520,
+      "clef_verdict": "grounded",
+      "match": true,
+      "raw_keys": [
+        "model",
+        "answers",
+        "usage"
+      ]
+    },
+    {
+      "model": "clef-flash",
+      "itemId": "gi_s03_leave_3days",
+      "verdict": "grounded",
+      "how": "via choice conf=0.153",
+      "latencyMs": 523,
+      "clef_verdict": "grounded",
+      "match": true,
+      "raw_keys": [
+        "model",
+        "answers",
+        "usage"
+      ]
+    },
+    {
+      "model": "clef-flash",
+      "itemId": "gi_s04_leave_accrual",
+      "verdict": "grounded",
+      "how": "via choice conf=0.6122",
+      "latencyMs": 750,
+      "clef_verdict": "grounded",
+      "match": true,
+      "raw_keys": [
+        "model",
+        "answers",
+        "usage"
+      ]
+    },
+    {
+      "model": "clef-flash",
+      "itemId": "gi_s05_tacit_maternity_remote",
+      "verdict": "grounded",
+      "how": "via choice conf=0.5858",
+      "latencyMs": 673,
+      "clef_verdict": "grounded",
+      "match": true,
+      "raw_keys": [
+        "model",
+        "answers",
+        "usage"
+      ]
+    },
+    {
+      "model": "clef-flash",
+      "itemId": "gi_s07_hwpx_scope",
+      "verdict": "grounded",
+      "how": "via choice conf=0.5469",
+      "latencyMs": 575,
+      "clef_verdict": "grounded",
+      "match": true,
+      "raw_keys": [
+        "model",
+        "answers",
+        "usage"
+      ]
+    },
+    {
+      "model": "clef-flash",
+      "itemId": "gi_s10_training_support",
+      "verdict": "grounded",
+      "how": "via choice conf=0.6313",
+      "latencyMs": 535,
+      "clef_verdict": "grounded",
+      "match": true,
+      "raw_keys": [
+        "model",
+        "answers",
+        "usage"
+      ]
+    },
+    {
+      "model": "clef-flash",
+      "itemId": "gi_s11_travel_expense",
+      "verdict": "grounded",
+      "how": "via choice conf=0.6108",
+      "latencyMs": 692,
+      "clef_verdict": "grounded",
+      "match": true,
+      "raw_keys": [
+        "model",
+        "answers",
+        "usage"
+      ]
+    },
+    {
+      "model": "clef-omni",
+      "itemId": "gi_s03_leave_3days",
+      "verdict": "partial",
+      "how": "via choice conf=0.1741",
+      "latencyMs": 519,
+      "clef_verdict": "grounded",
+      "match": false,
+      "raw_keys": [
+        "model",
+        "answers",
+        "usage"
+      ]
+    },
+    {
+      "model": "clef-omni",
+      "itemId": "gi_s04_leave_accrual",
+      "verdict": "grounded",
+      "how": "via choice conf=0.3537",
+      "latencyMs": 437,
+      "clef_verdict": "grounded",
+      "match": true,
+      "raw_keys": [
+        "model",
+        "answers",
+        "usage"
+      ]
+    },
+    {
+      "model": "clef-omni",
+      "itemId": "gi_s05_tacit_maternity_remote",
+      "verdict": "grounded",
+      "how": "via choice conf=0.5402",
+      "latencyMs": 526,
+      "clef_verdict": "grounded",
+      "match": true,
+      "raw_keys": [
+        "model",
+        "answers",
+        "usage"
+      ]
+    },
+    {
+      "model": "clef-omni",
+      "itemId": "gi_s07_hwpx_scope",
+      "verdict": "grounded",
+      "how": "via choice conf=0.6715",
+      "latencyMs": 486,
+      "clef_verdict": "grounded",
+      "match": true,
+      "raw_keys": [
+        "model",
+        "answers",
+        "usage"
+      ]
+    },
+    {
+      "model": "clef-omni",
+      "itemId": "gi_s10_training_support",
+      "verdict": "grounded",
+      "how": "via choice conf=0.6084",
+      "latencyMs": 419,
+      "clef_verdict": "grounded",
+      "match": true,
+      "raw_keys": [
+        "model",
+        "answers",
+        "usage"
+      ]
+    },
+    {
+      "model": "clef-omni",
+      "itemId": "gi_s11_travel_expense",
+      "verdict": "grounded",
+      "how": "via choice conf=0.3841",
+      "latencyMs": 479,
+      "clef_verdict": "grounded",
+      "match": true,
+      "raw_keys": [
+        "model",
+        "answers",
+        "usage"
+      ]
+    }
+  ],
+  "topic": [
+    {
+      "model": "clef",
+      "question": "점심 뭐 먹지?",
+      "offTopic": true,
+      "confidence": 0.9945,
+      "how": "choice=off_topic p_off=0.9945",
+      "latencyMs": 574,
+      "expected_off": true,
+      "match": true,
+      "would_block": true
+    },
+    {
+      "model": "clef",
+      "question": "오늘 기분이 우울해",
+      "offTopic": true,
+      "confidence": 0.9582,
+      "how": "choice=off_topic p_off=0.9582",
+      "latencyMs": 559,
+      "expected_off": true,
+      "match": true,
+      "would_block": true
+    },
+    {
+      "model": "clef",
+      "question": "연차 신청 어떻게 해요?",
+      "offTopic": false,
+      "confidence": 0.0148,
+      "how": "choice=work_related p_off=0.0148",
+      "latencyMs": 685,
+      "expected_off": false,
+      "match": true,
+      "would_block": false
+    },
+    {
+      "model": "clef",
+      "question": "출장비 정산은 어떻게 하나요?",
+      "offTopic": false,
+      "confidence": 0.0471,
+      "how": "choice=work_related p_off=0.0471",
+      "latencyMs": 541,
+      "expected_off": false,
+      "match": true,
+      "would_block": false
+    },
+    {
+      "model": "clef-flash",
+      "question": "점심 뭐 먹지?",
+      "offTopic": true,
+      "confidence": 0.9684,
+      "how": "choice=off_topic p_off=0.9684",
+      "latencyMs": 502,
+      "expected_off": true,
+      "match": true,
+      "would_block": true
+    },
+    {
+      "model": "clef-flash",
+      "question": "오늘 기분이 우울해",
+      "offTopic": true,
+      "confidence": 0.8983,
+      "how": "choice=off_topic p_off=0.8983",
+      "latencyMs": 446,
+      "expected_off": true,
+      "match": true,
+      "would_block": true
+    },
+    {
+      "model": "clef-flash",
+      "question": "연차 신청 어떻게 해요?",
+      "offTopic": false,
+      "confidence": 0.0478,
+      "how": "choice=work_related p_off=0.0478",
+      "latencyMs": 588,
+      "expected_off": false,
+      "match": true,
+      "would_block": false
+    },
+    {
+      "model": "clef-flash",
+      "question": "출장비 정산은 어떻게 하나요?",
+      "offTopic": false,
+      "confidence": 0.1481,
+      "how": "choice=work_related p_off=0.1481",
+      "latencyMs": 693,
+      "expected_off": false,
+      "match": true,
+      "would_block": false
+    },
+    {
+      "model": "clef-omni",
+      "question": "점심 뭐 먹지?",
+      "offTopic": true,
+      "confidence": 0.9757,
+      "how": "choice=off_topic p_off=0.9757",
+      "latencyMs": 527,
+      "expected_off": true,
+      "match": true,
+      "would_block": true
+    },
+    {
+      "model": "clef-omni",
+      "question": "오늘 기분이 우울해",
+      "offTopic": true,
+      "confidence": 0.9637,
+      "how": "choice=off_topic p_off=0.9637",
+      "latencyMs": 504,
+      "expected_off": true,
+      "match": true,
+      "would_block": true
+    },
+    {
+      "model": "clef-omni",
+      "question": "연차 신청 어떻게 해요?",
+      "offTopic": false,
+      "confidence": 0.0194,
+      "how": "choice=work_related p_off=0.0194",
+      "latencyMs": 418,
+      "expected_off": false,
+      "match": true,
+      "would_block": false
+    },
+    {
+      "model": "clef-omni",
+      "question": "출장비 정산은 어떻게 하나요?",
+      "offTopic": false,
+      "confidence": 0.0323,
+      "how": "choice=work_related p_off=0.0323",
+      "latencyMs": 1056,
+      "expected_off": false,
+      "match": true,
+      "would_block": false
+    }
+  ]
+}
