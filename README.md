@@ -1,148 +1,219 @@
-# 일잇 People OS — Workers판 프로토타입
+# 일잇 People OS — 서버 없이 Worker 하나로 돌아가는 HR·코칭 에이전트 업무 공간
 
-> **이것은 Workers 위에 새로 만드는 프로토타입입니다. 이미 정식 출시한 ChatGPT Sites(일잇, easy-slides 등)가 아닙니다.**
-> Cloudflare Developer Day Seoul 2026 Use Case 공모전(마감 2026-11-27, 행사 2026-12-02 파르나스) 제출용입니다.
->
-> **라이브 데모: https://people-os.workspace-easyware.workers.dev** — 배포됨, `/api/health` ok:true, 바인딩 6개(d1·kv·r2·vectorize·ai·durable_objects) 전부 true. 저장소: [workspace-easyware/people-os](https://github.com/workspace-easyware/people-os) (제출 전 공개 전환 예정).
+> **English summary** — *People OS* is an HR and coaching workspace that runs as **a single Cloudflare Worker, with no backend server**. One Worker handles the web UI (Static Assets), the API, inbound email (Email Routing), queue consumers, and cron jobs. Data lives in D1, R2, KV and Vectorize; every AI step — Whisper transcription, bge-m3 embeddings, Qwen3 answers, Clef "judgment" models for routing / guarding / re-ranking, and nightly self-evaluation — runs on Workers AI through AI Gateway. The agents follow fixed pipelines: they transcribe, summarize, index, retrieve evidence and answer *only with sources*, and a person decides anything that leaves the system or changes the organization's knowledge. This is a new prototype built on Workers for Cloudflare Developer Day Seoul 2026 (Use Case contest), not a released product. Docs are in Korean. Live demo: https://people-os.workspace-easyware.workers.dev (an account is required; the judge account is given in the submission form).
 
-HR 실무자·코치를 위한 AI 인텔리전스 플랫폼: 회의 전사본·규정·뉴스를 올리면 요약·RAG 답변·코칭 리플렉션을 한 흐름으로 내보냅니다.
+**링크** · [라이브 데모](https://people-os.workspace-easyware.workers.dev) · 발표자료(앱 안 "발표자료" 메뉴 · 독립 페이지 `/pitch.html`) · [아키텍처 문서](ARCHITECTURE.md) · [3분 데모 대본](DEMO-SCRIPT.md) · 데모 영상(제출 후 링크 추가)
 
-## 데모 흐름 (3분 영상용)
+> **이것은 Workers 위에 새로 만든 프로토타입입니다. 정식 출시한 서비스가 아닙니다.**
+> Cloudflare Developer Day Seoul 2026 Use Case 공모전(마감 2026-11-27, 행사 2026-12-02) 제출용입니다.
+> 저장소는 제출 직전에 공개 전환할 예정입니다.
 
-1. 홈 대시보드 — 현황 숫자 + 최근 문서·할 일 확인
-2. 음성 파일 업로드 → Whisper 전사 (최대 25MB, 전사본이 텍스트란에 채워짐) — 또는 샘플 전사본 붙여넣기
-3. 요약하기 → 3줄 요약 + 액션 아이템
-4. 액션 “할 일로 저장” + “PPTX 초안 다운로드” (표지+요약+액션, R2 저장)
-5. “연차 3일 쓸 수 있어?” → 근거 문서(연차휴가 규정)와 함께 답변
-6. 코칭 전사본 → 핵심 질문·패턴·다음 세션 질문 3개
-7. 요약 복사 → "라이브러리에서 보기"로 라이브러리 탭에서 확인
+## 30초 요약
 
-## 로컬 개발
+1. **백엔드 서버가 없습니다.** Worker 하나가 화면, API, 메일 수신, 큐 처리, 예약 작업을 맡습니다.
+2. **데이터 저장소가 다 있습니다.** 관계형은 D1, 파일은 R2, 캐시는 KV, 의미 검색은 Vectorize. 바인딩 한 줄씩으로 붙습니다.
+3. **AI가 에이전트로 일합니다.** 전사·요약·답변·코칭·평가·판단이 모두 Workers AI에서 돕니다. 여러 모델이 단계를 나눠 맡고, 밖으로 나가거나 조직의 지식을 바꾸는 일은 사람이 결정합니다.
 
-```bash
-cd people-os
-npm install
-npx wrangler dev --local
-# http://localhost:8787 로 접속
-```
-
-- `wrangler dev`는 로컬(Miniflare)에서 D1/KV/R2/Durable Objects를 에뮬레이션합니다.
-- 라이브 배포는 `~/workspace/custom-connectors/custom.cloudflare/bin/cf-wrangler.py deploy`로 합니다 (저장된 API 토큰 주입). D1 마이그레이션은 deploy가 자동 적용하지 않으므로 새 마이그레이션이 있으면 `d1 migrations apply people-os-db --remote`를 따로 실행합니다.
-- Node v24.22.1에서 확인했습니다.
-
-## API
-
-| 메소드 | 경로 | 설명 |
-|---|---|---|
-| POST/GET | `/api/health` | 상태 + 바인딩 확인 (규정 시드도 여기서 초기화) |
-| GET | `/api/home` | 홈 대시보드: 현황 숫자 + 최근 문서·할 일·리플렉션 |
-| GET/POST/PATCH/DELETE | `/api/tasks`, `/api/tasks/:id` | 할 일 체크리스트 (생성·토글·삭제) |
-| POST | `/api/deck` | `{title, summary, actions}` 또는 `{title, outline: {title, slides: [{heading, bullets}]}}` → pptxgenjs 덱 생성, R2 저장, `{url}` 반환. 개요가 오면 고친 문구를 그대로 쓰고 빈 불릿·빈 슬라이드는 제외 (S3) |
-| GET | `/api/deck/:id` | 생성된 .pptx 다운로드 |
-| POST | `/api/transcribe` | multipart `file`(최대 25MB) → R2 저장 + 백그라운드 전사 → `{recordingId, transcriptStatus: 'processing'}` (폴링으로 완료 확인, 긴 ogg는 1MB 단위 구간별 전사, 재개 가능) |
-| GET | `/api/recordings` | 최근 음성 녹음 목록 (메타데이터 + 상태 ready/pending/processing + 진행 상황) |
-| GET | `/api/recordings/:id` | 녹음 1건 + 전사본 |
-| POST | `/api/recordings/:id/advance` | 다음 1구간을 직접 전사하고 행 반환 (프론트 폴링이 부름) |
-| POST | `/api/recordings/:id/retry` | pending 녹음을 R2 오디오로 다시 전사 (백그라운드, 멈춘 processing 행은 이어가기) |
-| POST | `/api/documents` | `{title, content, kind}` 업로드 → R2 + D1. multipart `file`(최대 10MB)도 받는다 — 매직 바이트로 형식을 판별해 PDF·DOCX·XLSX·이미지는 Workers AI `toMarkdown()`으로, HWPX는 Worker 안에서 직접 텍스트를 뽑아 색인한다 (C5 Phase 3). HWP 5.0은 안내만 하고 변환하지 않는다 |
-| POST | `/api/documents/:id/summarize` | Workers AI 요약, 실패 시 로컬 추출식 요약 |
-| POST | `/api/ask` | `{question, sessionId?}` RAG 답변 + 근거 + 세션 기억 |
-| POST | `/api/coaching/reflect` | `{transcript, sessionId?}` 코칭 리플렉션 |
-| GET | `/api/library` | 문서·규정·리플렉션 목록 |
-| GET | `/api/seed` | 샘플 전사본·코칭 전사본·규정 7건 |
-
-시드 규정 7건: 연차휴가, 근무시간, 출장, 정보보안, 평가·승진, 교육, 근태·지각 — `seed/seed-data.json` 참조.
+녹음·규정·메일·코칭 기록을 올리면 전사하고, 요약하고, **근거를 붙여** 답하고, 스스로 품질을 평가합니다. 근거가 없으면 답을 만들지 않고 질문을 "답변 대기"에 올립니다.
 
 ## 아키텍처
 
+![People OS 아키텍처](public/architecture.svg)
+
 ```
-브라우저 (public/index.html, 탭 6개: 홈·업로드·질문·코칭·할 일·라이브러리)
-  → Workers (Hono, src/index.ts)
-    → D1 (문서·규정·세션·리플렉션·캐시·할 일·덱 메타·녹음)
-    → R2 (원본 파일 + 녹음 recordings/* + 덱 decks/*.pptx)
-    → KV (질문 캐시, 실패 시 D1 cache 테이블)
-    → Vectorize (RAG — 로컬에서 쿼리 실패 시 D1 텍스트 검색 폴백)
-    → Workers AI (요약·답변·리플렉션 + Whisper 전사 — 로컬에서 실패 시 로컬 템플릿/규칙 폴백, 전사는 pending 저장)
-    → Durable Objects AgentSession (대화 기억 — 실패 시 D1 sessions 폴백)
-    → Queues/Workflows, Hyperdrive, Cron, Turnstile: 설계·스텁 (Phase 4/5, README 하단 참조)
+[1층 들어오는 길]  브라우저(HTTPS)      외부 메일(SMTP)        시간
+                      │                    │                   │
+                      │              Email Routing        Cron Triggers
+                      │                    │                   │
+[2층 Worker 하나]  fetch()  ─────────  email()   ───  scheduled()   +   queue()  ◄─ Queues(+DLQ)
+                   모듈: 인증·역할 · 문서·전사 · 질문(RAG) · 코칭 · 메일함 · 관측·평가 · 결재 · 강의실
+                      │
+[3층 AI]          AI Gateway "people-os" → Workers AI (Whisper · toMarkdown · bge-m3 · Clef · Qwen3 · Llama 4 Scout)
+[4층 데이터]      D1 · R2 · KV · Vectorize · Durable Objects(대화 기억)
+[Cloudflare 밖]   Resend (메일 발송만)
 ```
 
-## Cloudflare 기능 매핑
+**Worker 진입점 4개** (`src/index.ts:1879-1921`)
 
-| 기능 | MVP에서 하는 일 | 상태 |
+| 진입점 | 깨우는 것 | 하는 일 |
 |---|---|---|
-| Workers | API + 프론트 서빙 | 구현됨 |
-| Workers AI | 요약·답변·리플렉션 생성 | 라이브 확인됨 (로컬에서는 실패 시 폴백) |
-| Workers AI (Whisper) | 음성 전사 (`@cf/openai/whisper`) | 라이브 확인됨 — 실제 Plaud 녹음 전사, 전사 실패 시 pending 저장 (전사본 없음) |
-| Vectorize | RAG 임베딩 검색 | 라이브 확인됨 (로컬에서는 D1 텍스트 검색 폴백) |
-| D1 | 문서·규정·세션·리플렉션·캐시·할 일·덱 메타·녹음 | 구현됨 (마이그레이션 `migrations/0001_init.sql`, `0002_workspace.sql`, `0003_recordings.sql`) |
-| KV | `/api/ask` 캐시 | 시도 후 D1 폴백 |
-| Durable Objects | 에이전트 세션 기억 | 시도 후 D1 폴백 |
-| R2 | 업로드 원본 저장 + 덱 `decks/*.pptx` | 라이브 확인됨 |
-| Hyperdrive | 기존 HR Postgres 연결 | 스텁/설계만 (모의 데이터) |
-| Queues + Workflows | 전사→요약→추출→임베딩 파이프라인 | 구현됨 (S1): 전사→요약→색인 Queues 파이프라인 + DLQ, 라이브 확인됨 |
-| AI Gateway | 모든 Workers AI 호출 경유 (게이트웨이 `people-os`, 채팅 캐시·태그별 로그) | 구현됨 (로컬 검증; 라이브 확인 전 — 대시보드에서 게이트웨이 생성 필요, 아래 S2 참조) |
-| Cron Triggers | 아침 HR 다이제스트 | 구현됨 (C9): 매일 07:00 KST, 첫 실행 2026-11-14 |
-| Turnstile | 업로드 스팸 방지 | 구현됨 (C7): fail-open, 키 설정 시 검증 |
+| `fetch` | 브라우저 요청 | Hono API + `public/` 정적 화면 서빙 |
+| `email` | Email Routing | 원문 R2 저장 → 파싱 → 수신자 메일함(D1) |
+| `queue` | Queues 메시지 | 전사 후 요약·색인, 문서 구조 트리, 평가 항목 1건 |
+| `scheduled` | Cron Triggers | 07:00 KST 아침 다이제스트 · 03:00 KST 비용 동기화·표본 판정·골든셋 평가 |
 
-## S2 — AI Gateway (2026-11-13, 로컬 구현)
+자세한 흐름·키 형식·임계값·실패 시 동작은 [ARCHITECTURE.md](ARCHITECTURE.md)에 있습니다.
 
-- 방식: Workers AI 바인딩 + AI Gateway 공식 방식 — `env.AI.run()`의 세 번째 인자로 `{ gateway: { id: "people-os", skipCache, tags } }`를 넘긴다. `wrangler.toml`의 `[ai]` 바인딩은 그대로 (변경 없음).
-- 헬퍼: `src/ai-gateway.ts`의 `aiGatewayOptions()` — 11개 AI 호출처 전부 경유 (채팅 llama-4-scout 5곳: 요약·질문·코칭·다이제스트·debug-ai / 임베딩 bge-m3 5곳: 시딩·문서 색인·암묵지 검증·질문 검색·debug-ai / 전사 whisper-large-v3-turbo 1곳).
-- 캐시 정책: 채팅은 게이트웨이 캐시 사용 (프롬프트에 근거 문맥이 포함돼 근거가 바뀌면 캐시 키도 바뀐다). 다시 생성(`force`)과 운영 진단(`/api/debug-ai`)은 `skipCache: true`. 임베딩·전사는 항상 `skipCache: true` (재색인 검증이 흐려지고, 전사는 오디오마다 달라 캐시할 이유가 없음).
-- 태그: 호출마다 `ask` / `summary` / `embed` / `whisper` / `coaching` / `digest` / `debug` 태그를 붙여 게이트웨이 대시보드에서 기능별로 구분한다.
-- **게이트웨이 생성 (배포 전 필수)**: wrangler CLI에는 `ai-gateway` 명령이 없어 CLI 생성이 안 된다. 대시보드 → AI Gateway → Create Gateway, 이름 `people-os`로 만든다. 이름 있는 게이트웨이는 자동 생성되지 않는다 (`"default"`만 첫 요청 때 자동 생성). 게이트웨이가 없으면 AI 호출이 실패하고 기존 로컬 폴백으로 떨어진다 (앱은 안 죽는다).
-- 레이트 리밋 (대시보드에서 설정, 권장): 분당 100회. 질문 1건이 AI 호출 2회(임베딩+채팅)라 기존 세션당 분당 20회 제한과 전사·요약을 합쳐도 여유가 있다. 캐시는 게이트웨이 기본값 사용.
-- 되돌리기: 호출처에서 `aiGatewayOptions()` 인자만 빼면 된다 (`wrangler.toml` 변경이 없어 되돌림이 한 줄씩이다).
+## Cloudflare 기능 표
 
-## C5 Phase 3 — 업로드 문서 파서 라우팅 (2026-11-13, 로컬 구현)
+상태: **기록 있음** = 이전 검증 기록([VERIFICATION.md](VERIFICATION.md), 2026-11-13, 사용자 Chrome 확인)에 라이브 확인이 있고 이번 개정에서 재확인하지 않음 · **코드 있음** = 코드는 있고 라이브 확인 전 (제출 직전 갱신).
 
-- 형식 판별은 확장자가 아니라 앞부분 바이트로 한다 (`src/parse.ts`): `%PDF` → PDF, `PK` + `mimetype=application/hwp+zip` → HWPX, `PK` + `[Content_Types].xml` → Office Open XML, `D0CF11E0` → HWP 5.0/구형 Office, 이미지 매직 바이트 → 이미지, UTF-8 디코딩되면 텍스트, `<?xml`/`<svg`/`<html` → toMarkdown.
-- HWPX는 Worker 안에서 직접 추출한다 (fflate로 zip을 풀어 `Contents/section*.xml`의 `<hp:t>` 텍스트를 모은다 — toMarkdown은 HWPX를 지원하지 않는다). 표 셀 텍스트도 순서대로 뽑히고, `제N조` 마커는 평문이라 조문 단위 청킹이 그대로 된다.
-- PDF·DOCX·XLSX·이미지·XML/HTML은 Workers AI `toMarkdown()`으로 변환한다 (`env.AI.toMarkdown({name, blob}, {gateway: {id: "people-os", skipCache: true}})` — 파일명에서 변환기를 고르므로 원본 파일명을 그대로 넘긴다).
-- 저장: 원본 `docs/<id>/source.<ext>` + 추출본 `docs/<id>/extracted.md` (R2), D1 `content`에는 추출본, `extract_status`/`extract_error`/`source_r2_key`는 마이그레이션 0012. 추출본은 기존 `indexDocument` 경로로 색인한다 (Vectorize 메타데이터 kind는 문서 실제 종류).
-- 실패 처리 (내용을 지어내지 않는다): HWP 5.0은 "HWPX 또는 PDF로 저장해 올려 주세요" 안내, 판별 불가 형식은 지원 형식 안내, 추출 실패(toMarkdown 에러·빈 결과·텍스트 없음)는 문서 행을 `extract_status='failed'`로 만들고 사유를 보여준다. 원본은 실패해도 R2에 남는다. 실패한 문서는 색인하지 않는다.
-- 상한: 문서 파일 10MB (우리 쪽 상한 — toMarkdown 공식 문서에 파일 크기 상한이 명시돼 있지 않다).
-- 로컬 검증: 단위 테스트 25개 통과 (판별 15개·HWPX 추출 9개·BOM 1개), `wrangler dev --local` e2e — HWPX 업로드 → `format: hwpx, extractStatus: ready`, D1 chunk 2개(제1조 목적·제2조 적용 범위), 질문 시 HWPX 문서가 근거로 나옴. 연차 질문은 여전히 연차휴가 규정이 1위. 로컬 AI가 안 돼 임베딩 upsert와 toMarkdown은 실패로 떨어지는 기존 한계가 있다 (D1 chunk는 남고, 에러가 그대로 보고됨). 라이브 확인 필요: DOCX/PDF 실제 변환, HWPX 근거 1위 여부.
-- 되돌리기: 파일 업로드 분기를 빼면 JSON 경로만 남는다 (마이그레이션 0012 컬럼은 남겨둬도 무해하다).
+| 기능 | 어디에 쓰나 | 상태 |
+|---|---|---|
+| Workers | 진입점 4개를 가진 Worker 1개 | 기록 있음 |
+| Workers Static Assets | `public/` 화면, 빌드 단계 없음 | 기록 있음 |
+| D1 | 모든 관계형 데이터·감사 기록 (마이그레이션 0001~0024) | 기록 있음 |
+| R2 | 음성·문서 원본과 추출본·PPTX·메일 원문과 첨부·질문별 프롬프트 원문 | 기록 있음 |
+| KV | 답변 캐시, 질문 레이트 리밋, 평가 일일 카운터 | 코드 있음 |
+| Vectorize | 인덱스 `people-os-index-m3`(1024차원), 공용/개인 메타데이터 필터 | 기록 있음 |
+| Workers AI | 전사·변환·임베딩·판단·생성·평가 (아래 모델 표) | 기록 있음 |
+| AI Gateway | 모든 AI 호출의 관문 — 용도 태그·채팅 캐시·비용 동기화 출처 | 코드 있음 (게이트웨이 로그 확인 전) |
+| Queues | 전사 후 요약·색인, 트리 빌드, 평가 항목. 재시도 3회 + DLQ | 기록 있음 |
+| Durable Objects | 세션별 대화 기억(최근 20턴) — 에이전트 실행기가 아님 | 코드 있음 |
+| Cron Triggers | 아침 다이제스트, 새벽 자기 평가 | 코드 있음 |
+| Email Routing | `@peopleos.site` 수신 → Worker `email()` | 코드 있음 (실제 외부 수신 테스트 확인 안 됨) |
+| Turnstile | 질문 폼 봇 확인 — 시크릿이 없으면 건너뜀(fail-open) | 코드 있음 (키 설정 확인 안 됨) |
 
-## 로컬 폴백 (중요)
+**쓰지 않는 것**: Hyperdrive, Workflows, Access, Analytics Engine, Dynamic Workers. 메일 **발송**은 Cloudflare 밖의 Resend HTTP API입니다 (Worker는 SMTP를 직접 쓸 수 없어서). 이 표에는 요금·한도를 적지 않았습니다.
 
-`wrangler dev --local`에서는 Workers AI와 Vectorize가 클라우드와 동일하게 동작하지 않습니다.
-그래서 코드는 **먼저 클라우드 바인딩을 시도하고, 실패하면 로컬 로직으로 답**합니다:
+## 기능 목록 (메뉴 순서)
 
-- 요약: Workers AI (`@cf/meta/llama-4-scout-17b-16e-instruct`) → 실패 시 추출식 요약 (`src/lib.ts localSummarize`)
-- RAG 검색: Vectorize 쿼리 → 실패 시 D1 텍스트 검색 + 키워드 순위 (`localSearch`)
-- 답변: Workers AI → 실패 시 근거 기반 템플릿 답변 (`local-template`)
-- 코칭: Workers AI → 실패 시 규칙 기반 리플렉션 (`localReflect`)
-- 전사: Workers AI Whisper → 실패·빈 결과·반복 환각 시 오디오만 저장하고 `transcript_status='pending'` (전사본을 지어내지 않음, `POST /api/recordings/:id/retry`로 다시 시도)
-- KV/DO: 실패 시 D1 테이블(`cache` / `sessions`)로 폴백
+- **홈** — 안 읽은 메일, 열린 할 일, 최근 문서와 리플렉션, 아침 브리핑(매일 07:00 자동 생성)
+- **메일함** — `@peopleos.site` 수신 메일이 내 메일함에 들어옴, AI 답장 초안(저장만, 자동 발송 안 함), 메일을 개인 업무 검색에 색인
+- **결재함** — 기안·상신·승인·반려·회수, 결재선 순서 진행, 모든 액션의 감사 이력 *(코드 있음 · 라이브 확인 전)*
+- **할 일** — 요약의 액션을 한 번에 할 일로 옮기고 체크
+- **녹음전사 · 문서저장** — 음성(최대 25MB) 전사, 긴 녹음은 구간 분할·진행 단계 표시. PDF·DOCX·XLSX·HWPX·이미지·텍스트 문서(최대 10MB) 업로드와 색인
+- **코칭 리플렉션** — 같은 전사본에서 코치에게는 핵심 질문·반복 패턴·다음 세션 질문을, 코칭 대상에게는 자기 성찰 포인트와 기한이 붙은 액션 플랜을
+- **강의실** — 유튜브·사내 영상 과정, 진도 기록, 사내 영상은 로그인 사용자에게만 R2에서 Range 스트리밍 *(코드 있음 · 라이브 확인 전)*
+- **개인 업무 검색** — 내가 올린 전사본·문서·메일에서만 답을 찾음
+- **HR 규정 검색** — 사내 규정에서 근거(문서 › 조문)와 함께 답변
+- **라이브러리** — 문서·규정·리플렉션·답변 대기 질문, 요약으로 PPTX 초안 생성
+- **관측 · 평가** (HR 관리자) — 질문별 처리 과정 추적, 골든 질문 세트 평가, 개선 목록
+- **사용자 관리** (HR 관리자) — 계정·역할 관리
+- **소개** — 제품 설명
 
-응답 JSON의 `engine` / `searchEngine` / `sessionVia` 필드로 어떤 경로로 답했는지 확인할 수 있습니다.
-라이브에서는 Workers AI / Vectorize를 실제로 사용함이 Chrome으로 확인됐습니다. 로컬 개발 시에만 폴백이 돕니다.
+## 에이전트가 하는 일, 사람이 하는 일
 
-## 구조
+기준은 하나입니다. **되돌릴 수 있고 안에서 끝나는 일은 에이전트가, 밖으로 나가거나 조직의 지식을 바꾸는 일은 사람이.**
+
+| 에이전트가 스스로 한다 | 사람이 확인하고 결정한다 |
+|---|---|
+| 전사, 요약, 색인, 문서 구조 분석 | 요약의 액션을 할 일로 옮길지 |
+| 근거 검색, 업무 외 질문 거절, 근거 없는 질문 기록 | 답변 대기 질문에 무엇이라고 답할지(게시) |
+| 메일 수신·소유자 매칭·스레드 묶기, 답장 **초안** 작성 | 메일을 **보낼지** |
+| PPTX 개요 초안 | 개요를 고치고 생성할지 |
+| 새벽 자기 평가(설정이 바뀌었거나 7일이 지났을 때), 회귀·낮은 점수 수집 | 어떤 개선 조치를 적용할지 |
+| 아침 다이제스트 작성 | — |
+
+**한계**: 정해진 단계를 따라가는 **파이프라인형**입니다. 모델이 도구를 골라 부르며 계획을 세우는 자유형 에이전트가 아니고, 에이전트가 스스로 메일을 보내거나 외부 시스템을 바꾸지 않습니다. `AgentSession` Durable Object는 에이전트 실행기가 아니라 **대화 기억만** 합니다. 에이전트 제안을 승인 큐에 올리는 구조는 아직 없습니다.
+
+## 기술 스택
+
+- **언어·프레임워크**: TypeScript, [Hono](https://hono.dev), wrangler. 프런트는 **빌드 없는 정적 HTML/JS/CSS** (`public/`).
+- **런타임 의존성 3개**: `hono`, `pptxgenjs`(PPTX 생성), `fflate`(HWPX zip 해제) (`package.json`)
+- **Workers AI 모델** (호출 위치는 [ARCHITECTURE.md 4.1](ARCHITECTURE.md#41-모델-표-코드-2026-11-17))
+
+| 용도 | 모델 |
+|---|---|
+| RAG 답변·요약·코칭 리플렉션·메일 답장 초안·문서 구조 트리 | `@cf/qwen/qwen3-30b-a3b-fp8` |
+| 아침 다이제스트·평가 judge·판단 모델 폴백 | `@cf/meta/llama-4-scout-17b-16e-instruct` |
+| 임베딩 (1024차원, 다국어) | `@cf/baai/bge-m3` |
+| 음성 전사 | `@cf/openai/whisper-large-v3-turbo` |
+| 문서 변환 | `env.AI.toMarkdown()` (PDF·DOCX·XLSX·이미지) |
+| 판단 모델 — 의도 라우터·업무 외 가드·근거 재순위·답변 판정 | `@cf/cloudflare/clef`, `@cf/cloudflare/clef-omni` |
+
+판단 모델은 고르기만 하고 글을 쓰지 않습니다. 쓰는 모델은 판단 모델이 통과시킨 근거만 받습니다. AI 판단 단계가 실패하면 그 단계를 건너뜁니다(fail-open).
+
+## 직접 실행
+
+### 로컬
+
+```bash
+npm install
+npx wrangler dev --local
+# http://localhost:8787
+```
+
+- 로컬에서는 D1·KV·R2·Durable Objects를 에뮬레이션합니다. **Workers AI와 Vectorize는 클라우드와 같이 동작하지 않아** 코드가 먼저 클라우드 바인딩을 시도하고 실패하면 폴백으로 답합니다: 요약은 추출식, 검색은 D1 키워드 검색, 답변은 근거 기반 템플릿, 리플렉션은 규칙 기반, 전사는 `pending`으로 저장(전사본을 지어내지 않음).
+- 응답 JSON의 `engine` / `searchEngine` / `sessionVia`로 어느 경로로 답했는지 볼 수 있습니다.
+- 마이그레이션을 로컬에 적용하려면 `npx wrangler d1 migrations apply people-os-db --local`을 쓰되, 앱이 먼저 스키마를 만든 DB에서는 0004에서 `progress` 컬럼 중복으로 실패할 수 있습니다 (원격 배포 경로에는 영향 없음).
+- 로그인 계정은 최초 관리자를 만든 뒤 쓸 수 있습니다 (아래).
+
+### 내 Cloudflare 계정에 배포
+
+필요한 리소스 (이름은 `wrangler.toml`과 같아야 합니다):
+
+| 리소스 | 이름·설정 |
+|---|---|
+| D1 | `people-os-db` — `migrations/` 0001~0024 적용 |
+| KV | 네임스페이스 1개 (바인딩 `CACHE`) |
+| R2 | `people-os-files` |
+| Vectorize | `people-os-index-m3`, **1024차원**, 코사인 |
+| Queues | `people-os-pipeline`, `people-os-pipeline-dlq` |
+| AI Gateway | `people-os` (CLI로 만들 수 없음 — 대시보드에서 생성) |
+| Email Routing | 선택 — 쓰려면 도메인의 catch-all을 Worker로 연결하고 `EMAIL_DOMAIN`(`src/email/send.ts`)을 바꿉니다 |
+
+`wrangler.toml`의 `database_id`·KV `id`·`CF_ACCOUNT_ID`는 이 저장소 작성자의 계정 값이므로 자기 값으로 바꿉니다.
+
+시크릿 (**이름만** 적습니다. `wrangler secret put <이름>`으로 설정):
+
+| 이름 | 용도 | 없으면 |
+|---|---|---|
+| `PASSWORD_PEPPER` | 비밀번호 해시 | 로그인 불가 (fail-closed) |
+| `BOOTSTRAP_SECRET` | 최초 관리자 생성 | 부트스트랩 거부 |
+| `ADMIN_SECRET` | 운영 경로 보호 | 운영 경로 항상 거부 |
+| `RESEND_API_KEY` | 메일 발송 (선택) | 발송 503 |
+| `TURNSTILE_SECRET` | 질문 폼 봇 확인 (선택) | 검증 건너뜀 |
+| `AIG_LOGS_TOKEN` | AI Gateway 비용 동기화 (선택) | 동기화 안내 오류만 |
+
+```bash
+npx wrangler d1 migrations apply people-os-db --remote
+npx wrangler deploy
+# 최초 관리자 생성 (사용자가 0명일 때만 동작):
+#   POST /api/bootstrap  { secret, email, name, password(12~128자) }
+```
+
+"Deploy to Cloudflare" 버튼은 리소스 자동 생성 여부를 확인하지 못해 넣지 않았습니다.
+
+## 3분 데모
+
+앱은 로그인 화면이 전체를 가립니다. **심사위원용 데모 계정은 제출 폼에 적었습니다** (공개 문서에 비밀번호를 적으면 누구나 메일 발송과 AI 호출을 쓸 수 있어 이 저장소에는 적지 않습니다).
+
+1. **홈** — 열린 할 일·최근 문서·아침 브리핑 확인
+2. **녹음전사** — 음성 파일 업로드(또는 샘플 전사본 붙여넣기) → 단계(전사 → 요약 → 색인)가 차례로 켜짐 → 요약 3줄 + 액션
+3. **할 일 · PPTX** — 액션을 "할 일로 저장", "PPTX 초안 다운로드"
+4. **HR 규정 검색** — "연차 3일 붙여 쓸 수 있어요?" → 조문 출처가 붙은 답. 이어서 규정에 없는 질문 → 답을 만들지 않고 "답변 대기"에 올라감 → 라이브러리에서 답을 게시하면 다음부터 그 답이 출처로 나옴
+5. **코칭 리플렉션** — 코칭 전사본으로 핵심 질문·패턴·다음 세션 질문(코치) 또는 성찰 포인트·액션 플랜(코칭 대상)
+
+(영상 대본: [DEMO-SCRIPT.md](DEMO-SCRIPT.md))
+
+## 저장소 구조
 
 ```
 people-os/
-  wrangler.toml        바인딩: D1, KV, R2, Vectorize, AI, Durable Objects, Assets
-  src/index.ts         Hono API + 폴백 로직 + 작업 공간·덱·전사 API (pptxgenjs, Whisper)
-  src/lib.ts           로컬 요약·검색·리플렉션 + 시드 로더
-  src/agent-session.ts Durable Object (세션 기억)
-  migrations/0001_init.sql, 0002_workspace.sql, 0003_recordings.sql
-  seed/seed-data.json  샘플 전사본 + 규정 7건 + 코칭 전사본
-  public/index.html    탭 6개 SPA (홈·업로드·질문·코칭·할 일·라이브러리)
+  wrangler.toml        바인딩·크론·큐 설정
+  src/
+    index.ts           Hono API, 큐·메일·크론 진입점
+    ask-pipeline.ts    질문(RAG) 11단계 파이프라인
+    ai-gateway.ts      AI Gateway 옵션
+    auth.ts, auth-routes.ts   로그인·세션·역할
+    parse.ts, ogg.ts, tree.ts 문서 형식 판별·HWPX 추출 / Ogg 구간 분할 / 문서 구조 트리
+    digest.ts, agent-session.ts   아침 다이제스트 / 대화 기억 Durable Object
+    obs/               관측·평가·판단 모델·비용 동기화
+    email/             메일 수신·파싱·발송
+    approval/          전자결재 상태머신
+    lms/               강의실
+  public/              정적 화면 (빌드 없음), architecture.svg
+  migrations/          D1 마이그레이션 0001~0024
+  seed/, seeds/        샘플 규정·전사본 / 결재·강의·평가 시드
 ```
 
-## 제출물
+## 정직한 상태
 
-- 아키텍처 다이어그램: [ARCHITECTURE.md](ARCHITECTURE.md) · [architecture.svg](architecture.svg)
-- 3분 데모 대본: [DEMO-SCRIPT.md](DEMO-SCRIPT.md) (2분 50초, 라이브 데모 URL 화면 녹화용)
-- 검증 기록: [VERIFICATION.md](VERIFICATION.md)
-- 데모 URL: https://people-os.workspace-easyware.workers.dev (라이브)
+**아직 없는 것**
+- 도구를 골라 부르는 자유형 에이전트, 에이전트 제안 승인 큐, 에이전트가 스스로 하는 외부 행동(메일 자동 발송 등)
+- 결재 완료 후 자동 처리(수강 승인·휴가 확정) — 훅 자리만 있음
+- 멀티테넌시(한 조직 기준), HWP 5.0 바이너리 변환(HWPX·PDF로 올려야 함)
+- 실제 조직에서의 효과 측정 — **측정한 숫자가 없습니다**
 
-## 아직 없는 것 (공모전 이후)
+**확인하지 못한 것** (이번 문서 개정 기준)
+- 이번 개정에서 라이브 동작을 다시 확인하지 않았습니다 (작업 VM에서 workers.dev에 접속할 수 없음). 위 표의 "기록 있음"은 이전 검증 기록입니다.
+- AI Gateway 로그가 라이브에서 찍히는지, Turnstile 키가 라이브에 설정돼 있는지
+- 외부 메일 수신·실제 메일 발송 end-to-end, 결재함·강의실의 라이브 배포 상태
+- `peopleos.site`는 메일 도메인입니다. 앱이 그 도메인으로도 열리는지는 확인하지 못했습니다 (대표 주소는 위 workers.dev 주소).
 
-- Plaud Dot 기기 자동 동기화 (페어링·스코프 토큰 필요 — ARCHITECTURE.md 참조), Hyperdrive 실연결, Cron 다이제스트, Turnstile 실연동
-- 덱 편집기 (Stage 2): 생성된 PPTX를 브라우저에서 고쳐 저장하는 FlowDesk식 제자리 편집 + R2 버전 관리 — ARCHITECTURE.md 참조
-- 3분 데모 영상 녹화본, 공모전 Google Form 제출, 행사 참가 등록
+## 문서
+
+- [ARCHITECTURE.md](ARCHITECTURE.md) — 상세 구조 (코드 `파일:행` 포함)
+- [DEMO-SCRIPT.md](DEMO-SCRIPT.md) — 3분 데모 대본
+- [VERIFICATION.md](VERIFICATION.md) — 검증 기록

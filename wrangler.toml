@@ -4,6 +4,11 @@ main = "src/index.ts"
 compatibility_date = "2025-07-18"
 compatibility_flags = ["nodejs_compat"]
 
+# 대표 주소 peopleos.site는 이미 Worker에 커스텀 도메인으로 연결됨 (2026-11-17, v6135db73).
+# wrangler.toml의 routes 항목은 토큰 권한 문제로 배포가 실패해서 제거함.
+# 커스텀 도메인은 Worker에 독립적으로 유지되므로 routes 없이도 계속 열린다.
+# workers.dev는 기본 주소로 그대로 유지된다.
+
 # 정적 프론트 (public/)
 [assets]
 directory = "./public"
