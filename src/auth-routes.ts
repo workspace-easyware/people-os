@@ -259,9 +259,24 @@ authApp.post("/auth/change-password", async (c) => {
 authApp.get("/admin/users", async (c) => {
   const admin = await requireAdmin(c);
   if (!admin) return fail(c, 401, "로그인이 필요합니다.");
-  const rows = await c.env.DB.prepare(
-    "SELECT id, email, name, role, coaching_role, status, created_at FROM users ORDER BY created_at, email",
-  ).all<{ id: string; email: string; name: string; role: string; coaching_role: string; status: string; created_at: string }>();
+  type Row = {
+    id: string; email: string; name: string; role: string; coaching_role: string; status: string; created_at: string;
+    department_id: string | null; department_name: string | null;
+  };
+  let rows: D1Result<Row>;
+  try {
+    // 조직관리 (2026-11-17): 소속 부서 id·이름을 함께 준다.
+    rows = await c.env.DB.prepare(
+      `SELECT u.id, u.email, u.name, u.role, u.coaching_role, u.status, u.created_at, u.department_id, d.name AS department_name
+       FROM users u LEFT JOIN departments d ON d.id = u.department_id ORDER BY u.created_at, u.email`,
+    ).all<Row>();
+  } catch (e) {
+    // migration 0024(departments·users.department_id) 미적용 DB: 부서 없이 기존 필드만.
+    if (!/no such (table|column)/i.test(e instanceof Error ? e.message : String(e))) throw e;
+    rows = await c.env.DB.prepare(
+      "SELECT id, email, name, role, coaching_role, status, created_at, NULL AS department_id, NULL AS department_name FROM users ORDER BY created_at, email",
+    ).all<Row>();
+  }
   return c.json({ ok: true, users: rows.results }, 200, { "cache-control": "no-store" });
 });
 
@@ -296,12 +311,20 @@ authApp.patch("/admin/users/:id", async (c) => {
   if (!admin) return fail(c, 401, "로그인이 필요합니다.");
   const id = c.req.param("id");
   const body = await readJson(c);
-  const target = await c.env.DB.prepare("SELECT id, role, status, coaching_role FROM users WHERE id = ?").bind(id).first<{
-    id: string; role: string; status: string; coaching_role: string | null;
+  const target = await c.env.DB.prepare("SELECT id, name, role, status, coaching_role FROM users WHERE id = ?").bind(id).first<{
+    id: string; name: string; role: string; status: string; coaching_role: string | null;
   }>();
   if (!target) return fail(c, 404, "계정을 찾을 수 없습니다.");
-  // 자기 계정의 역할·상태·코칭 역할은 바꿀 수 없다 (세션 관리자 기준. 시크릿 경로는 운영용으로 허용).
-  if (admin !== "secret" && admin.id === id) return fail(c, 403, "자기 계정의 역할·상태·코칭 역할은 바꿀 수 없습니다.");
+  // 이름 (조직관리 2026-11-17): 1~100자, 앞뒤 공백 제거. 자기 계정의 이름은 바꿀 수 있다.
+  let name = target.name;
+  if (body.name !== undefined) {
+    const n = typeof body.name === "string" ? body.name.trim() : "";
+    if (!n || n.length > 100) return fail(c, 400, "이름은 1~100자로 입력하세요.");
+    name = n;
+  }
+  // 자기 계정의 역할·상태·코칭 역할은 바꿀 수 없다 (세션 관리자 기준. 시크릿 경로는 운영용으로 허용). 이름만 허용.
+  const touchesAccess = body.role !== undefined || body.status !== undefined || body.coaching_role !== undefined;
+  if (admin !== "secret" && admin.id === id && touchesAccess) return fail(c, 403, "자기 계정의 역할·상태·코칭 역할은 바꿀 수 없습니다.");
   if (body.coaching_role !== undefined && body.coaching_role !== "coach" && body.coaching_role !== "coachee") {
     return fail(c, 400, "코칭 역할은 coach 또는 coachee만 가능합니다.");
   }
@@ -310,9 +333,10 @@ authApp.patch("/admin/users/:id", async (c) => {
   const coachingRole = body.coaching_role === "coach" || body.coaching_role === "coachee"
     ? body.coaching_role
     : normalizeCoachingRole(target.coaching_role);
-  await c.env.DB.prepare("UPDATE users SET role = ?, status = ?, coaching_role = ? WHERE id = ?").bind(role, status, coachingRole, id).run();
+  await c.env.DB.prepare("UPDATE users SET name = ?, role = ?, status = ?, coaching_role = ? WHERE id = ?")
+    .bind(name, role, status, coachingRole, id).run();
   if (status === "inactive") await revokeSessions(c.env, id);
-  return c.json({ ok: true, user: { id, role, status, coaching_role: coachingRole } }, 200, { "cache-control": "no-store" });
+  return c.json({ ok: true, user: { id, name, role, status, coaching_role: coachingRole } }, 200, { "cache-control": "no-store" });
 });
 
 authApp.post("/admin/users/:id/reset", async (c) => {
