@@ -8,6 +8,12 @@
 <!-- S4 관측 · 평가: obs.css(토큰·공통) 다음에 evals.css -->
 <link rel="stylesheet" href="/obs/obs.css" />
 <link rel="stylesheet" href="/obs/evals.css" />
+<link rel="stylesheet" href="/email.css" />
+<link rel="stylesheet" href="/pitch.css" />
+<link rel="stylesheet" href="/lms.css" />
+<link rel="stylesheet" href="/approval.css" />
+<link rel="stylesheet" href="/org.css" />
+<link rel="stylesheet" href="/calendar.css" />
 <style>
   /* S4 관측 탭의 하위 탭 바 (M6). 기존 토큰만 쓴다. */
   .obs-subtabs{display:flex;gap:var(--space-2,8px);flex-wrap:wrap;margin:0 0 var(--space-4,16px);border-bottom:1px solid var(--obs-line,#e4e4e7)}
@@ -58,6 +64,7 @@
       <button class="primary" type="submit" id="loginBtn">로그인</button>
     </form>
     <p class="muted" style="margin-top:14px">처음 접속하거나 비밀번호를 잊으셨다면 HR 관리자에게 설정 링크를 요청하세요.</p>
+    <p class="muted"><a href="/pitch.html">로그인 없이 발표자료 보기 →</a></p>
   </div>
   <div class="auth-box" id="setupBox" style="display:none">
     <h2>내 비밀번호 설정</h2>
@@ -78,20 +85,27 @@
   <div class="side-head"><button class="logo" type="button" onclick="switchTab('home')"><b>일</b><span>일잇 <i>People OS</i></span></button></div>
   <nav class="tabs">
     <button class="nav-active" data-tab="home"><span class="nav-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg></span><span class="nav-label">홈</span></button>
-    <button data-tab="upload"><span class="nav-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="2" width="6" height="12" rx="3"/><path d="M5 10v1a7 7 0 0 0 14 0v-1"/><line x1="12" y1="19" x2="12" y2="23"/><line x1="8" y1="23" x2="16" y2="23"/></svg></span><span class="nav-label">녹음전사.문서저장</span></button>
-    <button data-tab="ask"><span class="nav-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg></span><span class="nav-label">HR 규정 검색</span></button>
-    <button data-tab="personal"><span class="nav-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg></span><span class="nav-label">개인 업무 검색</span></button>
-    <button data-tab="coaching"><span class="nav-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polygon points="16.24 7.76 14.12 14.12 7.76 16.24 9.88 9.88 16.24 7.76"/></svg></span><span class="nav-label">코칭 리플렉션</span></button>
+    <button data-tab="email"><span class="nav-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 4h16a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2z"/><polyline points="22 6 12 13 2 6"/></svg></span><span class="nav-label">메일함</span><span class="nav-count" id="emailUnreadBadge" style="display:none"></span></button>
+    <button data-tab="approval"><span class="nav-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><polyline points="9 15 11 17 15 13"/></svg></span><span class="nav-label">결재함</span><span class="nav-count" id="apvPendingBadge" style="display:none"></span></button>
+    <button data-tab="calendar"><span class="nav-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg></span><span class="nav-label">캘린더</span></button>
     <button data-tab="tasks"><span class="nav-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 11 12 14 22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg></span><span class="nav-label">할 일</span></button>
+    <button data-tab="upload"><span class="nav-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="2" width="6" height="12" rx="3"/><path d="M5 10v1a7 7 0 0 0 14 0v-1"/><line x1="12" y1="19" x2="12" y2="23"/><line x1="8" y1="23" x2="16" y2="23"/></svg></span><span class="nav-label">녹음전사.문서저장</span></button>
+    <button data-tab="coaching"><span class="nav-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polygon points="16.24 7.76 14.12 14.12 7.76 16.24 9.88 9.88 16.24 7.76"/></svg></span><span class="nav-label">코칭 리플렉션</span></button>
+    <button data-tab="lms"><span class="nav-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="4" width="20" height="14" rx="2"/><polygon points="10 8 15 11 10 14"/><line x1="8" y1="21" x2="16" y2="21"/></svg></span><span class="nav-label">강의실</span></button>
+    <button data-tab="personal"><span class="nav-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg></span><span class="nav-label">개인 업무 검색</span></button>
+    <button data-tab="ask"><span class="nav-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg></span><span class="nav-label">HR 규정 검색</span></button>
     <button data-tab="library"><span class="nav-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/></svg></span><span class="nav-label">라이브러리</span></button>
     <button data-tab="obs"><span class="nav-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg></span><span class="nav-label">관측 · 평가</span></button>
     <button data-tab="admin"><span class="nav-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg></span><span class="nav-label">사용자 관리</span></button>
+    <button data-tab="org"><span class="nav-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="2" width="6" height="5" rx="1"/><rect x="2" y="17" width="6" height="5" rx="1"/><rect x="16" y="17" width="6" height="5" rx="1"/><path d="M12 7v5M5 17v-3h14v3"/></svg></span><span class="nav-label">조직관리</span></button>
     <button data-tab="about"><span class="nav-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg></span><span class="nav-label">소개</span></button>
+    <button data-tab="pitch"><span class="nav-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="12" y1="17" x2="12" y2="21"/><line x1="8" y1="21" x2="16" y2="21"/><polyline points="6 13 10 9 13 12 18 7"/></svg></span><span class="nav-label">발표자료</span></button>
   </nav>
   <button class="collapse-btn" id="collapseBtn" type="button" onclick="toggleSidebar()">« 접기</button>
   <div class="user-chip" id="userChip" style="display:none">
     <div class="who"><b id="userChipName"></b><span id="userChipMeta"></span></div>
     <button type="button" onclick="doLogout()">로그아웃</button>
+    <button class="user-avatar" id="userAvatar" type="button" onclick="doLogout()" title=""></button>
   </div>
 </aside>
 <div class="content">
@@ -99,18 +113,24 @@
   <div class="hero">
     <h1>일잇 People OS</h1>
     <p class="sub">HR·코칭 인텔리전스 플랫폼 <span id="health" class="badge">health 확인 중…</span></p>
+    <button class="ntf-bell" id="ntfBell" type="button" aria-label="알림" title="알림" style="display:none" onclick="ntfToggle(event)">🔔<span class="ntf-count" id="ntfCount" style="display:none"></span></button>
+    <div class="ntf-panel" id="ntfPanel" role="dialog" aria-label="알림">
+      <header><b>알림</b><button type="button" onclick="ntfReadAll()">모두 읽음</button></header>
+      <div class="ntf-list" id="ntfList"></div>
+    </div>
   </div>
 
   <section id="tab-home" class="active">
     <div class="stats" id="homeStats"></div>
     <div class="card home-card">
-      <h2>아침 브리핑</h2>
-      <div id="homeDigest"></div>
+      <h2>메일함</h2>
+      <div id="homeEmail"></div>
+      <div class="btnrow"><button class="secondary" onclick="switchTab('email')">메일함 열기 →</button></div>
     </div>
     <div class="card home-card">
-      <h2>최근 문서</h2>
-      <div id="homeDocs"></div>
-      <div class="btnrow"><button class="secondary" onclick="switchTab('upload');setUpPane('doc')">새 문서 업로드 →</button></div>
+      <h2>결재</h2>
+      <div id="homeApproval"></div>
+      <div class="btnrow"><button class="secondary" onclick="apvGo('PENDING')">결재함 열기 →</button></div>
     </div>
     <div class="card home-card">
       <h2>열린 할 일</h2>
@@ -118,8 +138,31 @@
       <div class="btnrow"><button class="secondary" onclick="switchTab('tasks')">할 일 전체 보기 →</button></div>
     </div>
     <div class="card home-card">
+      <h2>최근 문서</h2>
+      <div id="homeDocs"></div>
+      <div class="btnrow"><button class="secondary" onclick="switchTab('upload');setUpPane('doc')">새 문서 업로드 →</button></div>
+    </div>
+    <div class="card home-card">
       <h2>최근 리플렉션</h2>
       <div id="homeRefl"></div>
+    </div>
+    <div class="card home-card" id="homeLmsCard" style="display:none">
+      <h2>이어서 듣기</h2>
+      <div id="homeLms"></div>
+    </div>
+    <div class="card home-card">
+      <h2>빠른 검색</h2>
+      <div class="btnrow"><button class="secondary" onclick="switchTab('personal')">개인 업무 검색 →</button><button class="secondary" onclick="switchTab('ask')">HR 규정 검색 →</button></div>
+    </div>
+    <div class="card home-card">
+      <h2>라이브러리</h2>
+      <p class="small">파일 목록, 규정, 리플렉션, 답변 대기 질문을 한곳에서 봅니다.</p>
+      <div class="btnrow"><button class="secondary" onclick="switchTab('library')">라이브러리 열기 →</button></div>
+    </div>
+    <div class="card home-card"><h2>에이전트 활동</h2><div id="homeAgentActivity"></div></div>
+    <div class="card home-card">
+      <h2>아침 브리핑</h2>
+      <div id="homeDigest"></div>
     </div>
     <div class="card home-card" id="homeByUserCard" style="display:none">
       <h2>사용자별</h2>
@@ -191,6 +234,29 @@
     </div>
   </section>
 
+  <section id="tab-lms">
+    <div class="card" id="lmsListCard">
+      <h2>강의실</h2>
+      <p class="muted">유튜브 강의와 사내 영상을 이어서 듣고, 완료한 강의를 기록합니다.</p>
+      <div id="lmsList"></div>
+    </div>
+    <div class="card" id="lmsCourseCard" style="display:none">
+      <div class="lms-head">
+        <button type="button" class="secondary" onclick="lmsBack()">← 과정 목록</button>
+        <h2 id="lmsCourseTitle"></h2>
+        <div id="lmsCourseProg"></div>
+      </div>
+      <div class="lms-body">
+        <div>
+          <div id="lmsPlayer"></div>
+          <div id="lmsTitle"></div>
+          <div id="lmsActions"></div>
+        </div>
+        <div class="lms-lessons" id="lmsLessonList"></div>
+      </div>
+    </div>
+  </section>
+
   <section id="tab-personal">
     <div class="card">
       <h2>개인 업무 검색</h2>
@@ -233,6 +299,65 @@
     </div>
   </section>
 
+  <section id="tab-email">
+    <div class="card perspective-bar email-head">
+      <div><b>내 메일 주소</b> <span class="badge" id="emailMyAddr">—</span></div>
+      <div class="email-search">
+        <input type="search" id="emailSearch" placeholder="제목·본문·보낸 사람 검색" onkeydown="if(event.key==='Enter')emailDoSearch()" />
+        <button class="secondary" type="button" onclick="emailDoSearch()">검색</button>
+        <button class="primary" type="button" onclick="emailCompose()">새 메일</button>
+      </div>
+    </div>
+    <div class="obs-subtabs" role="tablist" aria-label="메일함">
+      <button type="button" role="tab" id="emailFolder-in" aria-selected="true" onclick="emailSetFolder('in')">받은 메일</button>
+      <button type="button" role="tab" id="emailFolder-starred" aria-selected="false" onclick="emailSetFolder('starred')">별표</button>
+      <button type="button" role="tab" id="emailFolder-out" aria-selected="false" onclick="emailSetFolder('out')">보낸 메일</button>
+      <select id="emailScope" style="display:none" onchange="emailLoad(1)" aria-label="범위 (HR 관리자)">
+        <option value="all">전체 메일 (HR 관리자)</option>
+        <option value="mine">내 메일만</option>
+        <option value="unassigned">공용 · 미지정</option>
+      </select>
+    </div>
+    <div class="card" id="emailListCard">
+      <div id="emailList"><p class="loading">불러오는 중…</p></div>
+      <div class="btnrow" id="emailPager"></div>
+    </div>
+    <div class="card" id="emailDetailCard" style="display:none"></div>
+    <div class="card" id="emailComposeCard" style="display:none">
+      <h2 id="emailComposeTitle">새 메일</h2>
+      <p class="small">보내는 주소: <b id="emailFromAddr">—</b> · Resend로 발송합니다.</p>
+      <input type="text" id="emailTo" placeholder="받는 사람 (쉼표로 구분)" />
+      <input type="text" id="emailCc" placeholder="참조 (선택)" />
+      <input type="text" id="emailSubject" placeholder="제목" />
+      <textarea id="emailBody" placeholder="본문"></textarea>
+      <input type="hidden" id="emailReplyToId" />
+      <div class="btnrow">
+        <button class="primary" type="button" id="emailSendBtn" onclick="emailSend()">발송</button>
+        <button class="secondary" type="button" onclick="emailCloseCompose()">취소</button>
+      </div>
+      <div id="emailSendResult"></div>
+    </div>
+  </section>
+
+  <!-- 캘린더 (2026-11-17). 해시: #calendar · #calendar/<id>. 본문은 public/calendar.js. -->
+  <section id="tab-calendar"><div id="calendarMount"></div></section>
+
+  <!-- 결재함 (2026-11-17). 해시: #approval · #approval/<docId> (알림 메일 링크). 본문은 public/approval.js. -->
+  <section id="tab-approval">
+    <div class="card perspective-bar apv-head" id="apvListHead">
+      <div><b>결재함</b> <span class="small">내가 결재할 문서와 내가 올린 기안</span></div>
+      <button class="primary" type="button" onclick="apvNew()">새 기안</button>
+    </div>
+    <div class="obs-subtabs" role="tablist" aria-label="결재함" id="apvTabs"></div>
+    <div class="card" id="apvListCard">
+      <div class="apv-sub" id="apvSub" style="display:none"></div>
+      <div id="apvList"><p class="loading">불러오는 중…</p></div>
+      <div class="btnrow" id="apvPager"></div>
+    </div>
+    <div class="card" id="apvDetailCard" style="display:none"></div>
+    <div class="card" id="apvEditCard" style="display:none"></div>
+  </section>
+
   <section id="tab-library">
     <div class="card">
       <h2>라이브러리</h2>
@@ -261,7 +386,24 @@
 
   <!-- 사용자 관리 (2026-11-15, HR admin 전용). 계정 목록·생성·설정 링크 발급·역할/상태 변경. -->
   <section id="tab-admin">
-    <div class="card">
+    <div class="obs-subtabs" role="tablist" aria-label="사용자 관리">
+      <button type="button" role="tab" id="adminSub-users" aria-selected="true" onclick="adminSetPane('users')">사용자</button>
+      <button type="button" role="tab" id="adminSub-depts" aria-selected="false" onclick="adminSetPane('depts')">부서</button>
+    </div>
+    <div class="card" id="adminDeptCard" style="display:none">
+      <h2>부서 관리</h2>
+      <p class="muted">부서장이 결재선의 첫 결재자가 됩니다. 부서장이 없는 부서의 사용자는 기본 결재선으로 기안할 수 없습니다.</p>
+      <form class="admin-form" id="deptCreateForm">
+        <span><label for="deptNewCode">코드</label><br><input id="deptNewCode" type="text" required maxlength="50" style="width:110px" /></span>
+        <span><label for="deptNewName">이름</label><br><input id="deptNewName" type="text" required maxlength="100" style="width:150px" /></span>
+        <span><label for="deptNewParent">상위 부서</label><br><select id="deptNewParent"></select></span>
+        <span><label for="deptNewManager">부서장</label><br><select id="deptNewManager"></select></span>
+        <button class="primary" type="submit">부서 추가</button>
+      </form>
+      <div style="color:#b91c1c;font-size:13px;min-height:18px" id="deptMsg"></div>
+      <div id="adminDepts"></div>
+    </div>
+    <div class="card" id="adminUsersCard">
       <h2>사용자 관리</h2>
       <p class="muted">HR 관리자만 볼 수 있습니다. 계정을 만들면 설정 링크가 나오고, 받은 사람이 링크에서 비밀번호를 정하면 계정이 활성화됩니다.</p>
       <form class="admin-form" id="adminCreateForm">
@@ -274,7 +416,7 @@
       <div class="ok" id="adminCreateMsg" style="color:#166534;font-size:13px;min-height:18px;word-break:break-all"></div>
       <div id="adminUsers"><p class="loading">사용자 목록을 불러오는 중입니다…</p></div>
     </div>
-    <div class="card">
+    <div class="card" id="adminPwCard">
       <h2>내 비밀번호 변경</h2>
       <form class="admin-form" id="changePwForm">
         <span><label for="pwCurrent">현재 비밀번호</label><br><input id="pwCurrent" type="password" autocomplete="current-password" required /></span>
@@ -285,50 +427,77 @@
     </div>
   </section>
 
+  <!-- 조직관리 (2026-11-17, HR admin 전용). 부서·부서장·구성원 소속·이름. 화면은 public/org.js. -->
+  <section id="tab-org"><div id="orgMount"></div></section>
+
   <section id="tab-about">
     <div class="about-hero">
-      <h2>회의에서 코칭까지,<br>한 곳에서.</h2>
-      <p>전사 · 요약 · 질문 · 코칭 · PPTX 초안 — HR과 코칭의 하루를 잇는 작업 공간입니다.</p>
-      <p class="small">Cloudflare Workers 위에 만든 프로토타입입니다.</p>
+      <h2>회의에서 코칭까지,<br>일이 스스로 이어집니다.</h2>
+      <p>녹음을 올리면 전사·요약·색인이 알아서 끝나고, 규정 질문에는 근거를 붙여 답합니다. 사람은 확인하고 결정하는 일만 합니다.</p>
+      <p class="small">서버 없이 Cloudflare Worker 하나로 돌아갑니다 · Cloudflare Developer Day Seoul 2026 Use Case 출품작</p>
+      <p style="margin-top:18px"><button type="button" class="primary" onclick="switchTab('pitch')">발표자료 보기 →</button> <button type="button" onclick="switchTab('upload')">데모 따라 하기 →</button></p>
     </div>
     <div class="card">
-      <h2>파이프라인</h2>
-      <div class="steps"><span>전사</span> → <span>요약</span> → <span>질문</span> → <span>코칭</span> → <span>PPTX 초안</span></div>
+      <h2>People OS는 무엇인가요</h2>
+      <p>일잇 People OS는 HR 담당자, 코치, 코칭을 받는 구성원이 함께 쓰는 업무 공간입니다. 회의 녹음, 사내 규정, 업무 메일, 코칭 기록처럼 흩어져 있던 자료를 한곳에 모으고, AI가 그 자료를 읽어 다음 할 일을 준비합니다.</p>
+      <p>녹음 파일을 올리면 전사본이 만들어지고, 요약과 액션 아이템이 붙고, 나중에 검색할 수 있게 색인됩니다. 이 과정에서 사람이 누르는 버튼은 "올리기" 하나입니다. 규정이 궁금하면 문장으로 물어봅니다. 답에는 어느 규정 몇 조를 근거로 했는지가 함께 나옵니다. 근거가 없으면 답을 만들지 않고, 담당자가 답을 달 수 있게 질문을 기록해 둡니다.</p>
+      <p>별도 서버나 컨테이너가 없습니다. 화면, API, 메일 수신, 비동기 처리, 예약 작업이 모두 Cloudflare Worker 하나 안에 있습니다.</p>
+    </div>
+    <div class="card">
+      <h2>왜 만들었나요</h2>
+      <p><b>기록은 쌓이는데 다시 쓰이지 않습니다.</b> 회의와 코칭은 녹음으로 남지만, 다시 듣고 정리하는 데 회의만큼의 시간이 듭니다. 정리되지 않은 기록은 검색되지 않고, 검색되지 않는 기록은 없는 것과 같습니다.</p>
+      <p><b>같은 질문이 HR 담당자에게 반복됩니다.</b> "연차 3일 붙여 쓸 수 있나요?" 같은 질문의 답은 규정집에 있습니다. 하지만 구성원은 규정집을 찾기보다 담당자에게 묻습니다. 담당자는 같은 답을 여러 번 쓰고, 규정에 없는 예외는 담당자 머릿속에만 남습니다.</p>
+      <p><b>코칭이 세션 사이에 끊깁니다.</b> 코치는 지난 세션에서 어떤 질문이 통했는지, 어떤 패턴이 반복됐는지 기억에 의존합니다. 코칭을 받는 사람은 세션에서 다짐한 행동을 일주일 뒤에 잊습니다.</p>
+      <p><b>AI 도구는 따로 놉니다.</b> 전사 도구, 요약 도구, 챗봇, 메일이 각각 다른 서비스라 결과를 사람이 복사해 옮깁니다. 어떤 AI가 무엇을 근거로 답했는지 나중에 확인할 길도 없습니다.</p>
+    </div>
+    <div class="pt-grid" data-cols="2">
+      <div class="pt-card"><h3>올리면 끝까지 갑니다</h3><p>녹음 한 번 올리면 전사, 요약, 색인이 순서대로 이어집니다. 중간에 실패하면 자동으로 다시 시도하고, 그래도 안 되면 어디서 멈췄는지 보여 줍니다.</p></div>
+      <div class="pt-card"><h3>근거 없이는 답하지 않습니다</h3><p>모든 답에 출처 문서와 조문이 붙습니다. 근거를 찾지 못하면 "모른다"고 답하고 질문을 답변 대기 목록에 올립니다.</p></div>
+      <div class="pt-card"><h3>물을수록 조직이 똑똑해집니다</h3><p>답변 대기 질문에 담당자가 답을 달면 그 답이 사내 지식으로 색인됩니다. 다음에 같은 질문이 오면 그 지식을 출처로 답합니다.</p></div>
+      <div class="pt-card"><h3>결정은 사람이 합니다</h3><p>AI는 메일 답장 초안까지만 씁니다. 발송은 사람이 읽고 직접 누릅니다. 발표 자료도 개요를 사람이 고친 뒤에 만듭니다.</p></div>
+    </div>
+    <div class="card">
+      <h2>무엇을 할 수 있나요</h2>
       <ul>
-        <li><b>전사</b> — 음성 파일을 올리면 Whisper가 텍스트로 바꿉니다. 긴 녹음은 구간별로 나눠 전사하고, 전사가 끝나면 요약·색인까지 자동 이어집니다.</li>
-        <li><b>요약</b> — 전사본에서 핵심 요약과 액션을 뽑습니다. 액션은 할 일로 저장하고, PPTX 초안으로 내려받을 수 있습니다.</li>
-        <li><b>질문</b> — HR 규정을 근거로 답합니다. 근거가 없으면 답을 지어내지 않고 답변 대기 목록에 기록합니다.</li>
-        <li><b>코칭</b> — 코칭 전사본에서 핵심 질문과 패턴을 뽑아 다음 세션을 준비합니다.</li>
-        <li><b>PPTX 초안</b> — 요약으로 실제 .pptx 파일을 만듭니다. 개요를 먼저 고쳐서 만들 수도 있습니다.</li>
+        <li><b>홈</b> — 안 읽은 메일, 열린 할 일, 최근 문서와 리플렉션, 아침 브리핑을 한 화면에서 봅니다. 아침 브리핑은 매일 07:00에 전날 기록을 모아 자동으로 만들어집니다.</li>
+        <li><b>메일함</b> — <code>@peopleos.site</code> 주소로 온 메일이 내 메일함에 들어옵니다. AI 답장 초안을 받아 고쳐서 보낼 수 있고, 메일을 개인 업무 검색에 넣을 수 있습니다.</li>
+        <li><b>결재함</b> — 기안하면 부서장과 HR 관리자 순서로 결재선이 자동으로 잡힙니다. 승인·반려·회수의 모든 기록이 감사 이력으로 남습니다.</li>
+        <li><b>할 일</b> — 요약에서 나온 액션을 한 번 눌러 할 일로 옮기고 체크합니다.</li>
+        <li><b>녹음전사 · 문서저장</b> — 음성 파일(최대 25MB)을 전사합니다. 긴 녹음은 구간으로 나눠 처리하고 진행 단계를 보여 줍니다. PDF, DOCX, XLSX, HWPX, 이미지 문서(최대 10MB)도 올려 색인합니다.</li>
+        <li><b>코칭 리플렉션</b> — 코치에게는 핵심 질문·반복 패턴·다음 세션 질문을, 코칭 대상에게는 자기 성찰 포인트와 기한이 붙은 액션 플랜을 만들어 줍니다. 같은 전사본에서 역할에 따라 다른 결과가 나옵니다.</li>
+        <li><b>강의실</b> — 유튜브 강의와 사내 영상을 과정으로 묶어 수강하고 진도를 기록합니다. 사내 영상은 로그인한 사람에게만 스트리밍됩니다.</li>
+        <li><b>개인 업무 검색</b> — 내가 올린 전사본·문서·메일에서만 답을 찾습니다. 다른 사람의 자료는 검색되지 않습니다.</li>
+        <li><b>HR 규정 검색</b> — 사내 규정을 근거로 답합니다. 조문 단위로 출처를 보여 줍니다.</li>
+        <li><b>라이브러리</b> — 문서, 규정, 리플렉션, 답변 대기 질문을 모아 봅니다. 요약으로 PPTX 초안을 만들어 내려받습니다.</li>
+        <li><b>관측 · 평가</b> (HR 관리자) — AI가 답한 과정을 단계별로 추적하고, 골든 질문 세트로 품질을 매일 자동 평가하고, 낮은 점수와 회귀를 개선 목록으로 모읍니다.</li>
+        <li><b>사용자 관리</b> (HR 관리자) — 계정을 만들고 역할(HR 관리자 / 일반, 코치 / 코칭 대상)을 정합니다.</li>
       </ul>
     </div>
     <div class="card">
-      <h2>데모 흐름</h2>
+      <h2>누가 어떻게 쓰나요</h2>
+      <h3>HR 담당자의 하루</h3>
+      <div class="pt-flow"><span>아침 브리핑 확인</span><span>문의 메일의 AI 답장 초안을 고쳐 발송</span><span>답변 대기 질문에 답을 달아 사내 지식으로 게시</span><span>관측·평가에서 어제 낮은 점수를 받은 답 확인</span></div>
+      <h3>코치의 하루</h3>
+      <div class="pt-flow"><span>코칭 세션 녹음 업로드("코칭 세션으로 표시")</span><span>전사·요약이 끝나면 코칭 리플렉션 생성</span><span>다음 세션 질문 3개 확인</span><span>요약으로 PPTX 초안 생성</span></div>
+      <h3>코칭 대상의 하루</h3>
+      <div class="pt-flow"><span>같은 세션 전사본으로 자기 성찰 포인트와 액션 플랜 받기</span><span>액션을 할 일로 저장</span><span>"지난 코칭에서 뭐라고 했지?"를 개인 업무 검색으로 확인</span><span>규정이 궁금하면 HR 규정 검색</span></div>
+    </div>
+    <div class="card">
+      <h2>믿고 쓸 수 있나요</h2>
       <ul>
-        <li>홈 대시보드에서 현황을 보고, 업로드 탭에서 샘플 전사본을 불러옵니다.</li>
-        <li>요약하고, 액션을 할 일로 저장하고, PPTX 초안을 내려받습니다.</li>
-        <li>질문 탭에서 “연차 3일 쓸 수 있어?”라고 물어보면 규정 근거와 함께 답합니다.</li>
-        <li>근거 없는 질문은 답변 대기 목록에 쌓이고, 담당자가 답을 달면 같은 질문에 암묵지 출처로 답합니다.</li>
-        <li>코칭 탭에서 리플렉션을 만들어 봅니다.</li>
+        <li><b>지어내지 않습니다.</b> 전사가 실패하면 빈 전사본을 만들지 않고 "대기"로 남깁니다. 근거가 없으면 답하지 않습니다. 평가 점수를 계산하지 못하면 0점이 아니라 "오류"로 기록합니다.</li>
+        <li><b>내 자료는 나만 봅니다.</b> 개인 문서·전사본·메일은 소유자 기준으로 나뉘어 저장되고 검색됩니다.</li>
+        <li><b>AI가 한 일이 기록에 남습니다.</b> 질문마다 어떤 근거 후보가 올라왔고 왜 채택·탈락했는지, 어느 단계가 몇 ms 걸렸는지 저장합니다.</li>
+        <li><b>AI가 멈춰도 앱은 멈추지 않습니다.</b> 판단 모델 호출이 실패하면 그 단계를 건너뛰고 정상 경로로 진행합니다.</li>
       </ul>
     </div>
     <div class="card">
-      <h2>쓰는 Cloudflare 기능</h2>
-      <ul>
-        <li><b>Workers</b> — API·화면을 서빙하는 서버리스 백엔드</li>
-        <li><b>D1</b> — 문서·규정·세션·할 일·리플렉션 저장</li>
-        <li><b>R2</b> — 음성·문서 원본·PPTX 파일 저장</li>
-        <li><b>KV</b> — 질문 캐시·속도 제한</li>
-        <li><b>Durable Objects</b> — 대화 세션 기억</li>
-        <li><b>Workers AI</b> — 전사(Whisper)·요약·답변·코칭·임베딩</li>
-        <li><b>Vectorize</b> — 규정·문서 근거 검색</li>
-        <li><b>Queues</b> — 전사 → 요약 → 색인 비동기 파이프라인</li>
-        <li><b>AI Gateway</b> — AI 호출 캐시·속도 제한·로그</li>
-        <li><b>Cron</b> — 매일 07:00 아침 다이제스트</li>
-        <li><b>Turnstile</b> — 질문 폼 스팸·봇 방지</li>
-      </ul>
+      <h2>어떻게 만들었나요</h2>
+      <p>서버가 없습니다. Cloudflare Worker 하나가 화면, API, 메일 수신, 큐 처리, 예약 작업을 모두 맡습니다. 데이터는 D1, R2, KV, Vectorize 네 곳에 역할을 나눠 담고, 전사부터 답변·평가까지의 AI는 전부 Workers AI에서 돕니다.</p>
+      <p><a href="#pitch/architecture" onclick="switchTab('pitch/architecture');return false">발표자료에서 구조 자세히 보기 →</a></p>
     </div>
   </section>
+  <section id="tab-pitch"><div id="pitchMount"></div></section>
 </main>
 </div>
 </div>
@@ -340,20 +509,28 @@
 <script src="/obs/evals.js"></script>
 <script src="/obs/gaps.js"></script>
 <script src="/obs/datasets.js"></script>
+<script src="/email.js"></script>
+<script src="/pitch.js"></script>
+<script src="/agent-activity.js"></script>
+<script src="/lms-player.js"></script>
+<script src="/lms.js"></script>
+<script src="/approval.js"></script>
+<script src="/org.js"></script>
+<script src="/calendar.js"></script>
 <script>
 let docId = null, sessionId = null, lastSummaryText = '', lastSummary = [], lastActions = [], lastDocTitle = '';
 let lastAnswer = '', lastQuestion = '', turnstileToken = null, turnstileWidgetId = null;
 let personalSessionId = null, lastPersonalAnswer = '', lastPersonalQuestion = '';
 const $ = (id) => document.getElementById(id);
-const TABS = ['home','upload','ask','personal','coaching','tasks','library','obs','admin','about'];
+const TABS = ['home','email','approval','calendar','tasks','upload','coaching','lms','personal','ask','library','obs','admin','org','about','pitch'];
 // 로그인 (2026-11-15): 현재 사용자. null이면 미로그인. 역할이 'user'면 obs·admin 탭을 숨긴다.
 let currentUser = null;
-const ADMIN_TABS = ['obs', 'admin'];
+const ADMIN_TABS = ['obs', 'admin', 'org'];
 // 코치 / 코칭 대상 (2026-11-16): 코칭 대상도 회사 직원이라 본인 업무 문서가 있다
 // (예: 영업부 Mercer의 업무 문서). 그래서 코칭 대상도 코치와 같은 일반 메뉴를 본다.
 // 메뉴 차이는 코칭 리플렉션 모드(코치용 vs 코칭 대상 자기 성찰+액션 플랜)이다.
 // hr_admin의 관리자 탭(obs·admin)은 coaching_role과 무관하게 보인다.
-const COACHEE_TABS = ['home', 'upload', 'ask', 'personal', 'coaching', 'tasks', 'library', 'about'];
+const COACHEE_TABS = ['home', 'email', 'approval', 'calendar', 'tasks', 'upload', 'coaching', 'lms', 'personal', 'ask', 'library', 'about', 'pitch'];
 function isCoachee() { return !!currentUser && currentUser.coaching_role !== 'coach'; }
 function tabAllowed(name) {
   if (!currentUser) return true;
@@ -372,12 +549,12 @@ function switchTab(name, fromHash) {
   if (currentUser && currentUser.role !== 'hr_admin' && ADMIN_TABS.includes(name)) { name = 'home'; sub = ''; }
   // 코칭 대상: 숨긴 탭(홈·녹음전사·개인 업무 검색·할 일·라이브러리)은 HR 규정 검색으로.
   if (!tabAllowed(name)) { name = 'ask'; sub = ''; }
-  if (name !== 'obs') sub = '';
-  else if (!sub) sub = 'traces';
-  const full = name === 'obs' ? 'obs/' + sub : name;
+  if (name !== 'obs' && name !== 'approval' && name !== 'calendar' && name !== 'pitch') sub = '';
+  else if (name === 'obs' && !sub) sub = 'traces';
+  const full = sub ? name + '/' + sub : name; // approval/<docId>는 알림 링크 (결재 문서 상세)
   if (!fromHash && location.hash !== '#' + full) {
     location.hash = full;
-    if (name === 'obs') return; // hashchange가 다시 불러 한 번만 mount한다
+    if (name === 'obs' || name === 'approval' || name === 'calendar' || name === 'pitch') return; // hashchange가 다시 불러 한 번만 mount한다
   }
   document.querySelectorAll('.tabs button').forEach(x => x.classList.remove('nav-active'));
   document.querySelectorAll('section').forEach(x => x.classList.remove('active'));
@@ -388,9 +565,15 @@ function switchTab(name, fromHash) {
   if (name === 'personal') renderPerspectives();
   if (name === 'tasks') loadTasks();
   if (name === 'library') refreshLib();
+  if (name === 'email') emailOpen();
+  if (name === 'approval') apvOpen(sub);
   if (name === 'coaching') loadCoachingPickers();
-  if (name === 'admin') loadAdminUsers();
+  if (name === 'lms') lmsOpen(); else lmsLeave();
+  if (name === 'admin') { adminSetPane('users'); loadAdminUsers(); }
+  if (name === 'org') orgOpen();
+  if (name === 'calendar') calendarOpen(sub); else if (window.calendarLeave) calendarLeave();
   if (name === 'obs') renderObs(sub); else unmountObs();
+  if (name === 'pitch') pitchOpen($('pitchMount'), sub); else if (window.pitchLeave) pitchLeave();
 }
 // ---- S4 관측 · 평가 하위 탭 라우터 (public/obs/*.js의 mount 계약) ----
 // traces.js: 'traces' | 'trace/<id>' · evals.js: 'evals' | 'run/<id>' · gaps.js: 'gaps'
@@ -681,13 +864,16 @@ function ownerNote(j) { return j && j.asUser ? ` · <b>${esc(j.asUser)}</b>의 �
 // ---- 로그인 (2026-11-15) ----
 function applyRole() {
   const isAdmin = currentUser && currentUser.role === 'hr_admin';
-  document.querySelectorAll('.tabs button[data-tab="obs"], .tabs button[data-tab="admin"]').forEach(b => {
+  document.querySelectorAll('.tabs button[data-tab="obs"], .tabs button[data-tab="admin"], .tabs button[data-tab="org"]').forEach(b => {
     b.style.display = isAdmin ? '' : 'none';
   });
-  // 개인 업무 검색은 로그인 사용자만 (익명은 탭을 숨긴다).
-  document.querySelectorAll('.tabs button[data-tab="personal"]').forEach(b => {
+  // 개인 업무 검색·메일함은 로그인 사용자만 (익명은 탭을 숨긴다).
+  document.querySelectorAll('.tabs button[data-tab="personal"], .tabs button[data-tab="email"], .tabs button[data-tab="approval"], .tabs button[data-tab="calendar"], .tabs button[data-tab="lms"]').forEach(b => {
     b.style.display = currentUser ? '' : 'none';
   });
+  // 알림 종 + 결재 대기 배지: 로그인했을 때만 (익명은 숨기고 숫자를 비운다).
+  $('ntfBell').style.display = currentUser ? '' : 'none';
+  if (currentUser) apvHome(); else { $('apvPendingBadge').style.display = 'none'; ntfPaintCount(0); }
   // 코칭 대상: COACHEE_TABS + (hr_admin이면) 관리자 탭만 렌더링한다.
   if (currentUser) {
     document.querySelectorAll('.tabs button[data-tab]').forEach(b => {
@@ -704,6 +890,8 @@ function applyRole() {
   const chip = $('userChip');
   if (currentUser) {
     $('userChipName').textContent = currentUser.name;
+    $('userAvatar').textContent = (currentUser.name || '?').trim().charAt(0) || '?';
+    $('userAvatar').title = (currentUser.name || '') + ' · 로그아웃';
     $('userChipMeta').textContent = currentUser.email + (isAdmin ? ' · HR 관리자' : ' · 일반 사용자') + (isCoachee() ? ' · 코칭 대상' : ' · 코치');
     chip.style.display = 'flex';
   } else {
@@ -744,7 +932,7 @@ async function doLogin(e) {
     $('loginPassword').value = '';
     hideAuthOverlay();
     applyRole();
-    switchTab('home');
+    switchTab(location.hash.slice(1) || 'home', !!location.hash.slice(1)); // 알림 메일 링크(#approval/<id>)로 들어왔으면 그대로 연다
   } catch (err) {
     $('loginErr').textContent = err.message;
   } finally {
@@ -792,8 +980,24 @@ async function loadAdminUsers() {
     return `<select aria-label="코칭 역할" ${self ? 'disabled title="자기 계정의 코칭 역할은 바꿀 수 없습니다"' : ''} onchange="setUserCoachingRole('${u.id}', this.value)">` +
       `<option value="coach"${v === 'coach' ? ' selected' : ''}>코치</option><option value="coachee"${v === 'coachee' ? ' selected' : ''}>코칭 대상</option></select>`;
   };
-  box.innerHTML = '<table class="admin-table"><thead><tr><th>이메일</th><th>이름</th><th>역할</th><th>코칭 역할</th><th>상태</th><th>동작</th></tr></thead><tbody>' +
-    j.users.map(u => `<tr><td>${esc(u.email)}</td><td>${esc(u.name)}</td><td>${roleLabel(u.role)}</td><td>${coachingCell(u)}</td><td>${statusLabel(u.status)}</td>` +
+  // 부서 (결재 A2): /api/admin/users는 department_id를 주지 않아서, 활성 사용자 검색(/api/approval/users)으로 현재 부서를 채운다.
+  const dj = await api('/api/approval/admin/departments').catch(() => ({ ok: false }));
+  const depts = dj.ok ? dj.departments.filter(d => d.is_active) : [];
+  const deptOf = {};
+  const first = await api('/api/approval/users').catch(() => ({ ok: false }));
+  (first.ok ? first.users : []).forEach(u => { deptOf[u.id] = u.department_id || ''; });
+  await Promise.all(j.users.filter(u => u.status === 'active' && !(u.id in deptOf)).map(async u => {
+    const r = await api('/api/approval/users?q=' + encodeURIComponent(u.email)).catch(() => ({ ok: false }));
+    const m = r.ok ? r.users.find(x => x.id === u.id) : null;
+    if (m) deptOf[u.id] = m.department_id || '';
+  }));
+  const deptCell = (u) => !dj.ok ? '—' :
+    `<select aria-label="부서" onchange="setUserDept('${u.id}', this.value)">` +
+    (u.id in deptOf ? '' : '<option value="" selected disabled>(미확인)</option>') +
+    `<option value=""${deptOf[u.id] === '' ? ' selected' : ''}>미지정</option>` +
+    depts.map(d => `<option value="${esc(d.id)}"${deptOf[u.id] === d.id ? ' selected' : ''}>${esc(d.name)}</option>`).join('') + '</select>';
+  box.innerHTML = '<table class="admin-table"><thead><tr><th>이메일</th><th>이름</th><th>부서</th><th>역할</th><th>코칭 역할</th><th>상태</th><th>동작</th></tr></thead><tbody>' +
+    j.users.map(u => `<tr><td>${esc(u.email)}</td><td>${esc(u.name)}</td><td>${deptCell(u)}</td><td>${roleLabel(u.role)}</td><td>${coachingCell(u)}</td><td>${statusLabel(u.status)}</td>` +
       `<td><div class="rowbtns">` +
       (u.status !== 'inactive' ? `<button type="button" onclick="issueUserLink('${u.id}')">설정 링크</button>` : '') +
       (u.status !== 'inactive' ? `<button type="button" onclick="resetUser('${u.id}')">초기화</button>` : '') +
@@ -853,6 +1057,58 @@ async function changeMyPassword(e) {
 $('loginForm').addEventListener('submit', doLogin);
 $('setupForm').addEventListener('submit', doSetup);
 $('adminCreateForm').addEventListener('submit', createAdminUser);
+// ---- 부서 관리 (결재 A2, hr_admin): /api/approval/admin/departments ----
+function adminSetPane(p) {
+  const d = p === 'depts';
+  $('adminSub-users').setAttribute('aria-selected', d ? 'false' : 'true');
+  $('adminSub-depts').setAttribute('aria-selected', d ? 'true' : 'false');
+  $('adminDeptCard').style.display = d ? '' : 'none';
+  $('adminUsersCard').style.display = d ? 'none' : '';
+  $('adminPwCard').style.display = d ? 'none' : '';
+  if (d) loadAdminDepts();
+}
+async function setUserDept(id, deptId) {
+  const j = await api('/api/approval/admin/users/' + encodeURIComponent(id) + '/department', { method: 'PUT', body: JSON.stringify({ department_id: deptId || null }) });
+  if (!j.ok) { alert('부서를 바꾸지 못했습니다. ' + (j.error || '')); loadAdminUsers(); }
+}
+let adminDeptList = [];
+async function loadAdminDepts() {
+  const [dj, uj] = await Promise.all([api('/api/approval/admin/departments'), api('/api/admin/users')]);
+  if (!dj.ok) { $('adminDepts').innerHTML = '<p class="err">부서 목록을 불러오지 못했습니다. ' + esc(dj.error || '') + '</p>'; return; }
+  adminDeptList = dj.departments;
+  const users = (uj.ok ? uj.users : []).filter(u => u.status === 'active');
+  const userOpts = (sel) => '<option value="">(없음)</option>' + users.map(u => `<option value="${esc(u.id)}"${u.id === sel ? ' selected' : ''}>${esc(u.name || u.email)}</option>`).join('');
+  const deptOpts = (sel, self) => '<option value="">(최상위)</option>' + dj.departments.filter(d => d.id !== self).map(d => `<option value="${esc(d.id)}"${d.id === sel ? ' selected' : ''}>${esc(d.name)}</option>`).join('');
+  $('deptNewParent').innerHTML = deptOpts('', '');
+  $('deptNewManager').innerHTML = userOpts('');
+  $('adminDepts').innerHTML = dj.departments.length
+    ? '<table class="admin-table"><thead><tr><th>코드</th><th>이름</th><th>상위</th><th>부서장</th><th>인원</th><th>사용</th><th></th></tr></thead><tbody>' +
+      dj.departments.map(d => `<tr id="deptRow-${esc(d.id)}"><td><input type="text" data-f="code" value="${escAttr(d.code)}" style="width:90px" /></td>
+        <td><input type="text" data-f="name" value="${escAttr(d.name)}" style="width:130px" /></td>
+        <td><select data-f="parent">${deptOpts(d.parent_id, d.id)}</select></td>
+        <td><select data-f="manager">${userOpts(d.manager_user_id)}</select></td>
+        <td>${d.member_count}</td>
+        <td><input type="checkbox" data-f="active" ${d.is_active ? 'checked' : ''} /></td>
+        <td><button type="button" onclick="saveDept('${escAttr(d.id)}')">저장</button></td></tr>`).join('') + '</tbody></table>'
+    : '<p class="empty">부서가 없습니다.</p>';
+}
+async function postDept(body) {
+  $('deptMsg').textContent = '';
+  const j = await api('/api/approval/admin/departments', { method: 'POST', body: JSON.stringify(body) });
+  if (!j.ok) { $('deptMsg').textContent = '저장하지 못했습니다. ' + (j.error || ''); return false; }
+  loadAdminDepts();
+  return true;
+}
+function saveDept(id) {
+  const row = $('deptRow-' + id), f = (k) => row.querySelector(`[data-f="${k}"]`);
+  const old = adminDeptList.find(d => d.id === id) || {};
+  postDept({ id, code: f('code').value, name: f('name').value, parent_id: f('parent').value || null, manager_user_id: f('manager').value || null, is_active: f('active').checked, sort_order: old.sort_order || 0 });
+}
+$('deptCreateForm').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const ok = await postDept({ code: $('deptNewCode').value, name: $('deptNewName').value, parent_id: $('deptNewParent').value || null, manager_user_id: $('deptNewManager').value || null });
+  if (ok) { $('deptNewCode').value = ''; $('deptNewName').value = ''; }
+});
 $('changePwForm').addEventListener('submit', changeMyPassword);
 function copySummary() {
   const text = lastSummaryText || '요약 결과가 없습니다.';
@@ -886,14 +1142,31 @@ function taskRow(t) {
   return `<div class="taskrow${t.done ? ' done' : ''}"><input type="checkbox" ${t.done ? 'checked' : ''} onchange="toggleTask('${t.id}')" />${owner}<span class="t-title">${esc(t.title)}</span>${t.source ? `<span class="t-src">${esc(t.source)}</span>` : ''}<button class="iconbtn" title="삭제" onclick="deleteTask('${t.id}')">×</button></div>`;
 }
 async function loadHome() {
-  const j = await api('/api/home');
+  const [j, em] = await Promise.all([
+    api('/api/home'),
+    api('/api/email/inbox?limit=5').catch(() => ({ ok: false })),
+  ]);
+  apvRenderHomeCard();
   if (!j.ok) return;
   const c = j.counts;
+  // 홈 통계도 메뉴 순서에 맞춘다: 안 읽은 메일 → 열린 할 일 → 문서 → 리플렉션.
   $('homeStats').innerHTML =
-    `<div class="stat"><b>${c.documents}</b><span>문서</span></div>` +
-    `<div class="stat"><b>${c.summaries}</b><span>요약 완료</span></div>` +
+    `<div class="stat"><b>${em && em.ok ? em.unread : '—'}</b><span>안 읽은 메일</span></div>` +
     `<div class="stat"><b>${c.openTasks}</b><span>열린 할 일</span></div>` +
+    `<div class="stat"><b>${c.documents}</b><span>문서</span></div>` +
     `<div class="stat"><b>${c.reflections}</b><span>리플렉션</span></div>`;
+  // 메일함 카드 (최근 5건, 안 읽은 것부터 — 클릭하면 해당 메일 상세로).
+  if (!em || !em.ok) {
+    $('homeEmail').innerHTML = '<p class="empty">로그인하면 내 메일을 볼 수 있습니다.</p>';
+  } else if (!em.emails.length) {
+    $('homeEmail').innerHTML = '<p class="empty">받은 메일이 없습니다.</p>';
+  } else {
+    $('homeEmail').innerHTML = em.emails.map(m => {
+      const unread = m.direction === 'in' && !m.is_read;
+      const who = m.direction === 'out' ? '나 → ' + emailName(m.to_addr) : emailName(m.from_addr);
+      return `<div class="taskrow" style="cursor:pointer" onclick="switchTab('email');emailView('${escAttr(m.id)}')"><span class="t-title">${unread ? '<b>● </b>' : ''}${esc(m.subject || '(제목 없음)')}</span><span class="badge">${esc(who)}</span><span class="t-src">${fmtDate(m.received_at)}</span></div>`;
+    }).join('');
+  }
   const adminHome = isAdminUser();
   $('homeDocs').innerHTML = j.recentDocuments.length
     ? j.recentDocuments.map(d => `<div class="taskrow"><span class="t-title">${esc(d.title)}</span><span class="badge">${esc(d.kind)}</span>${adminHome ? `<span class="badge" title="소유자">${esc(d.owner_name || '공용')}</span>` : ''}<span class="t-src">${fmtDate(d.created_at)}</span></div>`).join('')
@@ -918,6 +1191,8 @@ async function loadHome() {
         return `<div class="taskrow"><span class="t-title">${esc(pats[0] || '리플렉션')}</span>${who}<span class="t-src">${fmtDate(r.created_at)}</span></div>`;
       }).join('')
     : '<p class="empty">아직 리플렉션이 없습니다.</p>';
+  lmsHomeCard();
+  if (window.agentActivityCard) agentActivityCard($('homeAgentActivity'));
   try {
     const dg = await api('/api/digest');
     $('homeDigest').innerHTML = dg.ok && dg.digest
@@ -1298,10 +1573,13 @@ function timingsPanel(t) {
     ['질문 임베딩', 'Workers AI (bge-m3)', t.embed],
     ['근거 검색', 'Vectorize', t.vectorize],
     ['게이트·근거 정리', 'D1', t.gate],
+    ['질문 라우터', 'Workers AI', t.router, true],
+    ['토픽 가드', 'Workers AI', t.topic_guard, true],
+    ['재순위', 'Workers AI', t.rerank, true],
     ['답변 생성', 'Workers AI', t.llm],
   ].filter(([, , ms]) => typeof ms === 'number');
   const llmNote = t.llm === 0 ? ' — 호출 안 함 (근거 없음)' : '';
-  const items = rows.map(([name, prod, ms]) => `<li><b>${name}</b> · ${prod} · ${ms}ms${name === '답변 생성' ? llmNote : ''}</li>`).join('');
+  const items = rows.map(([name, prod, ms, judge]) => `<li><b>${name}</b>${judge ? ' <span class="badge">판단 모델</span>' : ''} · ${prod} · ${ms}ms${name === '답변 생성' ? llmNote : ''}</li>`).join('');
   return `<details class="timings"><summary>처리 과정 (전체 ${t.total ?? '?'}ms)</summary><ul>${items}</ul></details>`;
 }
 function renderAsk(j, targetId) {

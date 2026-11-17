@@ -1,0 +1,259 @@
+/* ==========================================================================
+   일잇 People OS — 발표자료 디자인 시스템 (public/pitch.css)  · O-A 2026-11-17
+   --------------------------------------------------------------------------
+   앱 안 탭(#pitch)과 독립 페이지(/pitch.html)가 같은 조각
+   public/pitch-content.html 을 불러와 이 파일로 그린다. 토큰은 styles.css
+   §1을 그대로 참조하고(먼저 불러야 한다), 읽는 글에만 필요한 값은 아래
+   .pt-root 변수로 따로 둔다. 참고 사이트를 다시 보고 바꿀 때는 §0 변수만
+   고친다. (참고 사이트는 O-A 세션에서 읽지 못해 presentation-plan.md 7장의
+   기본안 그대로다.)
+
+   ==== 조각 계약 (최종 — S-A·S-D가 따른다) =================================
+   파일: public/pitch-content.html — <html>·<head>·<body> 없이 조각만.
+   금지: <section> 태그 (styles.css가 모든 section을 display:none 한다),
+         <script>, 인라인 이벤트(onclick 등), javascript: 링크.
+         (pitch.js가 넣기 전에 지우지만, 처음부터 쓰지 않는다.)
+   공개: 로그인 없이 열린다. 계정·비밀번호·시크릿 값·내부 경로(/home/,
+         ~/workspace) 금지.
+
+   1) 히어로 (맨 위, 내비게이션의 "처음" 칩이 된다)
+     <header class="pt-hero" id="pt-top" data-key="top" data-nav="처음">
+       <p class="pt-hero-eyebrow">일잇 People OS</p>          (선택)
+       <h1>…</h1>
+       <p class="pt-hero-sub">…</p>
+       <p class="pt-hero-meta">…</p>
+     </header>
+     <div class="pt-keys">                                      (핵심 메시지 3개)
+       <a class="pt-keycard" href="#pt-serverless" data-keyno="1">
+         <strong>백엔드 서버가 없습니다</strong><p>…</p></a>
+       … data-keyno="2" → #pt-data, "3" → #pt-agentic
+     </div>
+     <div class="pt-live" data-live="health">
+       <span class="pt-live-text">지금 이 페이지를 서빙하는 Worker의 바인딩 상태입니다.</span>
+     </div>   ← 배지는 pitch.js가 /api/health로 채운다. 실패하면 띠가 숨는다.
+
+   2) 섹션 (히어로 다음, 순서대로. 내비게이션은 첫 섹션 바로 앞에 붙는다)
+     <article class="pt-sec" id="pt-<키>" data-key="<키>" data-nav="<칩 이름>"
+              data-group="biz|tech|end">
+       <header class="pt-sec-head"><span class="pt-num">01</span><h2>주장 문장</h2></header>
+       <p class="pt-lead">…</p>
+       … 본문 (p, h3, ul/ol, 아래 컴포넌트)
+       <p class="pt-src">근거: <code>src/…</code></p>
+     </article>
+     - id는 반드시 "pt-" + data-key. 키는 영문 소문자·숫자·하이픈.
+     - data-group: biz(비즈니스) / tech(기술) / end(마무리). 바뀌는 곳에
+       칩 사이 구분선이 생긴다.
+     - 핵심 섹션: class="pt-sec pt-key" data-keyno="1|2|3" → 남색 제목 띠 +
+       "핵심 N" 배지 (배지는 pitch.js가 넣는다. 조각에 쓰지 않는다).
+
+   3) 컴포넌트
+     .pt-grid[data-cols="2|3|4"] > .pt-card (h3 + p/ul)   카드 그리드 (760px 이하 1열)
+     .pt-flow > span (단계) / em (단계 사이 메모, 예: "큐")   단계 알약 + 화살표
+     .pt-table-wrap > table.pt-table (thead 권장)          좁은 화면에서 가로 스크롤
+     .pt-callout[data-tone="note|limit"] (b로 시작 권장)    강조 / 한계 상자
+     pre.pt-code (안에 <code> 없이 텍스트, &lt; 이스케이프)   코드 발췌
+     .pt-tags > span.badge                                 Cloudflare 기능 배지 줄
+     figure.pt-figure > a[href=그림] > img[width][height][alt] + figcaption
+                                                           다이어그램 (img에 width·height 필수)
+     .pt-src                                               근거(코드 위치) 작은 글씨
+     a[data-tab="upload"]                                  앱 탭 링크 — href는 비워 두거나 "#".
+                                                           pitch.js가 앱 안 "#upload", 독립 "/#upload"로 바꾼다
+     a[href="#pt-<키>"]                                    섹션 사이 링크 — pitch.js가 환경에 맞게 바꾼다
+
+   4) 주소 (pitch.js)
+     앱 안:  #pitch/<키>   (칩은 location.hash만 바꾼다 → hashchange → switchTab → pitchOpen)
+     독립:   /pitch.html#<키>   (#pt-<키>, #pitch/<키>도 받는다)
+     전역:   pitchOpen(mountEl, sectionKey), pitchLeave()
+   ========================================================================== */
+
+/* §0 발표자료 전용 변수 — 참고 사이트에 맞춰 바꿀 곳은 여기뿐 */
+.pt-root{
+  --pt-measure:880px;        /* 본문 최대 폭 */
+  --pt-body:16px;            /* 본문 크기 (앱은 14px) */
+  --pt-leading:1.7;
+  --pt-h2:26px;              /* 섹션 제목 */
+  --pt-h3:18px;
+  --pt-hero:36px;            /* 히어로 제목 (앱 안·760px 이하는 아래에서 줄인다) */
+  --pt-gap-sec:64px;         /* 섹션 사이 */
+  --pt-nav-h:44px;           /* 붙는 내비게이션 높이 */
+  --pt-nav-bg:rgba(246,246,247,.92);
+  --pt-chip-h:32px;
+  --pt-hero-bg:linear-gradient(135deg,var(--color-primary) 0%,#1d4e79 60%,var(--color-accent-700) 100%);
+  --pt-key-bg:var(--color-primary);
+  --pt-progress:var(--color-accent);
+  --pt-font:var(--font-sans);
+  font-family:var(--pt-font);
+  font-size:var(--pt-body);
+  line-height:var(--pt-leading);
+  color:var(--color-text);
+}
+
+/* §1 독립 페이지 껍데기 (/pitch.html) */
+body.pt-page{background:var(--color-bg)}
+.pt-topbar{background:var(--color-surface);border-bottom:1px solid var(--color-line)}
+.pt-topbar-in{max-width:var(--pt-measure,880px);margin:0 auto;padding:0 20px;height:52px;display:flex;align-items:center;justify-content:space-between;gap:12px}
+.pt-topbar .logo{font-size:15px;text-decoration:none}
+.pt-topbar a.btn{margin-top:0}
+.pt-main{max-width:calc(880px + 40px);margin:0 auto;padding:24px 20px 48px}
+.pt-footer{border-top:1px solid var(--color-line);background:var(--color-surface);color:var(--color-muted);font-size:var(--text-sm)}
+.pt-footer-in{max-width:880px;margin:0 auto;padding:20px;display:flex;flex-wrap:wrap;gap:8px 20px;justify-content:space-between}
+.pt-footer a{color:var(--color-primary)}
+.pt-state{color:var(--color-muted);font-size:var(--text-sm);padding:32px 0;text-align:center}
+.pt-state.err{color:var(--color-err);text-align:left}
+.pt-root[data-mode="app"]{max-width:var(--pt-measure);margin:0 auto}
+
+/* §2 히어로 · 핵심 메시지 카드 · 라이브 띠 */
+.pt-hero{background:var(--pt-hero-bg);color:#fff;border:1px solid var(--color-primary);border-radius:var(--radius-lg);padding:44px 36px;box-shadow:var(--shadow-lg);scroll-margin-top:calc(var(--pt-nav-h) + 16px)}
+.pt-hero-eyebrow{margin:0 0 8px;font-size:var(--text-sm);font-weight:var(--weight-bold);letter-spacing:.02em;color:rgba(255,255,255,.75)}
+.pt-hero h1{margin:0 0 12px;font-size:var(--pt-hero);line-height:1.2;letter-spacing:-.02em;font-weight:var(--weight-brand);color:#fff}
+.pt-hero h2{margin:0 0 12px;font-size:20px;line-height:1.4;font-weight:var(--weight-bold);color:#fff}
+.pt-hero p{margin:0 0 10px;color:rgba(255,255,255,.88);max-width:680px}
+.pt-hero-sub{font-size:17px;line-height:1.6}
+.pt-hero-meta{font-size:var(--text-xs);color:rgba(255,255,255,.65)!important;margin-top:16px!important}
+.pt-hero a{color:#fff}
+/* 앱 안: 위에 공통 .hero("일잇 People OS")가 이미 있으므로 한 단계 낮춘다 */
+.pt-root[data-mode="app"] .pt-hero{padding:28px 28px;box-shadow:none;background:var(--color-surface);color:var(--color-text);border-color:var(--color-line);border-top:3px solid var(--color-primary)}
+.pt-root[data-mode="app"] .pt-hero h1{font-size:26px;color:var(--color-primary)}
+.pt-root[data-mode="app"] .pt-hero h2{font-size:17px;color:var(--color-text)}
+.pt-root[data-mode="app"] .pt-hero p{color:var(--color-text-2)}
+.pt-root[data-mode="app"] .pt-hero-eyebrow,.pt-root[data-mode="app"] .pt-hero-meta{color:var(--color-muted)!important}
+.pt-root[data-mode="app"] .pt-hero a{color:var(--color-primary)}
+
+.pt-keys{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;margin:16px 0 0}
+a.pt-keycard{position:relative;display:block;text-decoration:none;color:var(--color-text);background:var(--color-surface);border:1px solid var(--color-line);border-radius:var(--radius);padding:16px 16px 16px 56px;transition:border-color var(--transition)}
+a.pt-keycard::before{content:attr(data-keyno);position:absolute;left:16px;top:16px;width:28px;height:28px;border-radius:50%;background:var(--color-primary);color:#fff;font-family:var(--font-mono);font-size:var(--text-sm);font-weight:var(--weight-bold);display:grid;place-items:center}
+a.pt-keycard:hover{border-color:var(--color-primary-line)}
+a.pt-keycard:focus-visible{outline:2px solid var(--color-accent);outline-offset:2px}
+a.pt-keycard strong{display:block;font-size:var(--text-md);line-height:1.4;color:var(--color-primary);margin:3px 0 6px}
+a.pt-keycard p{margin:0;font-size:var(--text-sm);line-height:var(--leading-sm);color:var(--color-text-2)}
+a.pt-keycard::after{content:"→";position:absolute;right:14px;top:16px;color:var(--color-text-3);font-size:var(--text-sm)}
+
+.pt-live{display:none;margin:12px 0 0;padding:10px 14px;border:1px solid var(--color-ok-line);background:var(--color-ok-bg);border-radius:var(--radius);font-size:var(--text-sm);line-height:var(--leading-sm);color:var(--color-text-2);align-items:center;flex-wrap:wrap;gap:6px 10px}
+.pt-live.is-ready{display:flex}
+.pt-live-text::before{content:"";display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--color-ok);margin-right:8px;vertical-align:1px;box-shadow:0 0 0 3px rgba(14,122,77,.15)}
+.pt-live-badges{display:flex;flex-wrap:wrap;gap:6px}
+.pt-live-badges .badge.ok::before{content:"✓ "}
+
+/* §3 붙는 섹션 내비게이션 (칩) + 읽기 진행 막대 */
+.pt-nav{position:sticky;top:0;z-index:4;margin:24px -8px 0;padding:6px 8px;background:var(--pt-nav-bg);-webkit-backdrop-filter:saturate(1.4) blur(8px);backdrop-filter:saturate(1.4) blur(8px);border-bottom:1px solid var(--color-line)}
+.pt-nav-track{display:flex;align-items:center;gap:6px;min-height:calc(var(--pt-nav-h) - 12px);overflow-x:auto;scrollbar-width:thin;-webkit-overflow-scrolling:touch}
+.pt-nav-track::-webkit-scrollbar{height:4px}
+.pt-nav-track::-webkit-scrollbar-thumb{background:var(--color-line-strong);border-radius:4px}
+a.pt-chip{flex:none;display:inline-flex;align-items:center;gap:6px;height:var(--pt-chip-h);padding:0 12px;border-radius:var(--radius-pill);border:1px solid var(--color-line);background:var(--color-surface);color:var(--color-text-2);font-size:var(--text-sm);font-weight:var(--weight-medium);text-decoration:none;white-space:nowrap;transition:background var(--transition),color var(--transition),border-color var(--transition)}
+a.pt-chip:hover{border-color:var(--color-primary-line);color:var(--color-primary)}
+a.pt-chip:focus-visible{outline:2px solid var(--color-accent);outline-offset:1px}
+a.pt-chip[aria-current="true"]{background:var(--color-primary);border-color:var(--color-primary);color:#fff}
+a.pt-chip .pt-chip-key{font-family:var(--font-mono);font-size:var(--text-2xs);font-weight:var(--weight-bold);padding:0 5px;border-radius:var(--radius-pill);background:var(--color-primary-soft);color:var(--color-primary);line-height:16px}
+a.pt-chip[aria-current="true"] .pt-chip-key{background:#fff}
+.pt-nav-sep{flex:none;width:1px;height:20px;background:var(--color-line-strong);margin:0 4px}
+.pt-nav-group{flex:none;font-size:var(--text-2xs);color:var(--color-muted);font-weight:var(--weight-bold);letter-spacing:.02em}
+.pt-progress{position:absolute;left:0;right:0;bottom:-1px;height:2px;background:transparent;overflow:hidden}
+.pt-progress i{display:block;height:100%;width:100%;background:var(--pt-progress);transform-origin:0 50%;transform:scaleX(0)}
+
+/* §4 섹션 뼈대 */
+.pt-sec{margin:var(--pt-gap-sec) 0 0;padding:var(--pt-gap-sec) 0 0;border-top:1px solid var(--color-line);scroll-margin-top:calc(var(--pt-nav-h) + 8px)}
+.pt-nav + .pt-sec{border-top:0;margin-top:0;padding-top:40px}
+.pt-sec-head{display:flex;align-items:flex-start;gap:12px;margin:0 0 16px}
+.pt-num{flex:none;font-family:var(--font-mono);font-size:var(--text-sm);font-weight:var(--weight-bold);line-height:24px;padding:2px 10px;border-radius:var(--radius-pill);background:var(--color-primary-soft);border:1px solid var(--color-primary-line);color:var(--color-primary);margin-top:2px;font-variant-numeric:tabular-nums}
+.pt-sec-head h2{margin:0;font-size:var(--pt-h2);line-height:1.3;letter-spacing:-.015em;font-weight:var(--weight-brand);color:var(--color-text)}
+.pt-sec h3{margin:32px 0 10px;font-size:var(--pt-h3);line-height:1.4;font-weight:var(--weight-bold);color:var(--color-primary)}
+.pt-sec p{margin:0 0 14px}
+.pt-sec ul,.pt-sec ol{margin:0 0 16px;padding-left:22px}
+.pt-sec li{margin:6px 0}
+.pt-sec a{color:var(--color-accent-700)}
+.pt-sec strong,.pt-sec b{font-weight:var(--weight-bold);color:var(--color-text)}
+.pt-lead{font-size:18px;line-height:1.65;color:var(--color-text-2)}
+.pt-src{font-size:var(--text-xs);line-height:18px;color:var(--color-muted);margin-top:12px!important}
+.pt-src code{font-size:11px}
+.pt-root code{font-size:.86em}
+
+/* 핵심 섹션 (6·7·8): 제목 줄을 남색 면 띠로 + "핵심 N" 배지 */
+.pt-key .pt-sec-head{background:var(--pt-key-bg);color:#fff;border-radius:var(--radius);padding:16px 18px;align-items:center;flex-wrap:wrap}
+.pt-key .pt-sec-head h2{color:#fff;flex:1 1 260px}
+.pt-key .pt-num{background:rgba(255,255,255,.12);border-color:rgba(255,255,255,.3);color:#fff;margin-top:0}
+.pt-keybadge{flex:none;order:-1;font-size:var(--text-xs);font-weight:var(--weight-bold);line-height:20px;padding:2px 10px;border-radius:var(--radius-pill);background:#fff;color:var(--color-primary)}
+
+/* §5 컴포넌트 */
+.pt-grid{display:grid;gap:12px;margin:16px 0 20px;grid-template-columns:repeat(2,minmax(0,1fr))}
+.pt-grid[data-cols="3"]{grid-template-columns:repeat(3,minmax(0,1fr))}
+.pt-grid[data-cols="4"]{grid-template-columns:repeat(4,minmax(0,1fr))}
+.pt-card{background:var(--color-surface);border:1px solid var(--color-line);border-radius:var(--radius);padding:16px;font-size:15px;line-height:1.6;min-width:0}
+.pt-card h3{margin:0 0 6px;font-size:var(--text-md);color:var(--color-text)}
+.pt-card p{margin:0 0 8px}
+.pt-card p:last-child,.pt-card ul:last-child{margin-bottom:0}
+.pt-card ul{padding-left:18px}
+
+.pt-flow{display:flex;flex-wrap:wrap;align-items:center;gap:6px;margin:10px 0 16px;padding:12px;background:var(--color-surface-soft);border:1px solid var(--color-line);border-radius:var(--radius);font-size:var(--text-sm);line-height:20px}
+.pt-flow > span{padding:2px 12px;border-radius:var(--radius-pill);background:#fff;border:1px solid var(--color-line);font-weight:var(--weight-medium);color:var(--color-text)}
+.pt-flow > span:not(:last-child)::after,.pt-flow > em::after{content:"→";margin-left:12px;color:var(--color-text-3);font-weight:400}
+.pt-flow > span:not(:last-child){position:relative;margin-right:18px}
+.pt-flow > span:not(:last-child)::after{position:absolute;right:-17px;top:2px;margin:0}
+.pt-flow > em{font-style:normal;font-size:var(--text-xs);color:var(--color-muted);margin-right:6px}
+.pt-flow > em::after{margin-left:6px}
+
+.pt-table-wrap{margin:12px 0 20px;overflow-x:auto;-webkit-overflow-scrolling:touch;border:1px solid var(--color-line);border-radius:var(--radius);background:var(--color-surface)}
+table.pt-table{width:100%;border-collapse:collapse;font-size:var(--text-sm);line-height:var(--leading-sm);min-width:520px}
+.pt-table th,.pt-table td{padding:10px 12px;border-bottom:1px solid var(--color-line);text-align:left;vertical-align:top}
+.pt-table thead th{color:var(--color-muted);font-weight:var(--weight-medium);background:var(--color-surface-soft);white-space:nowrap}
+.pt-table tbody tr:last-child > *{border-bottom:0}
+.pt-table tbody td:first-child,.pt-table tbody th{font-weight:var(--weight-bold);color:var(--color-text)}
+
+.pt-callout{margin:16px 0 20px;padding:14px 16px;border:1px solid var(--color-accent-line);border-left:3px solid var(--color-accent);border-radius:var(--radius-sm);background:var(--color-accent-soft);font-size:15px;line-height:1.65}
+.pt-callout[data-tone="limit"]{border-color:var(--color-warn-line);border-left-color:var(--cat-amber);background:var(--color-warn-bg)}
+.pt-callout > :last-child{margin-bottom:0}
+
+pre.pt-code{margin:12px 0 20px;padding:14px 16px;background:var(--color-surface-code);border:1px solid var(--color-line);border-radius:var(--radius-sm);font-family:var(--font-mono);font-size:13px;line-height:1.6;white-space:pre;overflow-x:auto;color:var(--color-text)}
+
+.pt-tags{display:flex;flex-wrap:wrap;gap:6px;margin:8px 0 16px}
+
+.pt-figure{margin:16px 0 20px;padding:12px;background:var(--color-surface);border:1px solid var(--color-line);border-radius:var(--radius)}
+.pt-figure img{display:block;width:100%;height:auto;max-width:100%}
+.pt-figure a{display:block;cursor:zoom-in}
+.pt-figure figcaption{margin-top:8px;font-size:var(--text-xs);color:var(--color-muted);text-align:center}
+
+/* §6 반응형 */
+@media (max-width:1100px){
+  .pt-grid[data-cols="4"]{grid-template-columns:repeat(2,minmax(0,1fr))}
+}
+@media (max-width:760px){
+  .pt-root{--pt-body:15px;--pt-h2:21px;--pt-h3:17px;--pt-hero:26px;--pt-gap-sec:40px;--pt-chip-h:30px}
+  .pt-main{padding:16px 12px 40px}
+  .pt-topbar-in{padding:0 12px}
+  .pt-hero{padding:28px 20px}
+  .pt-root[data-mode="app"] .pt-hero{padding:20px 16px}
+  .pt-root[data-mode="app"] .pt-hero h1{font-size:22px}
+  .pt-hero-sub{font-size:16px}
+  .pt-keys,.pt-grid,.pt-grid[data-cols="3"],.pt-grid[data-cols="4"]{grid-template-columns:minmax(0,1fr)}
+  .pt-nav{margin-left:-12px;margin-right:-12px;padding-left:12px;padding-right:12px}
+  .pt-nav-group{display:none}
+  .pt-lead{font-size:16px}
+  .pt-sec-head{gap:8px}
+  .pt-key .pt-sec-head{padding:12px 14px}
+}
+
+/* §7 인쇄 — PDF 제출용. 내비게이션 숨김, 색 면 유지, 섹션 안에서 쪽 나눔 줄이기 */
+@media print{
+  .pt-nav,.pt-topbar a.btn,.pt-live{display:none!important}
+  /* 앱 안에서 발표자료 탭을 인쇄할 때만 사이드바·공통 히어로를 숨긴다 (다른 탭 인쇄는 그대로) */
+  body:has(#tab-pitch.active) .sidebar,body:has(#tab-pitch.active) .hero{display:none!important}
+  body:has(#tab-pitch.active) main{max-width:none;padding:0}
+  body.pt-page{background:#fff}
+  .pt-main{max-width:none;padding:0}
+  .pt-root{--pt-body:12pt;--pt-gap-sec:20pt;max-width:none}
+  .pt-root,.pt-root *{-webkit-print-color-adjust:exact;print-color-adjust:exact}
+  .pt-hero{box-shadow:none}
+  .pt-sec{break-before:auto;padding-top:20pt;margin-top:20pt}
+  .pt-sec-head,.pt-card,.pt-callout,.pt-figure,pre.pt-code,.pt-flow,a.pt-keycard,.pt-table tr{break-inside:avoid}
+  .pt-sec-head{break-after:avoid}
+  .pt-key{break-before:page}
+  .pt-table-wrap{overflow:visible}
+  table.pt-table{min-width:0}
+  pre.pt-code{white-space:pre-wrap}
+  .pt-sec a[href^="http"]::after{content:" (" attr(href) ")";font-size:9pt;color:var(--color-muted)}
+  .pt-footer{border-top:1px solid #ccc}
+}
+
+/* §8 움직임 줄이기 — 부드러운 스크롤·전환 끔 (pitch.js도 behavior:auto로 스크롤) */
+@media (prefers-reduced-motion:reduce){
+  .pt-root *,.pt-root{transition:none!important;animation:none!important;scroll-behavior:auto!important}
+}

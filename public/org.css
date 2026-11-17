@@ -1,0 +1,19 @@
+/* 조직관리 (2026-11-17, HR admin) — 기존 디자인 토큰·admin-table·obs-subtabs 위에 얹는다. */
+.org-msg{font-size:13px;min-height:18px;margin:4px 0 8px;color:#b91c1c}
+.org-msg.ok{color:#166534}
+.org-rule{line-height:1.6}
+.org-warn{background:#fef3c7;border:1px solid #f59e0b;border-radius:8px;padding:8px 12px;margin:0 0 12px;font-size:13px;color:#78350f}
+.org-scroll{overflow-x:auto}
+.org-table td{vertical-align:middle}
+.org-table select{max-width:180px}
+.org-table tr.org-off td{opacity:.55}
+.org-table .badge{margin-left:4px}
+.org-name{display:inline-flex;gap:4px;align-items:center;margin:0}
+.org-name input{width:120px;margin:0}
+.org-name button{padding:2px 8px;font-size:12px}
+.org-form{display:flex;flex-wrap:wrap;gap:12px;align-items:flex-end}
+.org-form label{display:flex;flex-direction:column;gap:4px;font-size:13px;color:var(--color-muted)}
+.org-form label input[type="text"]{width:160px;margin:0}
+.org-form label select{min-width:150px;margin:0}
+.org-form label.org-check{flex-direction:row;align-items:center;gap:6px;color:inherit;padding-bottom:8px}
+.org-form-btns{display:flex;gap:8px}

@@ -116,6 +116,12 @@ code{font-family:var(--font-mono);font-size:var(--text-xs);background:var(--colo
 .sidebar.collapsed nav{padding:8px 4px}
 .sidebar.collapsed nav button{justify-content:center;padding:0}
 .sidebar.collapsed .collapse-btn{text-align:center;padding:0;margin:8px 4px}
+.user-chip .who b{color:var(--color-text);font-weight:var(--weight-bold)}
+.user-chip .user-avatar{display:none;width:32px;height:32px;padding:0;border:0;border-radius:50%;background:var(--color-primary);color:#fff;font-size:var(--text-base);font-weight:var(--weight-bold);cursor:pointer;flex:none;place-items:center;line-height:1}
+.user-chip .user-avatar:hover{background:var(--color-primary-700)}
+.sidebar.collapsed .user-chip{justify-content:center;padding:10px 0;gap:0}
+.sidebar.collapsed .user-chip .who,.sidebar.collapsed .user-chip button:not(.user-avatar){display:none}
+.sidebar.collapsed .user-chip .user-avatar{display:grid;place-items:center}
 .content{flex:1;min-width:0}
 main{max-width:1080px;margin:0 auto;padding:var(--space-5) var(--space-5) var(--space-6)}
 
@@ -188,9 +194,9 @@ button.iconbtn:hover{color:var(--color-danger);background:var(--color-err-bg)}
 .stat b{display:block;font-family:var(--font-mono);font-size:var(--text-3xl);font-weight:var(--weight-bold);color:var(--color-primary);line-height:30px;letter-spacing:-.01em;font-variant-numeric:tabular-nums}
 .stat span{color:var(--color-muted);font-size:var(--text-xs);line-height:18px}
 .stat::after{position:absolute;right:12px;top:12px;font-size:var(--icon-size);line-height:1;color:var(--color-muted);opacity:.7}
-.stat:nth-child(1)::after{content:"▤"}
-.stat:nth-child(2)::after{content:"✎"}
-.stat:nth-child(3)::after{content:"☑"}
+.stat:nth-child(1)::after{content:"✉"}
+.stat:nth-child(2)::after{content:"☑"}
+.stat:nth-child(3)::after{content:"▤"}
 .stat:nth-child(4)::after{content:"◍"}
 .taskrow{display:flex;gap:8px;align-items:center;min-height:36px;padding:6px 8px;margin:0 -8px;border-bottom:1px solid var(--line);border-radius:var(--radius-sm);font-size:var(--text-sm);line-height:var(--leading-sm);transition:background var(--transition)}
 .taskrow:hover{background:var(--color-surface-soft)}
