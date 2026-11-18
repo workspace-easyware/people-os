@@ -17,6 +17,7 @@ export type ApprovalEnv = {
   DB: D1Database;
   ADMIN_SECRET?: string;
   RESEND_API_KEY?: string;
+  NOTIFICATION_HUB?: DurableObjectNamespace; // DO-2 실시간 푸시 (없으면 건너뜀)
 };
 
 export type DocRow = {

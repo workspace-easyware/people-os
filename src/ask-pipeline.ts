@@ -34,7 +34,7 @@ export type AskEnv = {
 // Workers AI 바인딩에서 5028을 반환한다. (REST API에서는 3.1-8b가 되지만 바인딩에서는 안 된다.)
 // [2026-11-16] Qwen3-30b-a3b-fp8로 전환 — 골든셋 평가 6/6, 평균 judge 0.9 (Scout 기준선 6/6, 0.85),
 // 코칭 리플렉션 유효 JSON 3/3/3, Scout 대비 ~3.7배 빠름, ~2.5-5배 저렴.
-export const LLM_MODEL = "@cf/qwen/qwen3-30b-a3b-fp8";
+export const LLM_MODEL = "@cf/qwen/qwen3.8-27b";
 // 임베딩은 bge-m3 (1024차원, 다국어, Vectorize 인덱스 people-os-index-m3).
 // bge-base-en-v1.5(768차원, 영어용)는 한국어 질문을 구분하지 못해 근거 있음
 // 질문과 근거 없음 질문의 코사인 유사도가 0.81~0.83으로 겹쳤다 (2026-11-13
@@ -82,11 +82,39 @@ async function resolvePrompt(env: AskEnv, promptVersionId?: string): Promise<Pro
 // Workers AI가 주는 답은 {response: "..."} 상자 안에 있다. response가 문자열이
 // 아닐 때도 있고, JSON 답은 ```json 펜스로 감싸져 오는 경우가 있어 통째로
 // JSON.parse하면 실패한다. 문자열로 바꾸고 펜스를 벗긴 뒤 첫 {부터 마지막 }까지만 파싱한다.
+// [2026-11-18 모델 교체 2차] qwen3.8-27b 같은 추론 모델은 OpenAI chat.completion 형식
+// ({choices:[{message:{content, reasoning}}]})으로 답한다. content만 답으로 쓰고
+// reasoning(message 안이든 최상위든)은 버린다. content가 비면 ""를 돌려 호출처의
+// 빈 응답 처리(폴백/에러)로 보낸다 — 봉투 전체를 답으로 내지 않는다.
 export function responseText(out: unknown): string {
   if (typeof out === "string") return out;
+  const choices = (out as { choices?: unknown } | null)?.choices;
+  if (Array.isArray(choices)) {
+    const msg = (choices[0] as { message?: { content?: unknown } } | undefined)?.message;
+    return stripThink(contentText(msg?.content));
+  }
   const res = (out as { response?: unknown } | null)?.response;
   if (typeof res === "string") return res;
   return JSON.stringify(res ?? out);
+}
+
+// content는 보통 문자열이지만 [{type:"text", text}] 배열일 수도 있다. 그 밖은 "".
+function contentText(content: unknown): string {
+  if (typeof content === "string") return content;
+  if (Array.isArray(content)) {
+    return content.map((p) => (p && typeof (p as { text?: unknown }).text === "string" ? (p as { text: string }).text : "")).join("");
+  }
+  return "";
+}
+
+// content 안에 추론이 <think>…</think>로 섞여 오는 경우도 제거한다 (닫는 태그만 남은 경우 포함).
+function stripThink(s: string): string {
+  let t = s.replace(/<think>[\s\S]*?<\/think>/g, "");
+  const close = t.indexOf("</think>");
+  if (close >= 0) t = t.slice(close + "</think>".length);
+  const open = t.indexOf("<think>"); // 닫히지 않은 추론(토큰 한도로 잘림)은 답이 아니다
+  if (open >= 0) t = t.slice(0, open);
+  return t.trim();
 }
 
 export type Source = { id: string; title: string; section: string; snippet: string; score: number; kind?: "policy" | "tacit" | "transcript"; pool: RagPool; author?: string; publishedAt?: string; sectionPath?: string; nodeSummary?: string; nodeId?: string; docId?: string };
@@ -881,6 +909,7 @@ export async function runAsk(env: AskEnv, input: AskInput, opts: AskOptions = {}
         { role: "user", content: `질문: ${question}\n근거:\n${context}` },
       ];
       const out = await env.AI.run(LLM_MODEL, {
+        reasoning_effort: "medium",
         messages: promptMessages,
       }, aiGatewayOptionsWithMeta({ skipCache: gatewaySkipCache, tag: origin === "eval" ? "eval-ask" : "ask", metadata: gwMeta(origin === "eval" ? "eval-ask" : "ask") }));
       takeAigLogId();

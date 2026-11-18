@@ -238,7 +238,7 @@ approvalApp.get("/users", async (c) => {
   const q = (c.req.query("q") || "").trim().slice(0, 50);
   const like = "%" + q.replace(/[\\%_]/g, (m) => "\\" + m) + "%";
   const rows = await c.env.DB.prepare(
-    `SELECT u.id, u.name, u.email, u.role, u.department_id, dp.name AS department_name
+    `SELECT u.id, u.name, u.email, u.role, u.coaching_role, u.department_id, dp.name AS department_name
      FROM users u LEFT JOIN departments dp ON dp.id = u.department_id
      WHERE u.status = 'active' ${q ? "AND (u.name LIKE ? ESCAPE '\\' OR u.email LIKE ? ESCAPE '\\')" : ""}
      ORDER BY u.name LIMIT 30`,
@@ -281,7 +281,7 @@ approvalApp.post("/documents", async (c) => {
   const id = await createDraft(c.env.DB, v, { formId: form.id, title, bodyText, isUrgent: b.is_urgent === true, routes }, metaOf(c));
   if (b.submit === true) {
     const doc = (await loadDoc(c.env.DB, id))!;
-    const r = await performAction(c.env.DB, doc, await loadRoutes(c.env.DB, id), v, "SUBMIT", null, metaOf(c));
+    const r = await performAction(c.env.DB, doc, await loadRoutes(c.env.DB, id), v, "SUBMIT", null, metaOf(c), c.env);
     afterCommit(c, r.notifications.map((n) => n.id), null);
   }
   return c.json({ ok: true, id, document: await detail(c.env.DB, v, id) }, 201);
@@ -369,7 +369,7 @@ approvalApp.post("/documents/:id/actions", async (c) => {
   if (typeof b.version === "number" && b.version !== doc.version) {
     return fail(c, 409, "문서가 그 사이에 바뀌었습니다. 새로고침 후 다시 시도하세요.");
   }
-  const r = await performAction(c.env.DB, doc, routes, v, action, b.comment, metaOf(c));
+  const r = await performAction(c.env.DB, doc, routes, v, action, b.comment, metaOf(c), c.env);
   afterCommit(c, r.notifications.map((n) => n.id), r.runHook ? id : null);
   return c.json({
     ok: true, action: r.action, before: r.before, after: r.after,

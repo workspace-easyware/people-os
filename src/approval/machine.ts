@@ -17,6 +17,7 @@
 // 상신 후에는 본문·결재선을 바꿀 수 없다 (editDraft는 DRAFT/RECALLED에서만). 고치려면 회수한다.
 import { uid } from "../lib";
 import { makeNotify, notificationStmt, type NotifySpec } from "./notify";
+import { pushNotification, type PushEnv } from "../notifications/push";
 import { ApprovalError, type Action, type DocRow, type DocStatus, type RouteRow, type RouteSpec } from "./types";
 
 export type Actor = { id: string; role: "hr_admin" | "user" };
@@ -75,6 +76,7 @@ const GUARD = "EXISTS (SELECT 1 FROM approval_audit WHERE id = ?)";
 /** 상태 전이 단일 관문. 실패는 ApprovalError(4xx). */
 export async function performAction(
   db: D1Database, doc: DocRow, routes: RouteRow[], actor: Actor, action: Action, rawComment: unknown, meta: RequestMeta,
+  pushEnv?: PushEnv, // DO-2: 있으면 batch 커밋 성공 뒤 각 알림을 실시간 푸시 (없으면 건너뜀 — 폴링이 폴백)
 ): Promise<ActionResult> {
   const comment = typeof rawComment === "string" && rawComment.trim() ? rawComment.trim().slice(0, 2000) : null;
   if (!ALLOWED_FROM[action].includes(doc.status)) {
@@ -203,6 +205,12 @@ export async function performAction(
   const res = await db.batch(stmts);
   if ((res[verdictIndex]?.meta?.changes ?? 0) !== 1) {
     throw new ApprovalError(409, "다른 사용자가 먼저 처리했거나 문서가 바뀌었습니다. 새로고침 후 다시 시도하세요.");
+  }
+  // DO-2: D1 batch가 성공(상태 변경 확인)한 뒤에만, batch 밖에서 푸시. pushNotification은 던지지 않는다.
+  if (pushEnv) {
+    await Promise.all(notifications.map((n) => pushNotification(pushEnv, n.user_id, {
+      id: n.id, type: n.type, title: n.title, body: null, link: n.link, created_at: now,
+    })));
   }
   return { action, before: doc.status, after, notifications, runHook };
 }

@@ -42,9 +42,37 @@ binding = "AI"
 name = "AGENT_SESSION"
 class_name = "AgentSession"
 
+# WF-6 에이전트 루프 DO (인스턴스 1개 = run 1개의 agent 단계 1개). v2 태그는 D-2 배포 때 원격 적용된다.
+[[durable_objects.bindings]]
+name = "WORKFLOW_AGENT"
+class_name = "WorkflowAgent"
+
+# DO-1a 채팅방 DO. 바인딩만 — v3 마이그레이션 태그([ChatRoom, NotificationHub, RateLimiter])는 DO-MIG에서 한 번에 추가한다. 그 전에는 deploy 금지.
+[[durable_objects.bindings]]
+name = "CHAT_ROOM"
+class_name = "ChatRoom"
+
+# DO-2 알림 허브 DO. 바인딩만 — v3 마이그레이션 태그는 DO-MIG에서 한 번에 추가한다. 그 전에는 deploy 금지.
+[[durable_objects.bindings]]
+name = "NOTIFICATION_HUB"
+class_name = "NotificationHub"
+
+# DO-3 질문 레이트 리미터 DO. 바인딩만 — v3 마이그레이션 태그는 DO-MIG에서 한 번에 추가한다. 그 전에는 deploy 금지.
+[[durable_objects.bindings]]
+name = "RATE_LIMITER"
+class_name = "RateLimiter"
+
 [[migrations]]
 tag = "v1"
 new_sqlite_classes = ["AgentSession"]
+
+[[migrations]]
+tag = "v2"
+new_sqlite_classes = ["WorkflowAgent"]
+
+[[migrations]]
+tag = "v3"
+new_sqlite_classes = ["ChatRoom", "NotificationHub", "RateLimiter"]
 
 # S1 Queues 파이프라인 (전사 완료 → 요약 → 색인)
 # 큐 자체는 대시보드/부모가 만든다 (`wrangler queues create`는 이 단계에서
@@ -62,8 +90,9 @@ dead_letter_queue = "people-os-pipeline-dlq"
 
 # 0 22 * * * = 07:00 KST 다이제스트 (C9). 0 18 * * * = 03:00 KST S4 평가 cron
 # (비용 동기화 → 표본 판정 → 평가 실행 → 정체 실행 청소). scheduled()가 event.cron으로 분기한다.
+# WF-8: "*/15 * * * *" = 워크플로우 스케줄 틱(15분). 18:00·22:00 UTC에도 돌지만 그때는 위 두 크론과 **별개의 scheduled 이벤트**로 들어온다.
 [triggers]
-crons = ["0 22 * * *", "0 18 * * *"]
+crons = ["0 22 * * *", "0 18 * * *", "*/15 * * * *"]
 
 # S4 비용 동기화용 계정 ID (비밀 아님 — vars. AIG_LOGS_TOKEN은 secret으로 별도 설정).
 [vars]

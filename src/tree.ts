@@ -212,6 +212,7 @@ export async function buildTranscriptTree(
   const listed = chunks.slice(0, MAX_SEGMENT_CHUNKS);
   const chunkList = listed.map((ch) => `[chunk ${ch.ord}] ${ch.text.slice(0, SEGMENT_SNIPPET_LEN).replace(/\n/g, " ")}`).join("\n");
   const out = await ai.run(LLM_MODEL, {
+    reasoning_effort: "medium",
     messages: [
       {
         role: "system",

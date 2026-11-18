@@ -17,6 +17,7 @@ import {
 } from "./ask-pipeline";
 import type { Source } from "./ask-pipeline";
 // S4 M6-β: 관측·평가 하위 앱(M2·M3·M4)과 큐·cron 진입점.
+import { workflowRunsApp } from "./obs/routes-workflows"; // WF-11 워크플로우 run 관측 (읽기 전용, hr_admin)
 import { tracesApp } from "./obs/routes-traces";
 import { datasetsApp } from "./obs/routes-datasets";
 import { evalsApp } from "./obs/routes-evals";
@@ -34,10 +35,20 @@ import { lmsApp } from "./lms/routes";
 import { approvalApp } from "./approval/routes";
 import { agentActivityApp } from "./agent/activity"; // 에이전트 활동 타임라인 A1 (2026-11-17, 읽기 전용)
 import { calendarApp } from "./calendar/routes"; // 캘린더 C1 (2026-11-17, migration 0025)
+import { notificationsApp } from "./notifications/routes"; // DO-2 알림 WebSocket
+import { chatApp } from "./chat/routes"; // 채팅 DO-1a (2026-11-18, 1:1만)
+import { workflowApp } from "./workflow/routes"; // 워크플로우 WF-1 (2026-11-18, migration 0027)
+import { processWorkflowStep, sweepStaleWorkflowRuns } from "./workflow/engine"; // 워크플로우 실행 엔진 WF-3
+import type { WorkflowStepMessage } from "./workflow/types";
+import { runDueSchedules, runEventTriggers } from "./workflow/schedules"; // 워크플로우 스케줄·이벤트 트리거 WF-8 (migration 0028)
 
 export { adminAllowed };
 
 export { AgentSession };
+export { WorkflowAgent } from "./workflow/agent-do"; // WF-6 에이전트 루프 DO (wrangler.toml 마이그레이션 v2)
+export { NotificationHub } from "./notifications/hub"; // DO-2 알림 허브 DO (마이그레이션 v3는 DO-MIG에서)
+export { RateLimiter } from "./ratelimit/limiter"; // DO-3 질문 레이트 리미터 DO (마이그레이션 v3는 DO-MIG에서)
+export { ChatRoom } from "./chat/room"; // DO-1a 채팅방 DO (마이그레이션 v3는 DO-MIG에서)
 
 type Env = {
   DB: D1Database;
@@ -46,6 +57,10 @@ type Env = {
   VECTOR: VectorizeIndex;
   AI: Ai;
   AGENT_SESSION: DurableObjectNamespace;
+  WORKFLOW_AGENT: DurableObjectNamespace; // WF-6
+  CHAT_ROOM: DurableObjectNamespace; // DO-1a
+  NOTIFICATION_HUB: DurableObjectNamespace; // DO-2
+  RATE_LIMITER: DurableObjectNamespace; // DO-3 (없거나 실패하면 KV 폴백)
   ASSETS: Fetcher;
   // S1 Queues 파이프라인: 전사 완료 이벤트를 보내는 producer 바인딩.
   // 큐는 배포 전에 만들어야 한다 (wrangler.toml [[queues]] 참조).
@@ -126,9 +141,11 @@ type BuildTreeMessage = {
   enqueuedAt: string;
 };
 // S4: 큐 메시지 유니온 (전사 파이프라인 | 평가 항목 1건 | 트리 빌드).
-type QueueMessage = PipelineMessage | EvalItemMessage | BuildTreeMessage;
+// WF-3: + 워크플로우 단계 1개 (src/workflow/engine.ts).
+type QueueMessage = PipelineMessage | EvalItemMessage | BuildTreeMessage | WorkflowStepMessage;
 // S4 평가 cron: 03:00 KST. 07:00 KST 다이제스트 cron(0 22 * * *)과 event.cron으로 구분한다.
 const EVAL_CRON = "0 18 * * *";
+const WORKFLOW_CRON = "*/15 * * * *"; // WF-8 워크플로우 스케줄 틱
 // trace sink (M2): runAsk가 끝날 때 ask_events + spans/retrievals + R2 원문을 기록한다.
 const traceSink = createTraceSink();
 const PIPELINE_QUEUE_NAME = "people-os-pipeline";
@@ -167,12 +184,33 @@ async function verifyTurnstile(env: Env, token: string | undefined, ip: string |
   }
 }
 
-// KV 레이트 리밋 (C7): 세션 기준 60초 슬라이딩 윈도우에
-// ASK_RATE_LIMIT_PER_MINUTE회. 고정 분(캘린더 분) 윈도우는 경계를 넘기면
-// 카운터가 리셋돼 21번째가 안 걸릴 수 있어 슬라이딩으로 바꿨다 (C5-b 검증).
-// KV 실패 시 fail-open (차단하지 않음) — 로컬 Miniflare KV가 없어도
-// 질문이 막히지 않게 한다.
-async function checkAskRateLimit(env: Env, clientKey: string): Promise<{ allowed: boolean; remaining: number; resetInSec: number }> {
+// 질문 레이트 리밋: DO-3부터 RateLimiter DO(토큰 버킷, 동시 버스트도 정확)가 우선이다.
+// DO fetch가 예외·타임아웃(1초)·비-2xx·형식 오류면 기존 KV 구현(checkAskRateLimitKv)으로 폴백한다.
+// KV마저 실패하면 fail-open (차단하지 않음).
+type RateResult = { allowed: boolean; remaining: number; resetInSec: number };
+const RATE_DO_TIMEOUT_MS = 1000;
+
+export async function checkAskRateLimit(env: Env, clientKey: string): Promise<RateResult> {
+  try {
+    const stub = env.RATE_LIMITER.get(env.RATE_LIMITER.idFromName(`rl:ask:${clientKey}`));
+    const timeout = new Promise<never>((_, rej) => setTimeout(() => rej(new Error("rate limiter timeout")), RATE_DO_TIMEOUT_MS));
+    const res = await Promise.race([
+      stub.fetch("https://limiter/check", { method: "POST", signal: AbortSignal.timeout(RATE_DO_TIMEOUT_MS) }),
+      timeout,
+    ]);
+    if (!res.ok) throw new Error(`rate limiter ${res.status}`);
+    const j = (await res.json()) as Partial<RateResult>;
+    if (typeof j.allowed !== "boolean" || typeof j.remaining !== "number" || typeof j.resetInSec !== "number") throw new Error("rate limiter bad body");
+    return { allowed: j.allowed, remaining: j.remaining, resetInSec: j.resetInSec };
+  } catch (e) {
+    console.log("[ratelimit] DO failed, KV fallback:", e instanceof Error ? e.message : String(e));
+    return checkAskRateLimitKv(env, clientKey);
+  }
+}
+
+// 기존 KV 슬라이딩 윈도우 (C7): 세션 기준 60초 윈도우에 ASK_RATE_LIMIT_PER_MINUTE회.
+// KV get+put이라 동시 호출에는 완벽하지 않다 — 폴백 전용. KV 실패 시 fail-open.
+async function checkAskRateLimitKv(env: Env, clientKey: string): Promise<RateResult> {
   const key = `rl:ask:${clientKey}`;
   const now = Date.now();
   try {
@@ -676,6 +714,7 @@ async function summarizeDocument(env: Env, docId: string): Promise<{ summary: st
   // 1) Workers AI 시도 (클라우드에서 동작, 로컬에서는 실패할 수 있음)
   try {
     const out = await env.AI.run(LLM_MODEL, {
+      reasoning_effort: "medium",
       messages: [
         { role: "system", content: "다음 회의 전사본을 한국어로 3줄 요약하고 액션 아이템을 뽑아라. JSON으로만 답하라: {\"summary\":[\"...\"],\"actions\":[\"...\"]}" },
         { role: "user", content: doc.content.slice(0, 4000) },
@@ -1225,6 +1264,7 @@ app.post("/api/coaching/reflect", async (c) => {
     let cOut = localCoacheeReflect(transcript);
     try {
       const ai = await c.env.AI.run(LLM_MODEL, {
+        reasoning_effort: "medium",
         messages: [
           {
             role: "system",
@@ -1256,6 +1296,7 @@ app.post("/api/coaching/reflect", async (c) => {
   let out = localReflect(transcript);
   try {
     const ai = await c.env.AI.run(LLM_MODEL, {
+      reasoning_effort: "medium",
       messages: [
         { role: "system", content: "너는 코칭 리플렉션 분석가다. 세션 전사본에서 핵심 질문, 반복 패턴, 다음 세션 질문 3개를 한국어로 뽑아 JSON으로만 답하라: {\"questions\":[],\"patterns\":[],\"next_questions\":[]}" },
         { role: "user", content: transcript.slice(0, 4000) },
@@ -1597,7 +1638,7 @@ app.get("/api/debug-ai", async (c) => {
     out.embed = { ok: false, error: e instanceof Error ? e.message : String(e) };
   }
   // LLM 후보를 순서대로 시도해 바인딩에서 실제로 되는 모델을 확인한다.
-  const llmCandidates = [LLM_MODEL, "@cf/meta/llama-3.2-1b-instruct", "@cf/meta/llama-3.3-70b-instruct-fp8-fast"];
+  const llmCandidates = [LLM_MODEL, "@cf/meta/llama-3.3-70b-instruct-fp8-fast"];
   const llmResults: Array<Record<string, unknown>> = [];
   for (const model of llmCandidates) {
     try {
@@ -1779,6 +1820,7 @@ app.route("/api", authApp);
 // 하위 앱 경로는 마운트 지점 기준 상대다 (§8). 세 앱 모두 스키마 가드(503)를 갖고 있고,
 // 관리자 경로는 각 앱이 X-Admin-Secret ↔ ADMIN_SECRET으로 막는다 (fail-closed).
 // 캐치올(app.all("*")) 앞에 둬야 한다.
+app.route("/api/obs", workflowRunsApp); // WF-11: tracesApp의 obs 스키마 가드(*)보다 먼저 등록 — 워크플로우 테이블만 쓴다
 app.route("/api/obs", tracesApp);
 app.route("/api/obs", datasetsApp);
 app.route("/api/obs", evalsApp);
@@ -1794,7 +1836,10 @@ app.route("/api/email", emailApp);
 app.route("/api/lms", lmsApp); // 강의실 (2026-11-17)
 app.route("/api/approval", approvalApp); // 전자결재 1단계 (2026-11-17, migration 0024)
 app.route("/api/agent", agentActivityApp); // 에이전트 활동 타임라인 A1 — 로그인 필수, 소유자 격리
+app.route("/api/notifications", notificationsApp); // DO-2 알림 WebSocket — 세션 전용
+app.route("/api/chat", chatApp); // 채팅 DO-1a — 세션 전용, 1:1만
 app.route("/api/calendar", calendarApp); // 캘린더 C1 — 세션 전용 (X-Admin-Secret 불가)
+app.route("/api/workflows", workflowApp); // 워크플로우 WF-1 — 세션 전용 (X-Admin-Secret 불가)
 
 // 프론트는 [assets] 바인딩이 서빙한다. / 가 없으면 index.html로.
 app.all("*", async (c) => {
@@ -1814,13 +1859,14 @@ app.all("*", async (c) => {
 // - 요약·색인은 멱등이라 중복 전달·재시도해도 같은 결과가 나온다.
 async function processPipelineMessage(env: Env, msg: PipelineMessage): Promise<void> {
   if (!msg || msg.type !== "transcript-pipeline" || !msg.recordingId || !msg.docId) return;
-  const rec = await env.DB.prepare("SELECT id, title, doc_id, transcript_status, pipeline_stage FROM recordings WHERE id = ?").bind(msg.recordingId)
-    .first<{ id: string; title: string; doc_id: string | null; transcript_status: string; pipeline_stage: string | null }>();
+  const rec = await env.DB.prepare("SELECT id, title, doc_id, transcript_status, pipeline_stage, owner_id FROM recordings WHERE id = ?").bind(msg.recordingId)
+    .first<{ id: string; title: string; doc_id: string | null; transcript_status: string; pipeline_stage: string | null; owner_id: string | null }>();
   if (!rec || !rec.doc_id) {
     if (rec) await setPipelineStage(env, rec.id, "failed", "pipeline: transcript document not found").catch(() => {});
     return;
   }
   if (rec.pipeline_stage === "done") return;
+  let ownerForEvent: string | null = null;
   try {
     await setPipelineStage(env, rec.id, "summarizing");
     await summarizeDocument(env, rec.doc_id);
@@ -1831,9 +1877,19 @@ async function processPipelineMessage(env: Env, msg: PipelineMessage): Promise<v
     const indexed = await indexDocument(env, { id: rec.doc_id, title: doc.title, markdown: doc.content, kind: doc.kind, ownerId: doc.owner_id });
     if (indexed.indexError) throw new Error(`index failed: ${indexed.indexError}`);
     await setPipelineStage(env, rec.id, "done");
+    ownerForEvent = doc.owner_id ?? rec.owner_id;
   } catch (e) {
     await setPipelineStage(env, rec.id, "failed", e instanceof Error ? e.message : String(e)).catch(() => {});
     throw e;
+  }
+  // WF-8: 전사 완료 이벤트 트리거 (성공 경로에서만). 이미 "done"이므로 트리거가 실패해도 파이프라인은 실패시키지 않는다
+  // (try/catch로 감싸 console.error만 남김 — throw하면 큐가 재시도해 요약·색인이 다시 돈다).
+  if (ownerForEvent) {
+    try {
+      await runEventTriggers(env, "transcript_completed", { docId: rec.doc_id, recordingId: rec.id }, ownerForEvent);
+    } catch (e) {
+      console.error("transcript_completed trigger failed", rec.id, e instanceof Error ? e.message : String(e));
+    }
   }
 }
 
@@ -1842,6 +1898,7 @@ async function processPipelineMessage(env: Env, msg: PipelineMessage): Promise<v
 async function draftEmailReply(env: Env, email: EmailRow): Promise<string> {
   const body = (email.body_text || "").slice(0, 6000);
   const out = await env.AI.run(LLM_MODEL, {
+    reasoning_effort: "medium",
     messages: [
       {
         role: "system",
@@ -1891,6 +1948,15 @@ export default {
     // config_hash 같고 7일 안 지났으면 skipped) + 정체 실행 청소. 그 밖은 07:00 다이제스트.
     if (event.cron === EVAL_CRON) {
       ctx.waitUntil(runEvalCron(env, ctx));
+      // WF-3: 워크플로우 정체 run 청소 (queued/running 60분 → failed, waiting_approval 7일 → cancelled).
+      ctx.waitUntil(sweepStaleWorkflowRuns(env));
+      return;
+    }
+    // WF-8: 15분마다 워크플로우 스케줄 평가. "*/15"는 18:00·22:00 UTC에도 돌지만, 그때 평가/다이제스트 크론과
+    // 워크플로우 크론은 **별개의 scheduled 이벤트**로 각각 들어온다 (event.cron 문자열로 구분).
+    // 분기 순서: EVAL → WORKFLOW → 다이제스트(기본값). 이 순서를 바꾸면 새 크론이 다이제스트로 떨어진다.
+    if (event.cron === WORKFLOW_CRON) {
+      ctx.waitUntil(runDueSchedules(env, new Date(event.scheduledTime)));
       return;
     }
     ctx.waitUntil(generateDigest(env, new Date(event.scheduledTime)));
@@ -1911,6 +1977,9 @@ export default {
           // (검색은 청크·벡터로 정상 동작). D1 오류만 throw해 재시도한다.
           const r = await buildTreeForDoc(env, (msg.body as BuildTreeMessage).docId);
           console.log(`[tree] build-tree ${(msg.body as BuildTreeMessage).docId}:`, JSON.stringify(r));
+        } else if (body && body.type === "workflow-step") {
+          // WF-3: 워크플로우 단계 1개. 노드 실패는 run failed로 기록하고 ack, 엔진 예외만 throw → retry.
+          await processWorkflowStep(env, msg.body as WorkflowStepMessage);
         } else {
           // 기존 전사 파이프라인 (S1) — 그대로.
           await processPipelineMessage(env, msg.body as PipelineMessage);

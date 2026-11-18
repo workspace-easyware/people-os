@@ -27,7 +27,6 @@ export const PRICING_SOURCE = "https://developers.cloudflare.com/workers-ai/plat
 export const MODEL_PRICES: Record<string, ModelPrice> = {
   "@cf/meta/llama-4-scout-17b-16e-instruct": { inPerM: 0.27, outPerM: 0.85, checked: null, note: "답 생성(ask/eval-ask)·judge" },
   "@cf/baai/bge-m3": { inPerM: 0.012, outPerM: 0, checked: null, note: "임베딩" },
-  "@cf/meta/llama-3.2-1b-instruct": { inPerM: 0.027, outPerM: 0.2, checked: null, note: "debug-ai 후보" },
   "@cf/meta/llama-3.3-70b-instruct-fp8-fast": { inPerM: 0.29, outPerM: 2.25, checked: null, note: "debug-ai 후보" },
 };
 
