@@ -256,6 +256,7 @@ async function apvSave(submit) {
 let apvHomeData = null;
 async function apvHome() {
   if (!currentUser) return null;
+  ntfWsStart(); // 로그인 상태면 알림 소켓 연결 (이미 있으면 그대로). 폴링은 그대로 둔다 — 푸시의 폴백.
   let j;
   try { j = await api(`${APV}/home`); } catch { return apvHomeData; }
   if (!j || !j.ok) return null;
@@ -276,7 +277,10 @@ async function apvRenderHomeCard() {
       <div class="stat" style="cursor:pointer" onclick="apvGo('DRAFTING')"><b>${j.counts.DRAFTING}</b><span>내 기안 진행 중</span></div></div>` +
     (j.pending.length ? j.pending.map(d => `<div class="taskrow" style="cursor:pointer" onclick="apvToDoc('${escAttr(d.id)}')"><span class="t-title">${d.is_urgent ? '<span class="apv-urgent">긴급</span>' : ''}${esc(d.title)}</span><span class="badge">${esc(d.drafter_name || '')}</span><span class="t-src">${fmtDate(d.submitted_at)}</span></div>`).join('') : '<p class="empty">결재할 문서가 없습니다.</p>');
 }
+let ntfCountN = 0;
 function ntfPaintCount(n) {
+  ntfCountN = n;
+  if (!currentUser) ntfWsStop(); // 로그아웃(applyRole이 0으로 비운다) → 알림 소켓도 닫는다
   const c = $('ntfCount'); if (!c) return;
   c.textContent = n > 99 ? '99+' : String(n); c.style.display = n ? '' : 'none';
 }
@@ -310,3 +314,62 @@ document.addEventListener('click', (e) => {
   if (p && p.classList.contains('open') && !p.contains(e.target)) p.classList.remove('open');
 });
 setInterval(() => { if (currentUser && !document.hidden) apvHome(); }, 60000);
+
+// ---- 실시간 알림 푸시 (DO-2, 2026-11-18) ----
+// /api/notifications/ws 에 소켓 1개. 서버→클라이언트 {type:'notify', notification:{id,type,title,body,link,created_at}} 1종.
+// 푸시 수신: 토스트 + 미읽음 +1 + (결재함 목록이 열려 있으면) 재조회. 끊기면 5초 뒤 재연결, 최대 5회 후 중단 — 그 뒤는 기존 폴링이 커버한다.
+// 서버 데이터는 textContent로만 넣는다 (innerHTML 금지).
+const NTF_RETRY_MS = 5000, NTF_MAX_RETRY = 5, NTF_TOAST_MS = 5000;
+let ntfWs = null, ntfWsUser = '', ntfWsTries = 0, ntfWsTimer = null, ntfWsGaveUp = false;
+function ntfWsUrl() { return (location.protocol === 'https:' ? 'wss:' : 'ws:') + '//' + location.host + '/api/notifications/ws'; }
+function ntfWsStop() {
+  if (ntfWsTimer) { clearTimeout(ntfWsTimer); ntfWsTimer = null; }
+  const w = ntfWs; ntfWs = null; ntfWsUser = ''; ntfWsTries = 0; ntfWsGaveUp = false;
+  if (w) { w.onclose = null; try { w.close(1000, 'bye'); } catch { /* 이미 닫힘 */ } }
+}
+function ntfWsStart() {
+  if (!currentUser || typeof WebSocket === 'undefined') return;
+  if (ntfWsUser && ntfWsUser !== currentUser.id) ntfWsStop(); // 다른 사용자로 로그인
+  if (ntfWsGaveUp || ntfWs || ntfWsTimer) return;
+  ntfWsUser = currentUser.id;
+  let w;
+  try { w = new WebSocket(ntfWsUrl()); } catch { ntfWsSchedule(); return; }
+  ntfWs = w;
+  w.onopen = () => { ntfWsTries = 0; };
+  w.onmessage = (ev) => {
+    let m; try { m = JSON.parse(ev.data); } catch { return; }
+    if (m && m.type === 'notify' && m.notification) ntfOnPush(m.notification);
+  };
+  w.onclose = () => { if (ntfWs === w) { ntfWs = null; ntfWsSchedule(); } };
+  w.onerror = () => { /* onclose가 이어서 온다 */ };
+}
+function ntfWsSchedule() {
+  if (!currentUser || ntfWsTimer) return;
+  if (ntfWsTries >= NTF_MAX_RETRY) { ntfWsGaveUp = true; return; } // 중단 — 폴링이 커버
+  ntfWsTries++;
+  ntfWsTimer = setTimeout(() => { ntfWsTimer = null; ntfWsStart(); }, NTF_RETRY_MS);
+}
+function ntfOnPush(n) {
+  ntfToast(n);
+  ntfPaintCount(ntfCountN + 1); // 다음 apvHome 폴링이 서버 값으로 바로잡는다
+  const listOpen = /^#approval$/.test(location.hash) && $('apvListCard') && $('apvListCard').style.display !== 'none';
+  if (listOpen) { apvLoad(apvPage); apvHome(); }
+}
+function ntfToast(n) {
+  let box = $('ntfToastBox');
+  if (!box) {
+    box = document.createElement('div'); box.id = 'ntfToastBox';
+    box.style.cssText = 'position:fixed;top:16px;right:16px;z-index:10000;display:flex;flex-direction:column;gap:8px;max-width:320px';
+    document.body.appendChild(box);
+  }
+  const t = document.createElement('div');
+  t.className = 'ntf-toast'; t.setAttribute('role', 'status');
+  t.style.cssText = 'background:#fff;color:#222;border:1px solid #ccc;border-left:4px solid #f6821f;border-radius:6px;padding:10px 12px;box-shadow:0 4px 12px rgba(0,0,0,.18);cursor:pointer;font-size:14px';
+  const h = document.createElement('div'); h.style.fontWeight = '600'; h.textContent = String(n.title || '');
+  t.appendChild(h);
+  if (n.body) { const b = document.createElement('div'); b.style.cssText = 'margin-top:4px;font-size:13px;white-space:pre-line'; b.textContent = String(n.body); t.appendChild(b); }
+  const gone = () => { if (t.parentNode) t.parentNode.removeChild(t); };
+  t.onclick = () => { gone(); if (n.link) ntfClick(n.id, n.link); };
+  box.appendChild(t);
+  setTimeout(gone, NTF_TOAST_MS);
+}

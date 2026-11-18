@@ -1,0 +1,65 @@
+/* 워크플로우 비주얼 캔버스 WF-10 (2026-11-18) — styles.css의 토큰만 사용한다 (새 팔레트·폰트 없음).
+   노드 색은 폼의 기존 체계를 따른다: 기본 = surface/line, 승인 필요(send_email·webhook) = warn 배지 색, 조건 = primary-soft, 에이전트 = surface-tint.
+   조건 참/거짓 = ok/err 색. */
+.wfc-toggle{display:inline-flex;gap:0;margin:0 0 var(--space-2)}
+.wfc-toggle button{margin-top:0;border-radius:0}
+.wfc-toggle button:first-child{border-radius:var(--radius-sm) 0 0 var(--radius-sm)}
+.wfc-toggle button:last-child{border-radius:0 var(--radius-sm) var(--radius-sm) 0;margin-left:-1px}
+.wfc-toggle button.on{background:var(--color-primary-soft);border-color:var(--color-primary);color:var(--color-primary);font-weight:var(--weight-bold)}
+.wf-step-next{margin-top:2px;color:var(--color-text-2)}
+
+.wfc-bar{display:flex;flex-wrap:wrap;gap:var(--space-2);align-items:center;margin:0 0 var(--space-2)}
+.wfc-bar button{margin-top:0}
+.wfc-endzone{display:inline-flex;align-items:center;gap:6px;padding:6px 12px;border:2px dashed var(--color-err-line);border-radius:var(--radius-sm);background:var(--color-err-bg);color:var(--color-err);font-size:var(--text-sm);user-select:none}
+.wfc-endzone.hot{border-style:solid;border-color:var(--color-err)}
+.wfc-endico{font-size:10px}
+.wfc-help{margin:0 0 var(--space-2);color:var(--color-text-3)}
+.wfc-wrap{position:relative;overflow:auto;max-height:70vh;min-height:240px;border:1px solid var(--color-line);border-radius:var(--radius-sm);background:var(--color-surface-soft)}
+.wfc-empty{padding:var(--space-4)}
+.wfc-svg{display:block;touch-action:none;user-select:none;-webkit-user-select:none}
+
+/* 노드 */
+.wfc-node{cursor:grab}
+.wfc-ro .wfc-node{cursor:default}
+.wfc-box{fill:var(--color-surface);stroke:var(--color-line-strong);stroke-width:1.5}
+.wfc-node:hover .wfc-box{stroke:var(--color-primary)}
+.wfc-t-condition .wfc-box{fill:var(--color-primary-soft);stroke:var(--color-primary-line)}
+.wfc-t-agent .wfc-box{fill:var(--color-surface-tint)}
+.wfc-appr .wfc-box{fill:var(--color-warn-bg);stroke:var(--color-warn-line)}
+.wfc-type{font-size:11px;fill:var(--color-text-3)}
+.wfc-id{font-size:10px;fill:var(--color-text-3)}
+.wfc-name{font-size:13px;font-weight:600;fill:var(--color-text)}
+.wfc-in{fill:var(--color-surface);stroke:var(--color-line-strong);stroke-width:2}
+.wfc-out{fill:var(--color-surface);stroke:var(--color-primary);stroke-width:2.5;cursor:crosshair}
+.wfc-ro .wfc-out{cursor:default}
+.wfc-out:hover{fill:var(--color-primary-soft)}
+.wfc-out-true{stroke:var(--color-ok)}
+.wfc-out-false{stroke:var(--color-err)}
+.wfc-plab{font-size:10px;font-weight:600}
+.wfc-plab-true{fill:var(--color-ok)}
+.wfc-plab-false{fill:var(--color-err)}
+.wfc-endb rect{fill:var(--color-err-bg);stroke:var(--color-err-line)}
+.wfc-endb text{font-size:10px;font-weight:600;fill:var(--color-err)}
+
+/* 간선: 실선 = 명시(next), 점선 = 배열 순서(암묵) */
+.wfc-edge{fill:none;stroke:var(--color-text-3);stroke-width:2}
+.wfc-edge.wfc-implicit{stroke:var(--color-line-strong);stroke-dasharray:6 5}
+.wfc-edge.wfc-true{stroke:var(--color-ok)}
+.wfc-edge.wfc-false{stroke:var(--color-err)}
+.wfc-edge.wfc-temp{stroke-dasharray:4 4;pointer-events:none}
+.wfc-hit{fill:none;stroke:transparent;stroke-width:14;cursor:pointer}
+.wfc-ro .wfc-hit{cursor:default}
+.wfc-wrap:not(.wfc-ro) .wfc-e:hover .wfc-edge{stroke-width:3.5}
+.wfc-elab{font-size:11px;font-weight:600;paint-order:stroke;stroke:var(--color-surface-soft);stroke-width:4px}
+.wfc-elab-true{fill:var(--color-ok)}
+.wfc-elab-false{fill:var(--color-err)}
+.wfc-arr{fill:var(--color-text-3)}
+.wfc-arr-t{fill:var(--color-ok)}
+.wfc-arr-f{fill:var(--color-err)}
+.wfc-arr-i{fill:var(--color-line-strong)}
+
+/* 오른쪽 클릭 메뉴 */
+.wfc-menu{position:absolute;z-index:5;min-width:180px;padding:4px;background:var(--color-surface);border:1px solid var(--color-line-strong);border-radius:var(--radius-sm);box-shadow:0 4px 14px rgba(0,0,0,.12)}
+.wfc-mh{padding:4px 8px;font-size:var(--text-xs);color:var(--color-text-3);overflow-wrap:anywhere}
+.wfc-menu button.wfc-mi{display:block;width:100%;margin:0;text-align:left;padding:6px 8px;background:transparent;border:0;border-radius:var(--radius-sm);color:var(--color-text);font-size:var(--text-sm)}
+.wfc-menu button.wfc-mi:hover{background:var(--color-primary-soft)}
