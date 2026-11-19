@@ -292,3 +292,53 @@
 - 이번 범위 밖(미반영): `architecture.svg`, `ARCHITECTURE.md`, `VERIFICATION.md`. reasoning low/medium 미결이라 속도 수치는 적지 않음.
 - GitHub: `workspace-easyware/people-os` main, 스냅샷 6/8·7/8·8/8 (3배치). 루트 `architecture.svg` GitHub 사본 삭제는 11-26 공개 전환 전 별도.
 - 상세: `files/workflow-verify/pitch-update/RESULT.md`.
+
+## 전체 코드 점검·수정 + Cloudflare 기능 (2026-11-18, Fable 5.2) — 배포 완료, 브라우저 확인 대기
+
+- 프롬프트: `full-review-ultra-prompt.md`. 배포 **`2fa42ca9-7493-436e-bbd3-25fe26d6a30c`** (cf-wrangler.py deploy 1회). D1 **0032_chat_room_last_seq.sql** 원격 적용 (적용 전 list로 0032만 미적용 확인).
+- 점검: 감사 에이전트 6개(영역별) + `src/index.ts` 직접. 고친 것 **P0 5 / P1 18 / P2 15**.
+- P0: 할 일 PATCH/DELETE 소유자 검사, 요약 API 읽기 게이트, 지식 공백 익명 게시 차단, `/api/obs/*` 관리자 전용(개인 검색 트레이스가 익명에게 읽혔음), 다이제스트의 남의 개인 문서 제목·요약 노출.
+- P1 주요: 질문 레이트 리밋 우회, 리플렉션 범위, 긴 문서 임베딩 배치, 오래된 승인 메시지 차단, 공유 워크플로우 웹훅 헤더 값 가림, 비활성 계정 run 차단, 관리자 초기화 시 옛 비밀번호 무효화, 주제 가드 뒤집힘, 비용 동기화 정체, Turnstile 키 하나만 넣었을 때 잠김, 탭 이중 로드(홈 → 메일 상세 등 바로가기 깨짐), 문서 14곳 정정.
+- P2 주요: 요청마다 돌던 스키마 exec 1회로, 색인 D1 batch, 방 목록의 방마다 DO 호출 제거(`chat_rooms.last_seq`), 정체 run 청소 15분마다, 만료 로그인 기록 정리, 정적 파일 보안 헤더.
+- Cloudflare 기능: **Workers Logs** 구현 (`[observability]` + `src/obs/log.ts` 구조화 로그 — 내용 없이 식별자·상태·숫자만). Turnstile 로그인 확대·Analytics Engine·R2 presigned·Cache API·CSP는 넣지 않음 (이유는 RESULT.md 3절).
+- 동작 변경: 익명·권한 없는 호출만 막힘. 되돌리는 방법은 RESULT.md 2절. 원본 백업 `files/workflow-verify/full-review/orig/` (`src/workflow/routes.ts` 원본만 없음 — 변경은 `redactShared` 추가뿐).
+- 검증: tsc 통과, 로컬(마이그레이션 0001~0032 새 DB + 계정 3개) 권한·채팅 미읽음·워크플로우 승인 경로 통과. 라이브 health 200 전부 true, 로그인 화면·pitch 키워드 확인, HR 질문 grounded·제12조 인용(LLM 6.6초·총 10.8초, 1회).
+- 미검증: 로그인 뒤 화면 전부(브라우저), Workers Logs 대시보드, `index.html` 인라인 스크립트 자동 문법 검사(node 실행이 권한에 막힘 — 고친 곳은 다시 읽어 확인).
+- 사용자 결정 대기: 일반 사용자 비밀번호 변경 화면 위치, 로그아웃 시 새로고침, 암묵지 게시 hr_admin 전용 여부, `qwen3.8-27b` 단가, Turnstile 키 발급, reasoning low/medium. WF-2 복제 부채는 그대로 (요약·리플렉션이 이미 갈라져 있어 합칠 규칙 결정 필요).
+- GitHub 푸시 안 함 (다음 스냅샷: src 다수, `src/obs/log.ts`, `migrations/0032`, public 4개, `wrangler.toml`, README, DEMO-SCRIPT).
+- 상세: `files/workflow-verify/full-review/RESULT.md`.
+
+## 브라우저 검증 문제 수정 (2026-11-18)
+- 프롬프트: `browser-fix-prompt.md`. 배포 **`6f1ac4a8-f83f-402c-82a9-fd57a08038f0`** (cf-wrangler.py deploy 1회). 마이그레이션·백엔드 코드 변경 없음 (`public/index.html`, `public/workflow.js`만 수정).
+- 고친 것: ③ 요약하기 버튼(업로드 없이도 활성화·자동 업로드 후 요약, 라이브러리 제목 클릭으로 요약 화면 열기) ④ "nullnull"(`append(null)`) ② 날짜 KST 변환 ⑥ 홈 로딩(메일 API를 기다리지 않고 섹션 즉시 표시 + "불러오는 중…") ⑤ LMS 영상(라이브 R2에서 `lms/sample.mp4`가 사라져 있었음 → 로컬 원본으로 복원, 왕복 바이트 동일 확인).
+- 코드에서 재현되지 않은 것: ① 캘린더(라이브 D1 calendar_events가 0건 — 홈의 "11/21 코칭 세션"은 캘린더 데이터가 아님), ⑦ "Merlin 진행 중..." 토스트(앱 코드에 없음, 검증 도구 쪽 표시).
+- 미검증: 브라우저 실제 화면 전부 (사용자 확인 필요). 상세: `files/workflow-verify/browser-fix/RESULT.md`.
+- GitHub 푸시 안 함.
+
+## LMS 유튜브 임베드 잘림 수정 (2026-11-19)
+- 프롬프트: `lms-youtube-fix-prompt.md`. 배포 **`c591d2bb-c57c-48f6-843b-0bfec43559d1`** (cf-wrangler.py deploy 1회). 변경은 `public/lms.css` CSS 2줄뿐 (JS·API·DB·마이그레이션 없음).
+- 원인: `#lmsPlayer`는 16:9인데 그 안의 `.lms-player` 래퍼 div에 높이 규칙이 없어 iframe `height:100%`가 기본 150px로 무너짐. 고침: `.lms-player{width:100%;height:100%}`.
+- 점검: 14개 강의 모두 같은 유튜브 경로(`mountYoutube`)라 일괄 해결. R2 영상 플레이어는 별개 경로. 다른 결함은 못 찾음.
+- rescene-room은 GitHub 접근 도구가 없어 참조 못 함 (표준 방식으로 수정).
+- 검증: tsc·node --check 통과, 라이브 lms.css에 새 규칙 확인. 미검증: 브라우저 실제 화면(데스크톱·모바일) — 사용자 확인 필요.
+- GitHub 푸시 안 함. 상세: `files/workflow-verify/lms-youtube/RESULT.md`.
+
+## 워크플로우 기업용 템플릿 (2026-11-19)
+- 프롬프트: `workflow-templates-prompt.md`. 배포 **`a08fdfae-4c34-4012-8a37-6afc0844dea3`** (cf-wrangler.py deploy 1회). D1 마이그레이션·새 노드 타입 없음 (기존 노드 15종만).
+- 템플릿 5개 (코드 내장 `src/workflow/templates.ts`): 회의 자동화(4단계) · 휴가 신청 승인(2) · 주간 보고 자동 작성(3) · 신입 온보딩(6) · 지출 결재 요청(2). 읽기 전용 `GET /api/workflows/templates` 추가 (기존 API 불변).
+- UI: 빈 화면에 "워크플로우가 뭐예요?" 한 줄 설명 + 템플릿 카드(이름·설명·단계 수·"승인이 필요한 단계" 배지·"이 템플릿으로 만들기"). 사이드바 "템플릿으로 시작하기" 버튼으로 언제든 돌아옴. 만들면 일반 워크플로우로 저장되고 이름·단계 설정을 바꿀 수 있으며, 실행 입력 예시가 "고급 입력"에 채워진다.
+- "폼 입력" 단계는 폼 노드가 없어 실행 입력({{input.x}})으로 표현, "알림"은 확인용 할 일(create_task)로 대체.
+- 검증: tsc·node --check 통과, 로컬 하네스 34/34 (템플릿 5개 생성·실행·승인 게이트), 라이브 workflow.js 새 코드 확인. 미검증: 브라우저 실제 화면, 실제 메일 발송(로컬은 RESEND_API_KEY 없음).
+- GitHub 푸시 안 함. 상세: `files/workflow-verify/workflow-templates/RESULT.md`.
+
+## Plaud 연동 (2026-11-19)
+- 프롬프트: `plaud-integration-prompt.md`. 배포 **`555295d1-5e37-4f7a-be28-5eb0407678cb`** (cf-wrangler.py deploy 1회, 원격 마이그레이션 0033 적용).
+- 녹음전사·문서저장 탭에 "Plaud" 카드: OAuth 연결(PKCE, 구글 캘린더 패턴, 토큰 암호화 저장) → Plaud MCP(Worker가 클라이언트) 녹음 목록 → "가져오기"로 전사(+요약)를 개인 문서로 저장·개인 RAG 색인. 중복 방지·전사 없음 표시·토큰 갱신 실패 시 연결 해제.
+- OAuth: DCR 성공(공개 클라이언트, client_secret 없음). client_id는 비밀 아님 → wrangler.toml [vars]. 신규 시크릿 없음.
+- 검증: tsc·node --check 통과, 로컬 모의 Plaud로 전 흐름 통과. 미검증: 실제 Plaud 계정 연결·Vectorize 색인·브라우저 화면·라이브 HTTP 점검(원격 curl 승인 없음) — 사용자 확인 필요.
+- 수정 (2026-11-19): www.peopleos.site에서 "등록되지 않은 리디렉션 주소" → DCR 재등록(redirect URI 3개: peopleos.site·www·workers.dev), 새 client_id를 wrangler.toml에 반영, 허용 목록에 www 추가. 배포 **`d4309463-2ba7-4d7b-a170-128707e0c371`**. 브라우저 재확인 필요.
+- GitHub 푸시 안 함. 상세: `files/workflow-verify/plaud-integration/RESULT.md`.
+- 진단 (2026-11-19, 빈 목록 원인 확정용·임시): 마이그레이션 0034(`plaud_accounts.workspace_id`) 원격 적용, `/complete`·`/files`에서 get_current_user의 workspace_id 저장 + `/files`가 list_files 구조(keys·data_len)만 로그. 배포 **`f95498b7-7fe9-40fa-8271-6aff1cb77e68`**. 원인 확정 후 정리 예정.
+- 수정 (2026-11-19, 빈 목록): Plaud MCP 응답 text에 인젝션 방어 래퍼가 붙어 JSON.parse 실패 → `call()`이 가장 바깥 {…}를 추출해 재파싱(`parseToolText`). 배포 **`fe744d0b-56f4-415b-8111-7385555d20ae`**. 브라우저에서 목록 20건 확인 필요.
+- 수정 (2026-11-19, 행 레이아웃 + 오디오 fetch): `.taskrow`에 `flex-wrap:wrap`(오류 메모가 제목 폭을 0으로 눌러 한 글자씩 개행되던 문제) + `fetchAudio` `redirect:"follow"` 및 오류 이름/메시지 로그. 배포 **`ef4a4809-a122-4391-8a11-df4a67c416ec`**. 브라우저에서 첫 행 한 줄 표시·가져와서 전사하기 확인 필요.
+- 기능 (2026-11-19, 전사 없는 녹음): "가져와서 전사하기" — get_file presigned_url(5분)을 즉시 fetch → R2 recordings/<id>/ → 기존 Whisper 전사(advanceRecording) → 완료 시 출처 머리말 붙은 개인 문서 + 파이프라인 큐 색인. 마이그레이션 0035. 배포 **`6690e643-0575-4e68-8a0f-fda41279c188`**. 브라우저에서 2026-10-31 17:03:08 녹음으로 확인 필요.

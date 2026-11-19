@@ -13,7 +13,7 @@ import { buildTreeForDoc, treeHash } from "./tree";
 // S4 M6-α: /api/ask 파이프라인과 근거 검색 helper·상수는 ask-pipeline.ts로 옮겼다 (동작 불변).
 import {
   EMBED_DIMS, EMBED_MODEL, KEYWORD_GATE_MIN, KNOWLEDGE_EPOCH_KEY, LLM_MODEL, SCORE_FLOOR, VECTOR_INDEX_NAME, VECTOR_SEED_ERROR_KEY,
-  ensureVectorSeeded, getKnowledgeEpoch, keywordGate, recordGap, resolveSources, responseText, runAsk,
+  ensureVectorSeeded, generateWhatIf, getKnowledgeEpoch, keywordGate, recordGap, resolveSources, responseText, runAsk,
 } from "./ask-pipeline";
 import type { Source } from "./ask-pipeline";
 // S4 M6-β: 관측·평가 하위 앱(M2·M3·M4)과 큐·cron 진입점.
@@ -21,13 +21,15 @@ import { workflowRunsApp } from "./obs/routes-workflows"; // WF-11 워크플로�
 import { tracesApp } from "./obs/routes-traces";
 import { datasetsApp } from "./obs/routes-datasets";
 import { evalsApp } from "./obs/routes-evals";
-import { createTraceSink, mirrorFeedbackScore } from "./obs/trace";
+import { createTraceSink, mirrorFeedbackScore, readTraceBlob, traceR2Key } from "./obs/trace";
 import { processEvalItem, runScheduledEval, sampleJudgeUserTraces } from "./obs/runner";
 import { syncGatewayCosts } from "./obs/costs";
+import { WHISPER_PRICE } from "./obs/pricing";
 import type { EvalItemMessage } from "./obs/types";
 // 로그인 (2026-11-15): 인증 API + adminAllowed(이중 게이트용 상수 시간 비교).
 import { authApp } from "./auth-routes";
-import { adminAllowed, getSessionUser, isAdminRequest } from "./auth";
+import { adminAllowed, getSessionUser, isAdminRequest, secretMatches } from "./auth";
+import { logEvent } from "./obs/log"; // Workers Logs 구조화 로그 (전체 점검 2026-11-18)
 // 메일함 (2026-11-17): Email Routing 수신(email() 핸들러) + Resend 발송 + /api/email/*.
 import { emailApp, setEmailHooks, type EmailRow } from "./email/routes";
 import { handleInboundEmail } from "./email/inbound";
@@ -35,9 +37,12 @@ import { lmsApp } from "./lms/routes";
 import { approvalApp } from "./approval/routes";
 import { agentActivityApp } from "./agent/activity"; // 에이전트 활동 타임라인 A1 (2026-11-17, 읽기 전용)
 import { calendarApp } from "./calendar/routes"; // 캘린더 C1 (2026-11-17, migration 0025)
+import { plaudApp, setPlaudHooks } from "./plaud/routes"; // Plaud 연동 (2026-11-19, migration 0033)
 import { notificationsApp } from "./notifications/routes"; // DO-2 알림 WebSocket
 import { chatApp } from "./chat/routes"; // 채팅 DO-1a (2026-11-18, 1:1만)
 import { workflowApp } from "./workflow/routes"; // 워크플로우 WF-1 (2026-11-18, migration 0027)
+import { meetApp } from "./meet/routes"; // 화상회의 V0 (2026-11-19, RealtimeKit, migration 0038)
+import { setMeetHooks, sweepMeetings } from "./meet/transcript"; // 화상회의 V1+V2: 회의 후 전사 → 기존 파이프라인 (migration 0039)
 import { processWorkflowStep, sweepStaleWorkflowRuns } from "./workflow/engine"; // 워크플로우 실행 엔진 WF-3
 import type { WorkflowStepMessage } from "./workflow/types";
 import { runDueSchedules, runEventTriggers } from "./workflow/schedules"; // 워크플로우 스케줄·이벤트 트리거 WF-8 (migration 0028)
@@ -166,15 +171,18 @@ type PipelineStage = "queued" | "transcribing" | "summarizing" | "indexing" | "d
 // siteverify 호출 자체가 실패해도 fail-open으로 넘긴다 (일시 장애 시
 // 데모가 멈추지 않게). 검증 실패(토큰 없음·위조)만 403으로 막는다.
 async function verifyTurnstile(env: Env, token: string | undefined, ip: string | undefined): Promise<{ ok: boolean; skipped?: boolean; error?: string }> {
-  if (!env.TURNSTILE_SECRET) {
-    console.log("[turnstile] skipped: TURNSTILE_SECRET not set (fail-open for demo)");
+  // 전체 점검(2026-11-18) P1: 비밀 키와 사이트 키가 **둘 다** 있어야 켠다. 비밀 키만 넣으면 화면에는 위젯이 없는데
+  // 서버는 토큰을 요구해서 모든 질문이 403으로 막혔다 (설정 실수 한 번으로 질문 기능 전체가 죽는 것을 막는다).
+  if (!env.TURNSTILE_SECRET || !env.TURNSTILE_SITEKEY) {
+    console.log("[turnstile] skipped: TURNSTILE_SECRET/TURNSTILE_SITEKEY not both set (fail-open for demo)");
     return { ok: true, skipped: true };
   }
-  if (!token) return { ok: false, error: "bot check token is required — please retry the question" };
+  if (!token) return { ok: false, error: "봇 확인이 아직 끝나지 않았습니다. 잠시 후 다시 질문해 주세요. (계속되면 페이지를 새로고침하세요)" };
   try {
     const form = new URLSearchParams({ secret: env.TURNSTILE_SECRET, response: token });
     if (ip) form.set("remoteip", ip);
-    const res = await fetch(TURNSTILE_VERIFY_URL, { method: "POST", body: form });
+    // siteverify가 응답하지 않으면 5초 뒤 끊고 아래 catch의 fail-open으로 넘긴다 (질문이 무한정 매달리지 않게).
+    const res = await fetch(TURNSTILE_VERIFY_URL, { method: "POST", body: form, signal: AbortSignal.timeout(5000) });
     const data = await res.json() as { success?: boolean; "error-codes"?: string[] };
     if (data.success) return { ok: true };
     return { ok: false, error: `turnstile verification failed: ${(data["error-codes"] || []).join(",") || "unknown"}` };
@@ -294,6 +302,30 @@ async function enqueuePipeline(env: Env, recordingId: string, docId: string, tit
   await env.PIPELINE.send(msg);
 }
 
+// 전사 완료 분기 (advanceRecording에서 떼어냄, 화상회의 V2 2026-11-19): 전사본 문서 생성 → recordings ready → PIPELINE 큐.
+// 업로드 녹음과 RealtimeKit 회의 전사(src/meet/transcript.ts, setMeetHooks로 주입)가 같은 함수를 쓴다.
+// 개인별 RAG 격리: 전사본 문서는 녹음 행의 소유자를 그대로 복사한다. 코칭 플래그(0020): 녹음의 is_coaching을 문서로 넘긴다.
+// S1: 요약·색인은 큐 소비자에게 넘긴다. enqueue에 실패해도 전사본 자체는 ready로 남기고 파이프라인만 failed로 표시한다
+// (재시도는 POST /api/recordings/:id/pipeline-retry).
+async function finishTranscript(
+  env: Env,
+  rec: { id: string; title: string; object_key: string; owner_id: string | null; is_coaching: number | null },
+  docTitle: string, docContent: string, transcript: string,
+): Promise<string> {
+  const docId = uid("doc");
+  await env.DB.prepare("INSERT INTO documents (id, title, kind, content, r2_key, owner_id, is_coaching) VALUES (?, ?, 'transcript', ?, ?, ?, ?)")
+    .bind(docId, docTitle, docContent, rec.object_key, rec.owner_id ?? null, rec.is_coaching ? 1 : 0).run();
+  await env.DB.prepare("UPDATE recordings SET transcript = ?, transcript_status = 'ready', doc_id = ?, progress = NULL WHERE id = ?")
+    .bind(transcript, docId, rec.id).run();
+  try {
+    await enqueuePipeline(env, rec.id, docId, rec.title);
+    await setPipelineStage(env, rec.id, "queued");
+  } catch (e) {
+    await setPipelineStage(env, rec.id, "failed", `enqueue failed: ${e instanceof Error ? e.message : String(e)}`).catch(() => {});
+  }
+  return docId;
+}
+
 // R2 오디오를 구간 단위로 전사해 recordings 행을 ready/pending으로 만든다.
 // 진행 위치(done_chunks)와 완료분 텍스트(partial)를 행에 남겨, 여러 호출에
 // 나눠 이어갈 수 있다. 배경: waitUntil 백그라운드 작업이 약 2분 뒤에 조용히
@@ -353,21 +385,14 @@ async function advanceRecording(env: Env, recordingId: string, opts: { maxSegmen
         await setPipelineStage(env, recordingId, "queued").catch(() => {});
         return { status: "pending" };
       }
-      const docId = uid("doc");
-      // 개인별 RAG 격리: 전사본 문서는 녹음 행의 소유자를 그대로 복사한다.
-      // 코칭 플래그(0020): 녹음 업로드 때 받은 is_coaching을 전사본 문서로 넘긴다.
-      await env.DB.prepare("INSERT INTO documents (id, title, kind, content, r2_key, owner_id, is_coaching) VALUES (?, ?, 'transcript', ?, ?, ?, ?)")
-        .bind(docId, row.title.replace(/\.[^.]+$/, ""), partial, row.object_key, row.owner_id ?? null, row.is_coaching ? 1 : 0).run();
-      await env.DB.prepare("UPDATE recordings SET transcript = ?, transcript_status = 'ready', doc_id = ?, progress = NULL WHERE id = ?")
-        .bind(partial, docId, recordingId).run();
-      // S1: 전사 완료 → 요약·색인은 큐 소비자에게 넘긴다. enqueue에 실패해도
-      // 전사본 자체는 ready로 남기고 파이프라인만 failed로 표시한다
-      // (재시도는 POST /api/recordings/:id/pipeline-retry).
-      try {
-        await enqueuePipeline(env, recordingId, docId, row.title);
-        await setPipelineStage(env, recordingId, "queued");
-      } catch (e) {
-        await setPipelineStage(env, recordingId, "failed", `enqueue failed: ${e instanceof Error ? e.message : String(e)}`).catch(() => {});
+      // Plaud에서 가져온 녹음이면 출처 머리말을 문서 본문 앞에 붙인다 (plaud_imports.header, migration 0035). 없으면 null.
+      const plaud = await env.DB.prepare("SELECT user_id, plaud_file_id, header FROM plaud_imports WHERE recording_id = ? LIMIT 1").bind(recordingId)
+        .first<{ user_id: string; plaud_file_id: string; header: string | null }>().catch(() => null);
+      const docTitle = row.title.replace(/\.[^.]+$/, "");
+      const docContent = plaud?.header ? `# ${docTitle}\n\n${plaud.header} · 전사: People OS Whisper\n\n## 전사\n\n${partial}` : partial;
+      const docId = await finishTranscript(env, { id: recordingId, title: row.title, object_key: row.object_key, owner_id: row.owner_id, is_coaching: row.is_coaching }, docTitle, docContent, partial);
+      if (plaud) {
+        await env.DB.prepare("UPDATE plaud_imports SET doc_id = ?, title = ? WHERE recording_id = ?").bind(docId, docTitle, recordingId).run().catch(() => {});
       }
       return { status: "ready" };
     }
@@ -487,7 +512,20 @@ async function ensureSchema(db: D1Database) {
   `);
 }
 
-async function ensureSeeded(db: D1Database) {
+// 전체 점검(2026-11-18) P2: 거의 모든 API가 요청마다 ensureSeeded를 불러 CREATE TABLE 12문 exec +
+// COUNT 2회를 돌렸다. isolate당 한 번만 실제로 실행하고, 실패하면 다음 요청이 다시 시도한다.
+let seededOnce: Promise<void> | null = null;
+function ensureSeeded(db: D1Database): Promise<void> {
+  if (!seededOnce) {
+    seededOnce = ensureSeededImpl(db).catch((e) => {
+      seededOnce = null;
+      throw e;
+    });
+  }
+  return seededOnce;
+}
+
+async function ensureSeededImpl(db: D1Database) {
   await ensureSchema(db);
   const count = await db.prepare("SELECT COUNT(*) AS n FROM policies").first<{ n: number }>();
   if (!count || count.n === 0) {
@@ -741,8 +779,12 @@ async function summarizeDocument(env: Env, docId: string): Promise<{ summary: st
 app.post("/api/documents/:id/summarize", async (c) => {
   await ensureSeeded(c.env.DB);
   const id = c.req.param("id");
-  const doc = await c.env.DB.prepare("SELECT id, title FROM documents WHERE id = ?").bind(id).first<{ id: string; title: string }>();
+  const doc = await c.env.DB.prepare("SELECT id, title, owner_id FROM documents WHERE id = ?").bind(id).first<{ id: string; title: string; owner_id: string | null }>();
   if (!doc) return c.json({ ok: false, error: "document not found" }, 404);
+  // 전체 점검(2026-11-18) P0: 요약·액션이 응답에 실리므로 다운로드와 같은 읽기 게이트를 둔다
+  // (공용 또는 소유자 또는 hr_admin). 이전에는 남의 개인 전사본 id로 요약을 받아 볼 수 있었다.
+  const sumViewer = await getSessionUser(c.env, c.req.header("cookie"));
+  if (!canRead(sumViewer, doc.owner_id)) return c.json({ ok: false, error: "forbidden" }, 403);
   const r = await summarizeDocument(c.env, id);
   return c.json({ ok: true, id, title: doc.title, summary: r.summary, actions: r.actions, engine: r.engine });
 });
@@ -801,10 +843,16 @@ app.get("/api/recordings", async (c) => {
   const viewer = await getSessionUser(c.env, c.req.header("cookie"));
   const isAdmin = viewer?.role === "hr_admin";
   const { clause, params } = docOwnerClause(viewer, "recordings");
-  const rows = isAdmin
-    ? await c.env.DB.prepare("SELECT id, title, provider, model, mime_type, size, transcript_status, progress, pipeline_stage, pipeline_error, doc_id, owner_id, created_at FROM recordings ORDER BY created_at DESC LIMIT 20").all()
-    : await c.env.DB.prepare(`SELECT id, title, provider, model, mime_type, size, transcript_status, progress, pipeline_stage, pipeline_error, doc_id, owner_id, created_at FROM recordings WHERE ${clause} ORDER BY created_at DESC LIMIT 20`).bind(...params).all();
-  return c.json({ ok: true, recordings: rows.results || [] });
+  const cols = "id, title, provider, model, mime_type, size, transcript_status, progress, pipeline_stage, pipeline_error, doc_id, owner_id, created_at";
+  const q = async (withDur: boolean) => {
+    const sel = withDur ? `${cols}, duration_ms` : cols;
+    return isAdmin
+      ? await c.env.DB.prepare(`SELECT ${sel} FROM recordings ORDER BY created_at DESC LIMIT 20`).all()
+      : await c.env.DB.prepare(`SELECT ${sel} FROM recordings WHERE ${clause} ORDER BY created_at DESC LIMIT 20`).bind(...params).all();
+  };
+  // duration_ms는 0036 이후에만 있다 — 없으면 길이 없이 목록을 돌려준다.
+  const rows = await q(true).catch(() => q(false));
+  return c.json({ ok: true, recordings: rows.results || [], whisper: { neuronsPerMin: WHISPER_PRICE.neuronsPerMin, usdPerMin: WHISPER_PRICE.usdPerMin, checked: WHISPER_PRICE.checked } });
 });
 
 app.get("/api/recordings/:id", async (c) => {
@@ -923,18 +971,28 @@ async function bumpKnowledgeEpoch(env: Env): Promise<number> {
 async function indexDocument(env: Env, doc: { id: string; title: string; markdown: string; kind?: string; ownerId?: string | null }): Promise<{ chunks: number; upserted: number; indexError?: string }> {
   const chunks = splitMarkdownIntoChunks({ id: doc.id, title: doc.title, body: doc.markdown });
   await env.DB.prepare("DELETE FROM chunks WHERE doc_id = ?").bind(doc.id).run();
-  for (const ch of chunks) {
-    await env.DB.prepare("INSERT OR REPLACE INTO chunks (id, doc_id, article, text, ord) VALUES (?, ?, ?, ?, ?)").bind(ch.id, ch.doc_id, ch.article, ch.text, ch.ord).run();
+  // 전체 점검(2026-11-18) P2: chunk마다 D1 왕복 1회(N+1)이던 것을 D1 batch(50개 단위)로 묶는다. 결과는 같다.
+  const insertChunk = env.DB.prepare("INSERT OR REPLACE INTO chunks (id, doc_id, article, text, ord) VALUES (?, ?, ?, ?, ?)");
+  for (let i = 0; i < chunks.length; i += 50) {
+    await env.DB.batch(chunks.slice(i, i + 50).map((ch) => insertChunk.bind(ch.id, ch.doc_id, ch.article, ch.text, ch.ord)));
   }
   try {
     const texts = chunks.map((ch) => `${doc.title} ${ch.article} ${ch.text}`);
-    const emb = await env.AI.run(EMBED_MODEL, { text: texts }, aiGatewayOptions({ skipCache: true, tag: "embed" })) as { data: number[][] | number[] };
-    const data = emb.data;
-    // Workers AI는 텍스트 1개면 data를 평탄한 number[]로, 여러 개면
-    // number[][]로 돌려준다 (ask 핸들러도 같은 정규화를 한다). 1개짜리
-    // 문서를 2차원이라고 가정하면 여기서 shape 오류로 upsert가 안 된다.
-    const rows = Array.isArray(data) && data.length > 0 && Array.isArray(data[0]) ? (data as number[][]) : [data as number[]];
-    if (!Array.isArray(data) || rows.length !== texts.length) throw new Error("unexpected embedding response shape");
+    // 전체 점검(2026-11-18) P1: 긴 문서(chunk 수십~수백 개)를 한 번의 임베딩 호출에 다 실으면 배치 상한에 걸려
+    // 색인 전체가 실패했다. 재색인 경로(/api/admin/reindex)와 같이 나눠서 호출한다 (50개 이하 문서는 기존과 같은 1회 호출).
+    const EMBED_BATCH = 50;
+    const rows: number[][] = [];
+    for (let i = 0; i < texts.length; i += EMBED_BATCH) {
+      const part = texts.slice(i, i + EMBED_BATCH);
+      const emb = await env.AI.run(EMBED_MODEL, { text: part }, aiGatewayOptions({ skipCache: true, tag: "embed" })) as { data: number[][] | number[] };
+      const data = emb.data;
+      // Workers AI는 텍스트 1개면 data를 평탄한 number[]로, 여러 개면
+      // number[][]로 돌려준다 (ask 핸들러도 같은 정규화를 한다). 1개짜리
+      // 문서를 2차원이라고 가정하면 여기서 shape 오류로 upsert가 안 된다.
+      const partRows = Array.isArray(data) && data.length > 0 && Array.isArray(data[0]) ? (data as number[][]) : [data as number[]];
+      if (!Array.isArray(data) || partRows.length !== part.length) throw new Error("unexpected embedding response shape");
+      rows.push(...partRows);
+    }
     if (rows[0].length !== EMBED_DIMS) throw new Error(`embedding dims ${rows[0].length} != index dims ${EMBED_DIMS}`);
     // Vectorize 메타데이터 kind는 문서의 실제 종류를 쓴다 (C5 Phase 3:
     // 파일 업로드 문서가 'tacit'으로 오표시되지 않게. D1 documents.kind가
@@ -942,7 +1000,7 @@ async function indexDocument(env: Env, doc: { id: string; title: string; markdow
     // 개인별 RAG 격리: user_id는 소유자 id, 없으면 공용 센티넬 "shared".
     // pool도 소유자 기준으로 정한다 (개인 파일 업로드가 "공용"으로 보이지 않게).
     const vectors = chunks.map((ch, i) => ({ id: ch.id, values: rows[i], metadata: { title: doc.title, section: ch.article, snippet: ch.text.slice(0, 220), kind: doc.kind ?? "tacit", pool: poolForDoc(doc.kind, doc.ownerId), user_id: vectorUserIdForDoc(doc.ownerId) } }));
-    await env.VECTOR.upsert(vectors);
+    for (let i = 0; i < vectors.length; i += 500) await env.VECTOR.upsert(vectors.slice(i, i + 500));
     // 트리 빌드 큐 (2026-11-16): 전사본·파일 문서만. HR 규정(kind='policy')과
     // tacit 답은 건너뛴다 (buildTreeForDoc이 kind를 다시 확인한다).
     // 색인 실패가 아니므로 큐 전송 실패가 색인 결과를 바꾸지 않게 best-effort로 한다.
@@ -1025,8 +1083,16 @@ app.post("/api/ask", async (c) => {
   // C7 레이트 리밋: 세션/IP 기준 분당 20회. 초과 시 429 + 재시도 안내.
   // 식별자는 세션 우선: cf-connecting-ip는 클라우드 브라우저 등에서 요청마다
   // 바뀔 수 있어 IP 기준이면 카운터가 분산돼 제한이 안 걸린다. 세션이 없을 때만 IP로.
-  const rateKey = sessionId || clientIp || "anon";
-  const rate = await checkAskRateLimit(c.env, rateKey);
+  // 전체 점검(2026-11-18) P1: sessionId는 클라이언트가 정하는 값이라, 요청마다 새 sessionId를 보내면
+  // 제한이 걸리지 않았다. 로그인 사용자는 사용자 id 버킷을, 익명은 기존 세션 버킷에 더해 IP 버킷을 함께 본다.
+  // (정상 사용자는 같은 sessionId를 계속 쓰므로 세션 버킷이 먼저 닳는다 — 응답·수치는 기존과 같다.)
+  const viewer = await getSessionUser(c.env, c.req.header("cookie"));
+  const rateKey = viewer ? `user:${viewer.id}` : (sessionId || clientIp || "anon");
+  let rate = await checkAskRateLimit(c.env, rateKey);
+  if (rate.allowed && !viewer && clientIp) {
+    const ipRate = await checkAskRateLimit(c.env, `ip:${clientIp}`);
+    if (!ipRate.allowed) rate = ipRate;
+  }
   if (!rate.allowed) {
     return c.json(
       { ok: false, error: `너무 많은 질문입니다. ${rate.resetInSec}초 후에 다시 시도해 주세요.` },
@@ -1038,7 +1104,6 @@ app.post("/api/ask", async (c) => {
   // 캐시 조회 → 세션 문맥 → 근거 검색 → 답 생성 → 세션 저장 → 감사 기록 → 캐시 저장
   // 은 runAsk (src/ask-pipeline.ts, S4 M6-α). force면 캐시를 읽지 않고 AI Gateway 캐시도 건너뛴다.
   // 개인별 RAG 격리: 세션 사용자를 viewer로 넘긴다. 익명이면 viewer null → 공용만 검색.
-  const viewer = await getSessionUser(c.env, c.req.header("cookie"));
   const r = await runAsk(
     c.env,
     { question, sessionId, startedAt: t0 },
@@ -1047,6 +1112,50 @@ app.post("/api/ask", async (c) => {
     { traceSink, ctx: c.executionCtx as unknown as ExecutionContext },
   );
   return c.json(r.body);
+});
+
+// ---- What-If ("이 답이 달라지려면") — 답과 분리한 별도 호출 (2026-11-19) ----
+// 화면이 답을 그린 뒤 따로 부른다. 답은 What-If를 기다리지 않는다.
+// 인증: 그 답을 받은 사람만. 로그인 사용자의 질문(user_id 있음)은 본인만 (개인 업무 검색은 로그인 필수·소유자만),
+// 익명 질문(user_id 없음, HR 창만 가능)은 질문 때 쓴 sessionId를 ?sessionId= 로 보내야 한다.
+// 실패·시간 초과는 { ok: true, whatIf: null } — 답에는 영향이 없다 (fail-open). 결과는 KV에 1시간 두어 같은 호출의 LLM 재호출을 막는다.
+app.get("/api/ask/:eventId/whatif", async (c) => {
+  const eventId = c.req.param("eventId");
+  const row = await c.env.DB.prepare(
+    "SELECT id, session_id, user_id, origin, question, answer, grounded, latency_ms FROM ask_events WHERE id = ?",
+  ).bind(eventId).first<{ id: string; session_id: string; user_id: string | null; origin: string; question: string; answer: string; grounded: number; latency_ms: number | null }>();
+  if (!row || (row.origin !== "user" && row.origin !== "personal")) return c.json({ ok: false, error: "not found" }, 404);
+  const viewer = await getSessionUser(c.env, c.req.header("cookie"));
+  const querySession = c.req.query("sessionId") || "";
+  let allowed = false;
+  if (row.user_id) allowed = !!viewer && viewer.id === row.user_id;
+  else allowed = row.origin === "user" && !!querySession && secretMatches(row.session_id, querySession);
+  if (!allowed) return c.json({ ok: false, error: row.user_id && !viewer ? "login required" : "forbidden" }, row.user_id && !viewer ? 401 : 403);
+
+  const kvKey = `whatif:${eventId}`;
+  try {
+    const hit = await c.env.CACHE.get(kvKey);
+    if (hit) return c.json({ ok: true, eventId, whatIf: hit, cached: true });
+  } catch { /* 캐시 실패는 무시 */ }
+
+  // 근거 요약은 R2 원문에 있다. R2 기록은 응답 뒤(waitUntil)라 방금 끝난 답이면 잠깐 늦을 수 있어 짧게 재시도한다.
+  let ctx: Array<{ title: string; section: string; snippet: string }> | undefined;
+  for (let i = 0; i < 4; i++) {
+    const blob = await readTraceBlob(c.env, traceR2Key(eventId));
+    if (blob) { ctx = blob.whatIfContext; break; }
+    await new Promise((r) => setTimeout(r, 400));
+  }
+  // 근거 있는 답인데 요약을 못 구하면 (예전 트레이스·R2 기록 실패) 만들지 않는다 — 근거 없는 답으로 오인하지 않게.
+  if (!ctx && row.grounded === 1) return c.json({ ok: true, eventId, whatIf: null, reason: "no_context" });
+
+  const r = await generateWhatIf(c.env, { eventId, question: row.question, answer: row.answer, sources: ctx ?? [], pool: row.origin === "personal" ? "personal" : "shared" });
+  // 트레이스 span (실패해도 응답에 영향 없음). 답 span 뒤(latency)에 놓는다.
+  try {
+    await c.env.DB.prepare("INSERT OR REPLACE INTO trace_spans (id, event_id, name, product, start_ms, duration_ms, ok, attrs_json) VALUES (?, ?, 'what_if', 'workers-ai', ?, ?, ?, ?)")
+      .bind(`${eventId}:what_if`, eventId, row.latency_ms ?? 0, r.ms, r.whatIf ? 1 : 0, JSON.stringify({ model: LLM_MODEL, grounded: r.grounded, separate: true, ...(r.error ? { error: r.error } : {}) })).run();
+  } catch { /* 스키마 없음 등 — 무시 */ }
+  if (r.whatIf) { try { await c.env.CACHE.put(kvKey, r.whatIf, { expirationTtl: 3600 }); } catch { /* 무시 */ } }
+  return c.json({ ok: true, eventId, whatIf: r.whatIf ?? null, ms: r.ms, ...(r.error ? { error: r.error } : {}) });
 });
 
 // ---- 개인 업무 검색 (2026-11-16) ----
@@ -1119,6 +1228,12 @@ app.post("/api/feedback", async (c) => {
   });
 });
 
+// 로그인 세션 또는 X-Admin-Secret(운영 스크립트·관측 화면) 중 하나면 통과.
+async function loggedInOrAdmin(c: Context<{ Bindings: Env }>): Promise<boolean> {
+  if (adminAllowed(c.env, c.req.header("x-admin-secret"))) return true;
+  return (await getSessionUser(c.env, c.req.header("cookie"))) !== null;
+}
+
 // 0021: 공백 질문자 표시 이름. 기록된 사용자가 있으면 그 이름, 없으면 평가 실행에서 온
 // 행(low-score/regression)은 "평가", 그 외는 "익명".
 function gapAskerName(source: string, userId: string | null, name: string | null): string {
@@ -1132,6 +1247,9 @@ function gapAskerName(source: string, userId: string | null, name: string | null
 // 게시된 암묵지 문서 제목을 함께 돌려준다 (프론트 링크용).
 app.get("/api/gaps", async (c) => {
   await ensureSeeded(c.env.DB);
+  // 전체 점검(2026-11-18) P1: 질문 원문·질문자 이름이 나가므로 로그인 사용자(또는 X-Admin-Secret)만.
+  // 화면은 로그인 뒤에만 이 목록을 부른다 (익명은 로그인 창에서 막힘).
+  if (!(await loggedInOrAdmin(c))) return c.json({ ok: false, error: "로그인이 필요합니다." }, 401);
   const rows = await c.env.DB.prepare(
     // 0021: 질문자 이름 (user_id NULL → "익명", 평가에서 온 행(low-score/regression) → "평가").
     "SELECT g.id, g.question, g.asked_at, g.status, g.doc_id, g.count, g.source, g.user_id, d.title AS doc_title, u.name AS asker_user_name FROM knowledge_gaps g LEFT JOIN documents d ON d.id = g.doc_id LEFT JOIN users u ON u.id = g.user_id ORDER BY g.asked_at DESC LIMIT 50"
@@ -1149,6 +1267,9 @@ app.get("/api/gaps", async (c) => {
 // 같은 질문을 다시 실행해 근거가 잡히면 resolved, 아니면 open으로 되돌린다.
 app.post("/api/gaps/:id/publish", async (c) => {
   await ensureSeeded(c.env.DB);
+  // 전체 점검(2026-11-18) P0: 게시한 답은 공용 RAG 근거가 되므로 익명 게시를 막는다
+  // (이전에는 로그인 없이 공용 지식에 아무 내용이나 넣을 수 있었다). 로그인 사용자는 기존과 같다.
+  if (!(await loggedInOrAdmin(c))) return c.json({ ok: false, error: "로그인이 필요합니다." }, 401);
   const id = c.req.param("id");
   const gap = await c.env.DB.prepare("SELECT id, question, status, doc_id FROM knowledge_gaps WHERE id = ?").bind(id)
     .first<{ id: string; question: string; status: string; doc_id: string | null }>();
@@ -1335,14 +1456,15 @@ app.get("/api/home", async (c) => {
   // 0021: 할 일은 GET /api/tasks와 같은 범위 — hr_admin 전체, 그 외 본인 + 미지정(owner_id NULL).
   const tc = taskOwnerClause(viewer);
   const openTasks = await count(`SELECT COUNT(*) AS n FROM tasks t WHERE t.done = 0${tc.clause ? ` AND ${tc.clause}` : ""}`, tc.params);
-  const reflections = await count("SELECT COUNT(*) AS n FROM reflections");
+  const rs = reflectionScope(viewer);
+  const reflections = await count(`SELECT COUNT(*) AS n FROM reflections r${rs.clause ? ` WHERE ${rs.clause}` : ""}`, rs.params);
   // 0021: 최근 문서·리플렉션·할 일에 소유자/참여자 이름을 붙인다 (NULL → 화면에서 공용/미지정).
   const docCols = "documents.id, documents.title, documents.kind, documents.created_at, u.name AS owner_name";
   const recentDocuments = isAdmin
     ? (await c.env.DB.prepare(`SELECT ${docCols} FROM documents LEFT JOIN users u ON u.id = documents.owner_id ORDER BY documents.created_at DESC LIMIT 5`).all()).results || []
     : (await c.env.DB.prepare(`SELECT ${docCols} FROM documents LEFT JOIN users u ON u.id = documents.owner_id WHERE ${docClause} ORDER BY documents.created_at DESC LIMIT 5`).bind(...docParams).all()).results || [];
   const tasks = (await c.env.DB.prepare(`SELECT t.id, t.title, t.source, t.created_at, t.owner_id, COALESCE(u.name, '미지정') AS owner_name FROM tasks t LEFT JOIN users u ON u.id = t.owner_id WHERE t.done = 0${tc.clause ? ` AND ${tc.clause}` : ""} ORDER BY t.created_at DESC LIMIT 5`).bind(...tc.params).all()).results || [];
-  const recentReflections = (await c.env.DB.prepare("SELECT r.id, r.patterns, r.created_at, uc.name AS coach_name, ue.name AS coachee_name FROM reflections r LEFT JOIN users uc ON uc.id = r.coach_id LEFT JOIN users ue ON ue.id = r.coachee_id ORDER BY r.created_at DESC LIMIT 3").all()).results || [];
+  const recentReflections = (await c.env.DB.prepare(`SELECT r.id, r.patterns, r.created_at, uc.name AS coach_name, ue.name AS coachee_name FROM reflections r LEFT JOIN users uc ON uc.id = r.coach_id LEFT JOIN users ue ON ue.id = r.coachee_id${rs.clause ? ` WHERE ${rs.clause}` : ""} ORDER BY r.created_at DESC LIMIT 3`).bind(...rs.params).all()).results || [];
   // 0021: hr_admin 전용 사용자별 집계 (문서 = 소유 문서, 할 일 = 소유 할 일, 리플렉션 = 코치 또는 코칭 대상).
   let byUser: Array<{ userId: string; name: string; email: string; documents: number; tasks: number; reflections: number }> | undefined;
   if (isAdmin) {
@@ -1363,6 +1485,22 @@ function taskOwnerClause(viewer: { id: string; role: string } | null): { clause:
   if (viewer?.role === "hr_admin") return { clause: "", params: [] };
   if (!viewer) return { clause: "(t.owner_id IS NULL)", params: [] };
   return { clause: "(t.owner_id IS NULL OR t.owner_id = ?)", params: [viewer.id] };
+}
+
+// 전체 점검(2026-11-18) P0: 할 일 완료 처리·삭제 범위 = 읽기 범위(taskOwnerClause)와 같다.
+// hr_admin 전체, 미지정(owner_id NULL)은 누구나(기존 동작 유지), 소유자가 있으면 본인만.
+function canTouchTask(viewer: { id: string; role: string } | null, ownerId: string | null): boolean {
+  if (viewer?.role === "hr_admin") return true;
+  if (!ownerId) return true;
+  return !!viewer && viewer.id === ownerId;
+}
+
+// 전체 점검(2026-11-18) P1: 리플렉션 읽기 범위. hr_admin 전체, 로그인 사용자는 본인이 코치·코칭 대상인 것 +
+// 참여자 미기록(둘 다 NULL, 익명·초기 데이터), 익명은 참여자 미기록만. 이전에는 남의 코칭 패턴이 모두에게 보였다.
+function reflectionScope(viewer: { id: string; role: string } | null): { clause: string; params: string[] } {
+  if (viewer?.role === "hr_admin") return { clause: "", params: [] };
+  if (!viewer) return { clause: "(r.coach_id IS NULL AND r.coachee_id IS NULL)", params: [] };
+  return { clause: "(r.coach_id = ? OR r.coachee_id = ? OR (r.coach_id IS NULL AND r.coachee_id IS NULL))", params: [viewer.id, viewer.id] };
 }
 
 // ---- tasks (할 일 체크리스트) ----
@@ -1403,8 +1541,9 @@ app.patch("/api/tasks/:id", async (c) => {
   await ensureSeeded(c.env.DB);
   const id = c.req.param("id");
   const body = await c.req.json().catch(() => ({})) as { done?: boolean };
-  const row = await c.env.DB.prepare("SELECT done FROM tasks WHERE id = ?").bind(id).first<{ done: number }>();
+  const row = await c.env.DB.prepare("SELECT done, owner_id FROM tasks WHERE id = ?").bind(id).first<{ done: number; owner_id: string | null }>();
   if (!row) return c.json({ ok: false, error: "task not found" }, 404);
+  if (!canTouchTask(await getSessionUser(c.env, c.req.header("cookie")), row.owner_id)) return c.json({ ok: false, error: "forbidden" }, 403);
   const done = typeof body.done === "boolean" ? (body.done ? 1 : 0) : (row.done ? 0 : 1);
   await c.env.DB.prepare("UPDATE tasks SET done = ?, done_at = ? WHERE id = ?").bind(done, done ? new Date().toISOString() : null, id).run();
   return c.json({ ok: true, id, done: done === 1 });
@@ -1413,6 +1552,9 @@ app.patch("/api/tasks/:id", async (c) => {
 app.delete("/api/tasks/:id", async (c) => {
   await ensureSeeded(c.env.DB);
   const id = c.req.param("id");
+  const row = await c.env.DB.prepare("SELECT owner_id FROM tasks WHERE id = ?").bind(id).first<{ owner_id: string | null }>();
+  if (!row) return c.json({ ok: false, error: "task not found" }, 404);
+  if (!canTouchTask(await getSessionUser(c.env, c.req.header("cookie")), row.owner_id)) return c.json({ ok: false, error: "forbidden" }, 403);
   const res = await c.env.DB.prepare("DELETE FROM tasks WHERE id = ?").bind(id).run();
   if ((res.meta.changes ?? 0) === 0) return c.json({ ok: false, error: "task not found" }, 404);
   return c.json({ ok: true, id });
@@ -1492,7 +1634,8 @@ app.get("/api/library", async (c) => {
     ? await c.env.DB.prepare(`SELECT ${deckCols} FROM decks LEFT JOIN users u ON u.id = decks.owner_id ORDER BY decks.created_at DESC LIMIT 100`).all()
     : await c.env.DB.prepare(`SELECT ${deckCols} FROM decks LEFT JOIN users u ON u.id = decks.owner_id WHERE ${dcl.clause} ORDER BY decks.created_at DESC LIMIT 100`).bind(...dcl.params).all();
   const pols = await c.env.DB.prepare("SELECT id, title, section FROM policies ORDER BY id").all();
-  const refls = await c.env.DB.prepare("SELECT r.id, r.session_id, r.patterns, r.next_questions, r.mode, r.created_at, uc.name AS coach_name, ue.name AS coachee_name FROM reflections r LEFT JOIN users uc ON uc.id = r.coach_id LEFT JOIN users ue ON ue.id = r.coachee_id ORDER BY r.created_at DESC LIMIT 20").all();
+  const lrs = reflectionScope(viewer);
+  const refls = await c.env.DB.prepare(`SELECT r.id, r.session_id, r.patterns, r.next_questions, r.mode, r.created_at, uc.name AS coach_name, ue.name AS coachee_name FROM reflections r LEFT JOIN users uc ON uc.id = r.coach_id LEFT JOIN users ue ON ue.id = r.coachee_id${lrs.clause ? ` WHERE ${lrs.clause}` : ""} ORDER BY r.created_at DESC LIMIT 20`).bind(...lrs.params).all();
   // canDelete: 소유자 본인 또는 hr_admin (공용 owner_id NULL은 hr_admin만). owner_id 자체는 내보내지 않는다.
   // HR admin에게는 소유자 표시를 위해 owner(표시 이름)를 함께 보낸다. 공용이면 null → 화면에 '공용'.
   const mark = (r: any) => ({ ...r, owner_id: undefined, owner_email: undefined, owner_name: undefined, canDelete: !!viewer && (isAdmin || r.owner_id === viewer.id), owner: isAdmin ? (r.owner_id ? (r.owner_name || r.owner_email || r.owner_id) : null) : undefined });
@@ -1586,20 +1729,57 @@ app.delete("/api/documents/:id", async (c) => {
   const viewer = await getSessionUser(c.env, c.req.header("cookie"));
   if (!canWrite(viewer, row.owner_id)) return c.json({ ok: false, error: "forbidden" }, 403);
   const errors: string[] = [];
-  const chunkRows = await c.env.DB.prepare("SELECT id FROM chunks WHERE doc_id = ?").bind(id).all<{ id: string }>();
+  const vectorsDeleted = await purgeDocument(c.env, id, row, errors);
+  return c.json({ ok: true, id, vectorsDeleted, errors });
+});
+
+// 문서 삭제 공통 단계: Vectorize 벡터 → R2(r2_key, source_r2_key) → D1 chunks → recordings.doc_id=NULL → documents 행.
+// 문서·녹음 삭제 엔드포인트가 함께 쓴다. 단계별 실패는 errors에 모으고 계속 진행한다.
+async function purgeDocument(env: Env, id: string, row: { r2_key: string | null; source_r2_key: string | null }, errors: string[]): Promise<number> {
+  const chunkRows = await env.DB.prepare("SELECT id FROM chunks WHERE doc_id = ?").bind(id).all<{ id: string }>();
   const ids = (chunkRows.results || []).map((r) => r.id);
   for (let i = 0; i < ids.length; i += 100) {
-    try { await c.env.VECTOR.deleteByIds(ids.slice(i, i + 100)); }
+    try { await env.VECTOR.deleteByIds(ids.slice(i, i + 100)); }
     catch (e) { errors.push(`vectors: ${e instanceof Error ? e.message : String(e)}`); break; }
   }
   for (const key of [row.r2_key, row.source_r2_key]) {
     if (!key) continue;
-    try { await c.env.FILES.delete(key); } catch (e) { errors.push(`r2: ${e instanceof Error ? e.message : String(e)}`); }
+    try { await env.FILES.delete(key); } catch (e) { errors.push(`r2: ${e instanceof Error ? e.message : String(e)}`); }
   }
-  await c.env.DB.prepare("DELETE FROM chunks WHERE doc_id = ?").bind(id).run();
-  await c.env.DB.prepare("UPDATE recordings SET doc_id = NULL WHERE doc_id = ?").bind(id).run();
-  await c.env.DB.prepare("DELETE FROM documents WHERE id = ?").bind(id).run();
-  return c.json({ ok: true, id, vectorsDeleted: ids.length, errors });
+  await env.DB.prepare("DELETE FROM chunks WHERE doc_id = ?").bind(id).run();
+  await env.DB.prepare("UPDATE recordings SET doc_id = NULL WHERE doc_id = ?").bind(id).run();
+  await env.DB.prepare("DELETE FROM documents WHERE id = ?").bind(id).run();
+  return ids.length;
+}
+
+// 녹음 삭제: 문서(벡터·R2·chunks) → R2 오디오 → plaud_imports → recordings 행. 소유자 또는 hr_admin만.
+// 전사 진행 중(processing)이면 409. 관측 데이터(trace_costs, ask_events 등)는 건드리지 않는다.
+app.delete("/api/recordings/:id", async (c) => {
+  await ensureSeeded(c.env.DB);
+  const id = c.req.param("id");
+  const rec = await c.env.DB.prepare("SELECT id, object_key, transcript_status, doc_id, owner_id FROM recordings WHERE id = ?").bind(id)
+    .first<{ id: string; object_key: string | null; transcript_status: string; doc_id: string | null; owner_id: string | null }>();
+  if (!rec) return c.json({ ok: false, error: "recording not found" }, 404);
+  const viewer = await getSessionUser(c.env, c.req.header("cookie"));
+  if (!canWrite(viewer, rec.owner_id)) return c.json({ ok: false, error: "forbidden" }, 403);
+  if (rec.transcript_status === "processing") return c.json({ ok: false, error: "전사 진행 중인 녹음은 삭제할 수 없습니다." }, 409);
+  const errors: string[] = [];
+  let vectorsDeleted = 0;
+  if (rec.doc_id) {
+    const doc = await c.env.DB.prepare("SELECT id, r2_key, source_r2_key FROM documents WHERE id = ?").bind(rec.doc_id)
+      .first<{ id: string; r2_key: string | null; source_r2_key: string | null }>();
+    if (doc) {
+      try { vectorsDeleted = await purgeDocument(c.env, doc.id, doc, errors); }
+      catch (e) { errors.push(`document: ${e instanceof Error ? e.message : String(e)}`); }
+    }
+  }
+  if (rec.object_key) {
+    try { await c.env.FILES.delete(rec.object_key); } catch (e) { errors.push(`r2-audio: ${e instanceof Error ? e.message : String(e)}`); }
+  }
+  try { await c.env.DB.prepare("DELETE FROM plaud_imports WHERE recording_id = ?").bind(id).run(); }
+  catch (e) { errors.push(`plaud_imports: ${e instanceof Error ? e.message : String(e)}`); }
+  await c.env.DB.prepare("DELETE FROM recordings WHERE id = ?").bind(id).run();
+  return c.json({ ok: true, id, vectorsDeleted, errors });
 });
 
 app.delete("/api/decks/:id", async (c) => {
@@ -1806,6 +1986,8 @@ app.post("/api/admin/reindex-docs", async (c) => {
 
 // ---- digest (아침 다이제스트, C9) ----
 app.get("/api/digest", async (c) => {
+  // 전체 점검(2026-11-18) P0: 로그인 사용자(또는 X-Admin-Secret)만. 내용 범위는 digest.ts collectSnapshot 참조.
+  if (!(await loggedInOrAdmin(c))) return c.json({ ok: false, error: "로그인이 필요합니다." }, 401);
   const digest = await getLatestDigest(c.env);
   if (!digest) return c.json({ ok: true, digest: null, message: "아직 생성된 다이제스트가 없습니다. 매일 07:00에 생성됩니다." });
   return c.json({ ok: true, digest });
@@ -1820,6 +2002,16 @@ app.route("/api", authApp);
 // 하위 앱 경로는 마운트 지점 기준 상대다 (§8). 세 앱 모두 스키마 가드(503)를 갖고 있고,
 // 관리자 경로는 각 앱이 X-Admin-Secret ↔ ADMIN_SECRET으로 막는다 (fail-closed).
 // 캐치올(app.all("*")) 앞에 둬야 한다.
+// 전체 점검(2026-11-18) P0: 관측·평가 API 전체를 관리자 전용으로 잠근다 (hr_admin 세션 또는 X-Admin-Secret).
+// 이전에는 "읽기 공개(마스킹)" 설계였는데, 개인 업무 검색(origin=personal) 트레이스의 답변·문서 제목과 질문자 이름이
+// 로그인 없이 읽혔고, 평가 실행·공백 승격·프롬프트 초안·사람 점수 같은 쓰기 경로도 익명으로 열려 있었다.
+// 화면의 관측 탭은 원래 hr_admin에게만 보이므로 정상 사용 흐름은 그대로다. 되돌리려면 이 app.use 블록만 지우면 된다.
+app.use("/api/obs/*", async (c, next) => {
+  const cookie = c.req.header("cookie");
+  if (await isAdminRequest(c.env, cookie, c.req.header("x-admin-secret"))) return next();
+  if (!(await getSessionUser(c.env, cookie))) return c.json({ ok: false, error: "로그인이 필요합니다." }, 401);
+  return c.json({ ok: false, error: "관리자만 볼 수 있습니다." }, 403);
+});
 app.route("/api/obs", workflowRunsApp); // WF-11: tracesApp의 obs 스키마 가드(*)보다 먼저 등록 — 워크플로우 테이블만 쓴다
 app.route("/api/obs", tracesApp);
 app.route("/api/obs", datasetsApp);
@@ -1839,7 +2031,20 @@ app.route("/api/agent", agentActivityApp); // 에이전트 활동 타임라인 A
 app.route("/api/notifications", notificationsApp); // DO-2 알림 WebSocket — 세션 전용
 app.route("/api/chat", chatApp); // 채팅 DO-1a — 세션 전용, 1:1만
 app.route("/api/calendar", calendarApp); // 캘린더 C1 — 세션 전용 (X-Admin-Secret 불가)
+// Plaud 연동 (2026-11-19): 전사문 가져오기는 이 파일의 indexDocument를 쓰므로 여기서 주입한다 (메일 훅과 같은 방식).
+setPlaudHooks({
+  saveDocument: async (env, d) => savePlaudDocument(env as unknown as Env, d),
+  startTranscription: async (env, ctx, d) => startPlaudTranscription(env as unknown as Env, ctx, d),
+});
+app.route("/api/plaud", plaudApp); // Plaud OAuth + 녹음 목록 + 전사문 가져오기 — 세션 전용 (X-Admin-Secret 불가)
 app.route("/api/workflows", workflowApp); // 워크플로우 WF-1 — 세션 전용 (X-Admin-Secret 불가)
+// 화상회의 (RealtimeKit): 세션 + 채팅방 멤버 전용. /api/meet/webhook만 세션 없이 rtk-signature 서명으로 검증한다.
+// 바인딩: CF_ACCOUNT_ID·RTK_APP_ID([vars]) + RTK_API_TOKEN(secret). Env 타입은 src/meet/rtk.ts RtkEnv 참조.
+// V2: 회의 후 전사는 업로드 녹음과 같은 finishTranscript(문서 → recordings ready → PIPELINE)로 들어간다 (메일·Plaud 훅과 같은 방식).
+setMeetHooks({
+  finishTranscript: (env, rec, docTitle, docContent, transcript) => finishTranscript(env as unknown as Env, rec, docTitle, docContent, transcript),
+});
+app.route("/api/meet", meetApp);
 
 // 프론트는 [assets] 바인딩이 서빙한다. / 가 없으면 index.html로.
 app.all("*", async (c) => {
@@ -1937,6 +2142,45 @@ async function indexEmailToPersonalRag(env: Env, email: EmailRow): Promise<{ doc
   }
 }
 
+// Plaud 전사문 → 내 개인 문서 (2026-11-19). 일반 문서 업로드(POST /api/documents, kind='transcript')와 같은 경로:
+// documents 행(owner_id=가져온 사람) + R2 원문 + indexDocument(개인 RAG, 트리 큐 포함). 색인이 실패해도 문서 행은 남긴다.
+async function savePlaudDocument(env: Env, d: { ownerId: string; title: string; content: string }): Promise<{ docId: string; chunks: number; indexError?: string }> {
+  const id = uid("doc");
+  const r2Key = `documents/${id}.txt`;
+  let r2Stored = false;
+  try { await env.FILES.put(r2Key, d.content); r2Stored = true; } catch { r2Stored = false; }
+  await env.DB.prepare("INSERT INTO documents (id, title, kind, content, r2_key, owner_id, is_coaching) VALUES (?, ?, 'transcript', ?, ?, ?, 0)")
+    .bind(id, d.title, d.content, r2Stored ? r2Key : null, d.ownerId).run();
+  try {
+    const r = await indexDocument(env, { id, title: d.title, markdown: d.content, kind: "transcript", ownerId: d.ownerId });
+    return { docId: id, chunks: r.chunks, ...(r.indexError ? { indexError: r.indexError } : {}) };
+  } catch (e) {
+    return { docId: id, chunks: 0, indexError: e instanceof Error ? e.message : String(e) };
+  }
+}
+
+// Plaud 전사 없는 녹음 (2026-11-19): /api/transcribe와 같은 규칙으로 R2 저장(recordings/<id>/<이름>) + HEAD 검증 +
+// recordings 행(processing) + 처음 2구간 waitUntil 전사. 이후는 프론트 폴링(/advance)과 파이프라인 큐가 기존 그대로 이어간다.
+async function startPlaudTranscription(env: Env, ctx: { waitUntil(p: Promise<unknown>): void }, d: { ownerId: string; name: string; body: ReadableStream | ArrayBuffer; size: number; mime: string; durationMs?: number | null }): Promise<{ recordingId: string }> {
+  const id = uid("rec");
+  const safeName = d.name.replace(/[^a-zA-Z0-9._-]/g, "_").replace(/^_+/, "").slice(-120) || "audio.ogg";
+  const objectKey = `recordings/${id}/${safeName}`;
+  await env.FILES.put(objectKey, d.body, { httpMetadata: { contentType: d.mime } });
+  const head = await env.FILES.head(objectKey).catch(() => null);
+  if (!head || head.size !== d.size) {
+    await env.FILES.delete(objectKey).catch(() => {});
+    throw new Error("r2 verify failed after plaud audio upload");
+  }
+  await env.DB.prepare("INSERT INTO recordings (id, title, provider, model, object_key, mime_type, size, transcript, transcript_status, doc_id, created_at, owner_id, is_coaching) VALUES (?, ?, 'workers-ai', ?, ?, ?, ?, NULL, 'processing', NULL, ?, ?, 0)")
+    .bind(id, d.name, WHISPER_MODEL, objectKey, d.mime, d.size, new Date().toISOString(), d.ownerId).run();
+  // 길이(0036): 마이그레이션 전이어도 전사는 막지 않는다.
+  if (typeof d.durationMs === "number" && d.durationMs > 0) {
+    await env.DB.prepare("UPDATE recordings SET duration_ms = ? WHERE id = ?").bind(Math.round(d.durationMs), id).run().catch(() => {});
+  }
+  ctx.waitUntil(advanceRecording(env, id, { maxSegments: 2, maxMs: 60_000 }));
+  return { recordingId: id };
+}
+
 export default {
   fetch: app.fetch,
   // 메일 수신 (2026-11-17): Email Routing(peopleos.site catch-all → people-os) → 원문 R2 → 파싱 → D1.
@@ -1957,6 +2201,11 @@ export default {
     // 분기 순서: EVAL → WORKFLOW → 다이제스트(기본값). 이 순서를 바꾸면 새 크론이 다이제스트로 떨어진다.
     if (event.cron === WORKFLOW_CRON) {
       ctx.waitUntil(runDueSchedules(env, new Date(event.scheduledTime)));
+      // 전체 점검(2026-11-18) P2: 정체 run 청소를 하루 1번(03:00 KST)에서 15분마다로. 고아가 된 run이 최대 하루 동안
+      // 동시 실행 한도(3개)를 차지해 429가 나던 것을 줄인다. 기준(60분·7일)은 그대로이고 멱등이다.
+      ctx.waitUntil(sweepStaleWorkflowRuns(env).catch((e) => console.error("[workflow] sweep failed", e instanceof Error ? e.message : String(e))));
+      // 화상회의 V1+V2: 오래된 active 회의 정리 + 웹훅 누락 전사 재조회 (RealtimeKit 미설정이면 아무것도 안 함).
+      ctx.waitUntil(sweepMeetings(env as never).catch((e) => console.error("[meet] sweep failed", e instanceof Error ? e.message : String(e))));
       return;
     }
     ctx.waitUntil(generateDigest(env, new Date(event.scheduledTime)));
@@ -1987,6 +2236,8 @@ export default {
         msg.ack();
       } catch (e) {
         console.log(`[pipeline] message ${msg.id} failed (attempt ${msg.attempts}):`, e instanceof Error ? e.message : String(e));
+        // Workers Logs: 큐 실패를 종류·시도 횟수로 찾을 수 있게 구조화해서도 남긴다 (3회 실패 뒤에는 DLQ로 간다).
+        logEvent("queue.message_failed", { messageId: msg.id, type: (msg.body as { type?: string } | null)?.type ?? "transcript-pipeline", attempts: msg.attempts, error: (e instanceof Error ? e.message : String(e)).slice(0, 200) });
         msg.retry();
       }
     }
@@ -1998,6 +2249,17 @@ export default {
 // 평가 가드(eval_enabled=0 거부, config_hash 같고 7일 안 지났으면 skipped,
 // 60분 넘은 running 청소)는 runScheduledEval(M4) 안에 있다.
 async function runEvalCron(env: Env, ctx: ExecutionContext): Promise<void> {
+  // 전체 점검(2026-11-18) P2: 만료된 로그인 시도 기록·세션·설정 링크를 하루 한 번 지운다 (이전에는 영원히 쌓였다).
+  // 만료된 행은 이미 어디에서도 유효하지 않으므로(조회가 전부 expires_at > now 조건) 지워도 동작은 같다.
+  try {
+    const now = Date.now();
+    const res = await env.DB.batch([
+      env.DB.prepare("DELETE FROM login_attempts WHERE expires_at < ?").bind(now),
+      env.DB.prepare("DELETE FROM auth_sessions WHERE expires_at < ?").bind(now),
+      env.DB.prepare("DELETE FROM password_links WHERE expires_at < ?").bind(now),
+    ]);
+    logEvent("cron.auth_cleanup", { loginAttempts: res[0].meta?.changes ?? 0, sessions: res[1].meta?.changes ?? 0, links: res[2].meta?.changes ?? 0 });
+  } catch (e) { console.log("[cron:eval] auth cleanup failed:", e instanceof Error ? e.message : String(e)); }
   try {
     const sync = await syncGatewayCosts(env);
     console.log("[cron:eval] cost sync:", JSON.stringify(sync));

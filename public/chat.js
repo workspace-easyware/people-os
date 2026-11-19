@@ -260,6 +260,7 @@
     S.reads = {}; S.pickerSeq = null; S.reactBusy = {};
     S.members = []; S.creatorId = null; S.membersOpen = false; S.addOpen = false; S.transfer = null;
     S.mpanel.hidden = true;
+    S.meeting = null; if (S.callCard) S.callCard.hidden = true;
     S.root.className = 'chat-root show-pane';
     S.empty.hidden = true;
     S.conv.hidden = false;
@@ -328,10 +329,12 @@
     S.peerRole.textContent = peer.coaching_role ? roleLabel(peer.coaching_role) : '';
     S.membersBtn.hidden = true;
     paintHeadPresence();
+    renderCallCard();
     renderMsgs();
     renderRooms();
     loadHistory();
     connectWs();
+    loadActiveMeeting();
     if (S.input.focus) S.input.focus();
   }
 
@@ -349,12 +352,79 @@
     if (known && Array.isArray(known.members)) applyMembers(known.members, known.creator_id);
     S.toggleGroupFormHide();
     paintHeadPresence();
+    renderCallCard();
     renderMsgs();
     renderRooms();
     loadHistory();
     connectWs();
+    loadActiveMeeting();
     if (!known) loadMembers();
     if (S.input.focus) S.input.focus();
+  }
+
+  // ---------- 화상회의 V1 (2026-11-19): [영상 통화] 버튼 · "통화 진행 중" 카드 ----------
+  // 서버: POST /api/meet/rooms/:roomId/start {transcribe} · GET /api/meet/rooms/:roomId/active.
+  // 방 소켓 이벤트: {type:'meeting_started', meeting} → 카드 표시, {type:'meeting_ended', meeting_id} → 카드 닫기.
+  // 통화 화면은 새 탭 /meet?m=<id> (SDK는 meet.html에만 있다). 팝업 차단을 피하려고 클릭 순간에 빈 탭을 먼저 연다.
+  var SYSTEM_SENDER = 'system:people-os';
+  function isCoachingDm() {
+    if (!S || !S.peer || typeof currentUser === 'undefined' || !currentUser) return false;
+    var mine = currentUser.coaching_role === 'coach', theirs = S.peer.coaching_role === 'coach';
+    return mine !== theirs;
+  }
+  function paintCallControls() {
+    if (!S || !S.callBtn) return;
+    var coaching = isCoachingDm();
+    S.callTx.disabled = coaching;
+    if (coaching) S.callTx.checked = true;
+    S.callTxLabel.textContent = coaching ? '전사 (코칭: 항상)' : '전사';
+    S.callTxWrap.hidden = !!S.meeting; // 진행 중인 통화에는 선택이 의미 없다
+    S.callBtn.textContent = S.meeting ? '통화 참여' : '영상 통화';
+  }
+  function renderCallCard() {
+    if (!S || !S.callCard) return;
+    var m = S.meeting;
+    S.callCard.hidden = !m;
+    if (m) S.callCardText.textContent = '영상 통화 진행 중' + (m.transcribe ? ' · 전사됨' : '') + (m.is_coaching ? ' · 코칭' : '');
+    paintCallControls();
+  }
+  function openMeetTab(path, pre) {
+    var w = pre || window.open('', '_blank');
+    if (w) { try { w.opener = null; } catch (e) { /* 무시 */ } w.location.href = path; }
+    else location.href = path; // 팝업이 막혔으면 이 탭에서 연다
+  }
+  async function loadActiveMeeting() {
+    var s = S, tok = s.token, id = curRoomId();
+    try {
+      var r = await getJson('/api/meet/rooms/' + encodeURIComponent(id) + '/active');
+      if (S !== s || s.token !== tok) return;
+      s.meeting = (r.ok && r.body && r.body.meeting) || null; // 403(아직 방이 없는 DM 등)은 조용히 카드 없음
+      renderCallCard();
+    } catch (e) { /* 카드만 못 그린다 */ }
+  }
+  async function startCall() {
+    var s = S;
+    if (!s || !cur() || s.callBusy) return;
+    if (s.meeting) { openMeetTab('/meet?m=' + encodeURIComponent(s.meeting.id)); return; }
+    var id = curRoomId();
+    s.callBusy = true; s.callBtn.disabled = true;
+    var pre = window.open('', '_blank'); // 클릭 순간에 연다 (응답 뒤 window.open은 팝업 차단에 걸린다)
+    try {
+      var r = await getJson('/api/meet/rooms/' + encodeURIComponent(id) + '/start', jsonOpts('POST', { transcribe: isCoachingDm() ? true : !!s.callTx.checked }));
+      if (!r.ok || !r.body || !r.body.meeting) {
+        if (pre) pre.close();
+        var msg = r.status === 403 && !s.group ? '먼저 메시지를 한 번 주고받은 뒤에 영상 통화를 시작할 수 있습니다.' : errText(r.status === 403 ? null : r, '영상 통화를 시작하지 못했습니다.');
+        if (S === s) note(msg, 'err');
+        return;
+      }
+      if (S === s && curRoomId() === id) { s.meeting = r.body.meeting; renderCallCard(); }
+      openMeetTab('/meet?m=' + encodeURIComponent(r.body.meeting.id), pre);
+    } catch (e) {
+      if (pre) pre.close();
+      if (S === s) note('영상 통화를 시작하지 못했습니다. 네트워크를 확인해 주세요.', 'err');
+    } finally {
+      s.callBusy = false; s.callBtn.disabled = false;
+    }
   }
 
   // ---------- 접속 표시 (머리글) ----------
@@ -471,6 +541,10 @@
     if (!S.msgs.length) box.append(h('p', { cls: 'chat-empty', id: 'chatNoMsgs', text: '메시지가 없습니다. 첫 메시지를 보내 보세요.' }));
     var me = meId();
     S.msgs.forEach(function (m) {
+      if (m.sender_id === SYSTEM_SENDER) { // 시스템 안내 (화상회의 전사본 준비 등) — 가운데 한 줄
+        box.append(h('div', { cls: 'chat-item chat-sys', 'data-seq': String(m.seq) }, h('span', { text: m.body + ' · ' + fmtTime(m.created_at) })));
+        return;
+      }
       var mine = m.sender_id === me;
       var bubble = h('div', { cls: 'chat-msg ' + (mine ? 'mine' : 'theirs'), 'data-seq': String(m.seq) },
         h('div', { cls: 'chat-msg-meta' }, h('b', { text: m.sender_name || '' }), h('span', { text: ' ' + fmtTime(m.created_at) })),
@@ -594,7 +668,7 @@
       var wasRetry = s.retried;
       s.wsOpened = true; s.retried = false;
       note('');
-      if (wasRetry) loadHistory(true); // 끊긴 사이 온 메시지를 REST로 보충
+      if (wasRetry) { loadHistory(true); loadActiveMeeting(); } // 끊긴 사이 온 메시지·통화 시작/종료를 REST로 보충
     };
     ws.onmessage = function (ev) {
       if (S !== s || s.token !== tok) return;
@@ -607,6 +681,14 @@
       }
       if (m.type === 'reaction') {
         if (typeof m.seq === 'number' && setReactions(m.seq, m.reactions)) renderMsgs('stay');
+        return;
+      }
+      if (m.type === 'meeting_started') { // 화상회의 V1: 방 안 "통화 진행 중" 카드
+        if (m.meeting && typeof m.meeting.id === 'string') { s.meeting = m.meeting; renderCallCard(); }
+        return;
+      }
+      if (m.type === 'meeting_ended') {
+        if (s.meeting && (!m.meeting_id || m.meeting_id === s.meeting.id)) { s.meeting = null; renderCallCard(); }
         return;
       }
       if (m.type !== 'message') return;
@@ -892,6 +974,16 @@
     onlineCount.hidden = true;
     var membersBtn = h('button', { type: 'button', cls: 'secondary chat-members-btn', id: 'chatMembersBtn', text: '멤버', hidden: 'hidden', onclick: function () { toggleMembers(); } });
     membersBtn.hidden = true;
+    // -- 화상회의 V1 (2026-11-19): 방 머리글 [영상 통화] + 전사 선택 (코칭 1:1은 항상 전사 — 서버가 강제한다)
+    var callTx = h('input', { type: 'checkbox', id: 'chatCallTranscribe' });
+    callTx.checked = true;
+    var callTxLabel = h('span', { id: 'chatCallTranscribeText', text: '전사' });
+    var callTxWrap = h('label', { cls: 'chat-call-tx', title: '통화가 끝나면 한국어로 전사해 녹음전사 목록에 넣습니다' }, callTx, callTxLabel);
+    var callBtn = h('button', { type: 'button', cls: 'secondary chat-call-btn', id: 'chatCallBtn', text: '영상 통화', title: '이 방 멤버와 영상 통화 (새 탭)', onclick: function () { startCall(); } });
+    var callCardText = h('span', { cls: 'chat-call-text', id: 'chatCallText', text: '' });
+    var callJoin = h('button', { type: 'button', cls: 'primary', id: 'chatCallJoin', text: '참여', onclick: function () { if (S && S.meeting) openMeetTab('/meet?m=' + encodeURIComponent(S.meeting.id)); } });
+    var callCard = h('div', { cls: 'chat-call-card', id: 'chatCallCard', role: 'status', hidden: 'hidden' }, h('span', { cls: 'chat-call-live', 'aria-hidden': 'true' }), callCardText, callJoin);
+    callCard.hidden = true;
     var backBtn = h('button', { type: 'button', cls: 'secondary chat-back', id: 'chatBackBtn', text: '← 목록', onclick: async function () {
       st.root.className = 'chat-root';
       st.viewing = false;
@@ -934,8 +1026,8 @@
     };
     var sendBtn = h('button', { type: 'button', cls: 'primary', id: 'chatSendBtn', text: '보내기', onclick: function () { send(); } });
     var conv = h('div', { cls: 'chat-conv', id: 'chatConv', hidden: 'hidden' },
-      h('div', { cls: 'chat-conv-head' }, backBtn, peerDot, peerName, renameBtn, renameForm, peerRole, onlineCount, membersBtn),
-      mpanel, msgBox, noteEl,
+      h('div', { cls: 'chat-conv-head' }, backBtn, peerDot, peerName, renameBtn, renameForm, peerRole, onlineCount, callTxWrap, callBtn, membersBtn),
+      callCard, mpanel, msgBox, noteEl,
       h('div', { cls: 'chat-compose' }, input, sendBtn));
     conv.hidden = true;
     var empty = h('div', { cls: 'chat-pane-empty', id: 'chatPaneEmpty', text: '왼쪽에서 대화를 고르거나 "새 대화"·"그룹 만들기"로 시작하세요.' });
@@ -949,6 +1041,7 @@
     st.reads = {}; st.pickerSeq = null; st.reactBusy = {};
     st.membersBtn = membersBtn; st.mpanel = mpanel; st.mTitle = mTitle; st.mList = mList; st.mNote = mNote; st.mAdd = mAdd; st.mAddBtn = mAddBtn;
     st.mSearchInput = mSearchInput; st.mResults = mResults; st.mTransfer = mTransfer;
+    st.callBtn = callBtn; st.callTx = callTx; st.callTxLabel = callTxLabel; st.callTxWrap = callTxWrap; st.callCard = callCard; st.callCardText = callCardText; st.meeting = null; st.callBusy = false;
     st.toggleGroupFormHide = function () { groupForm.hidden = true; search.hidden = true; };
     S = st;
     mount.append(root);

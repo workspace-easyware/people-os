@@ -12,7 +12,7 @@
 import { docOwnerClause, docOwnerClauseForPool, localSearchChunks, poolForDoc, poolForKind, questionTokens, RAG_POOL_LABEL, SHARED_USER_ID, uid, vectorPoolFilter } from "./lib";
 import type { RagPool, RagViewer } from "./lib";
 import { aiGatewayOptions, aiGatewayOptionsWithMeta } from "./ai-gateway";
-import type { AskTrace, RetrievalCandidate, TraceSink, TraceSpan } from "./obs/types";
+import type { AskDecision, AskTrace, RetrievalCandidate, TraceSink, TraceSpan, WhatIfSource } from "./obs/types";
 // S4 M6-β: 활성 system 프롬프트는 M4 prompts.ts가 D1 prompt_versions에서 읽는다
 // (테이블·행이 없으면 하드코딩 v1 폴백 — 질문 응답이 깨지지 않는다).
 import { getActivePrompt } from "./obs/prompts";
@@ -20,6 +20,7 @@ import { classifyTopic, TOPIC_GUARD_ANSWER, TOPIC_GUARD_THRESHOLD, type TopicGua
 // 판단 모델 병행 (2026-11-16): 의도 라우터 + 근거 재순위 (둘 다 Clef-omni).
 import { classifyIntent, HR_REDIRECT_ANSWER, PERSONAL_REDIRECT_ANSWER, ROUTER_REDIRECT_MIN_CONFIDENCE } from "./obs/router";
 import { rerankSources } from "./obs/rerank";
+import { logEvent } from "./obs/log";
 
 // runAsk와 helper가 쓰는 바인딩. index.ts의 Env는 이를 포함한다(구조적 타이핑).
 export type AskEnv = {
@@ -540,7 +541,71 @@ export type AskResponse = {
   cached: false;
   eventId: string;
   timings: Record<string, number>;
+  // XAI 보완 (2026-11-19) — 모두 선택 필드. 사용자 경로(HR·개인 창)에서만 채운다.
+  decisiveSourceId?: string; // 근거 재순위가 고른 1순위 근거 id (재순위를 안 거쳤으면 없음)
+  decision?: AskDecision; // 라우터 전환·토픽 가드 차단 사유 + 신뢰도 (일반 답이면 없음)
 };
+
+// ---- XAI 보완: What-If ("이 답이 달라지려면") ----
+// 답과 분리 (2026-11-19): 답은 What-If를 기다리지 않고 바로 나간다. 화면이 답을 그린 뒤
+// GET /api/ask/:eventId/whatif 를 따로 불러 아래 함수들로 한두 문장을 받는다.
+// 입력은 트레이스(R2)에 남겨 둔 whatIfContext(근거 3개 × 180자)와 ask_events의 질문·답이다.
+// 실패·빈 응답·시간 초과면 whatIf 없음 (fail-open) — 답에는 영향이 없다.
+// 로컬 실측 (2026-11-19): 3.8s · 11.0s 성공, 1건은 20s 초과 → 상한 15s.
+const WHAT_IF_TIMEOUT_MS = 15000;
+const WHAT_IF_MAX_CHARS = 240;
+
+export function buildWhatIfMessages(question: string, answer: string, sources: WhatIfSource[], pool: RagPool): Array<{ role: string; content: string }> {
+  const kindWord = pool === "personal" ? "문서" : "규정";
+  if (!sources.length) {
+    return [
+      { role: "system", content: `너는 사내 Q&A 답변을 설명하는 검토자다. 이 질문은 등록된 ${kindWord}에서 근거를 찾지 못해 답하지 못했다. 어떤 근거(어떤 ${kindWord}·조항·내용)가 등록되어 있으면 답할 수 있는지 한국어 한두 문장(150자 이내)으로만 쓴다. 근거가 있다고 단정하지 않는다. 머리말 없이 문장만 쓴다.` },
+      { role: "user", content: `질문: ${question.slice(0, 300)}` },
+    ];
+  }
+  const ctx = sources.slice(0, 3).map((s) => `[${s.title} › ${s.section}] ${s.snippet.slice(0, 180)}`).join("\n");
+  return [
+    { role: "system", content: `너는 사내 Q&A 답변을 설명하는 검토자다. 질문·근거·답을 보고, 이 답의 결론이 달라지려면 어떤 조건이나 근거가 필요한지 한국어 한두 문장(150자 이내)으로만 쓴다. "~라면 결론이 달라질 수 있습니다" 형태로 쓰고, 근거에 없는 사실을 단정하지 않는다. 머리말 없이 문장만 쓴다.` },
+    { role: "user", content: `질문: ${question.slice(0, 300)}\n근거:\n${ctx}\n답: ${answer.slice(0, 500)}` },
+  ];
+}
+
+export function cleanWhatIf(text: string): string | undefined {
+  let t = text.replace(/^["'“”\s]+|["'“”\s]+$/g, "").replace(/^(답|What-?If|이 답이 달라지려면)\s*[:：]\s*/i, "").replace(/\s+/g, " ").trim();
+  if (t.length < 8) return undefined;
+  if (t.length > WHAT_IF_MAX_CHARS) t = t.slice(0, WHAT_IF_MAX_CHARS - 1).trimEnd() + "…";
+  return t;
+}
+
+/** What-If 1건 생성 (엔드포인트용). 실패·빈 응답·시간 초과면 error와 함께 whatIf 없이 돌려준다 (throw 안 함). */
+export async function generateWhatIf(
+  env: Pick<AskEnv, "AI">,
+  input: { eventId: string; question: string; answer: string; sources: WhatIfSource[]; pool: RagPool },
+): Promise<{ whatIf?: string; ms: number; error?: string; grounded: boolean }> {
+  const start = Date.now();
+  const grounded = input.sources.length > 0;
+  try {
+    const call = env.AI.run(LLM_MODEL, {
+      reasoning_effort: "low",
+      messages: buildWhatIfMessages(input.question, input.answer, input.sources, input.pool),
+    }, aiGatewayOptionsWithMeta({ skipCache: false, tag: "what-if", metadata: { eventId: input.eventId, tag: "what-if" } }));
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const timeout = new Promise<never>((_, rej) => { timer = setTimeout(() => rej(new Error("what-if timeout")), WHAT_IF_TIMEOUT_MS); });
+    const out = await Promise.race([call, timeout]).finally(() => { if (timer) clearTimeout(timer); });
+    const whatIf = cleanWhatIf(responseText(out));
+    return whatIf ? { whatIf, ms: Date.now() - start, grounded } : { ms: Date.now() - start, error: "empty what-if", grounded };
+  } catch (e) {
+    return { ms: Date.now() - start, error: errMsg(e), grounded };
+  }
+}
+
+/** 전환·차단 사유 문구(예: "개인 질문으로 판단되어 개인 업무 검색으로 안내합니다 (신뢰도 0.85)"). */
+export function decisionMessage(kind: AskDecision["kind"], confidence: number): string {
+  const c = (Math.round(confidence * 100) / 100).toFixed(2);
+  if (kind === "redirect_personal") return `개인 질문으로 판단되어 개인 업무 검색으로 안내합니다 (신뢰도 ${c})`;
+  if (kind === "redirect_hr") return `HR 규정 질문으로 판단되어 HR 규정 검색으로 안내합니다 (신뢰도 ${c})`;
+  return `HR 규정과 관련 없는 질문으로 판단되어 답변하지 않습니다 (신뢰도 ${c})`;
+}
 
 export type AskRunResult =
   // 캐시 적중: 원본 호출의 응답 + cached:true. 새 트레이스는 만들지 않는다 (§1 주의).
@@ -613,10 +678,17 @@ export async function runAsk(env: AskEnv, input: AskInput, opts: AskOptions = {}
   if (readCache) {
     try {
       const cached = await env.CACHE.get(cacheKey);
-      if (cached) return { cached: true, body: { ...JSON.parse(cached), cached: true, sessionId } };
+      if (cached) {
+        const body = { ...JSON.parse(cached), cached: true, sessionId };
+        logEvent("ask.cache_hit", { via: "kv", origin, pool, userId: viewer?.id ?? null, ms: Date.now() - t0 });
+        return { cached: true, body };
+      }
     } catch { /* KV 로컬 실패 시 아래 D1 캐시로 */ }
     const d1Cache = await env.DB.prepare("SELECT value FROM cache WHERE key = ?").bind(cacheKey).first<{ value: string }>();
-    if (d1Cache) return { cached: true, body: { ...JSON.parse(d1Cache.value), cached: true, cacheVia: "d1", sessionId } };
+    if (d1Cache) {
+      logEvent("ask.cache_hit", { via: "d1", origin, pool, userId: viewer?.id ?? null, ms: Date.now() - t0 });
+      return { cached: true, body: { ...JSON.parse(d1Cache.value), cached: true, cacheVia: "d1", sessionId } };
+    }
   }
   mark("cache", cacheStart);
   span("cache", "kv", cacheStart, true, { readCache, hit: false });
@@ -646,7 +718,8 @@ export async function runAsk(env: AskEnv, input: AskInput, opts: AskOptions = {}
     } catch { /* 세션 조회 실패 시 현재 질문만으로 검색 */ }
   }
   mark("session", sessionStart);
-  span("session", sessionReadVia, sessionStart, true, { via: sessionReadVia, followUp: searchQuestion !== question });
+  // XAI 보완: viewerRole = 질문 시점 질문자 역할 (설명서의 "질문자 역할" 원천, 익명·평가 null).
+  span("session", sessionReadVia, sessionStart, true, { via: sessionReadVia, followUp: searchQuestion !== question, viewerRole: viewer?.role ?? null });
 
   // 의도 라우터 (Decision Model, Clef-omni) — 2026-11-16. HR/개인 창 분리 가드.
   // 세션 문맥을 더한 searchQuestion으로 판별한다. 평가 호출(origin='eval')은
@@ -715,6 +788,18 @@ export async function runAsk(env: AskEnv, input: AskInput, opts: AskOptions = {}
     mark("topic_guard", guardStart);
   }
 
+  // XAI 보완 (2026-11-19): 전환·차단 사유. 라우터/가드가 이미 계산한 confidence를 그대로 쓴다.
+  // 일반 답(전환·차단 없음)에는 만들지 않는다.
+  let decision: AskDecision | undefined;
+  if (routerRedirect && routerInfo) {
+    const kind: AskDecision["kind"] = routerRedirect === PERSONAL_REDIRECT_ANSWER ? "redirect_personal" : "redirect_hr";
+    decision = { kind, by: "router", confidence: routerInfo.confidence, message: decisionMessage(kind, routerInfo.confidence) };
+  } else if (guardedOffTopic) {
+    const byGuard = !!guardInfo?.offTopic;
+    const conf = byGuard ? guardInfo!.confidence : routerInfo?.confidence ?? 0;
+    decision = { kind: "off_topic", by: byGuard ? "topic_guard" : "router", confidence: conf, message: decisionMessage("off_topic", conf) };
+  }
+
   // 근거 검색 — 하이브리드 (회수 튜닝): Vectorize + D1 키워드 검색을 합친다.
   // Vectorize만 쓰면 topK 밖 순위의 chunk를 못 가져온다. 문장형 질문은
   // 임베딩 점수가 흩어져 맞는 chunk가 4위 이하로 밀리는데, 그때도 정책
@@ -727,6 +812,7 @@ export async function runAsk(env: AskEnv, input: AskInput, opts: AskOptions = {}
   let sources: Source[] = [];
   let searchEngine = guardedOffTopic || routerRedirect ? "none" : "d1-text";
   let d1FallbackRan = false; // Vectorize/AI 실패 시 D1 폴백이 이미 돎
+  let decisiveSourceId: string | undefined; // XAI 보완: 재순위가 고른 1순위 (재순위 미경유면 없음)
   let vectorError: string | undefined;
   // 라우터가 돌려보낸 질문(잘못된 창)은 검색하지 않는다.
   if (!guardedOffTopic && !routerRedirect) {
@@ -860,7 +946,9 @@ export async function runAsk(env: AskEnv, input: AskInput, opts: AskOptions = {}
       try {
         const rr = await rerankSources(env, searchQuestion, sources);
         sources = rr.sources;
-        span("rerank", "workers-ai", rerankStart, true, { reranked: rr.reranked, winnerId: rr.winnerId ?? null, reason: rr.reason });
+        // 재순위 모델이 실제로 고른 경우만 결정적 근거로 표시한다 (파싱·호출 실패 = 표시 안 함).
+        if (rr.decidedId && sources.some((s) => s.id === rr.decidedId)) decisiveSourceId = rr.decidedId;
+        span("rerank", "workers-ai", rerankStart, true, { reranked: rr.reranked, winnerId: rr.winnerId ?? null, decisiveId: decisiveSourceId ?? null, reason: rr.reason });
         mark("rerank", rerankStart);
       } catch (e) {
         span("rerank", "workers-ai", rerankStart, false, { error: errMsg(e) });
@@ -933,6 +1021,12 @@ export async function runAsk(env: AskEnv, input: AskInput, opts: AskOptions = {}
     span("llm", "workers-ai", llmStart, engine === "workers-ai", { model: LLM_MODEL, engine, promptVersion, ...(llmError ? { error: llmError } : {}) });
   }
 
+  // What-If는 답과 분리했다 (2026-11-19): 여기서 LLM을 부르지 않는다. What-If 엔드포인트가 쓸
+  // 근거 요약(3개 × 180자)만 트레이스에 남긴다. 전환·차단 답(고정 안내문)에는 만들지 않는다.
+  const whatIfContext: WhatIfSource[] | undefined = isUserPath && !routerRedirect && !guardedOffTopic
+    ? sources.slice(0, 3).map((s) => ({ title: s.title, section: s.sectionPath || s.section, snippet: s.snippet.slice(0, 180) }))
+    : undefined;
+
   // Durable Objects 세션에 대화 저장 시도 → 실패 시 D1 sessions 폴백
   let sessionVia = "durable-objects";
   if (persistSession) {
@@ -954,7 +1048,10 @@ export async function runAsk(env: AskEnv, input: AskInput, opts: AskOptions = {}
   }
 
   timings.total = Date.now() - t0;
-  const result: AskResponse = { ok: true, sessionId, question, answer, sources, grounded, engine, searchEngine, sessionVia, cached: false, eventId, timings };
+  const result: AskResponse = {
+    ok: true, sessionId, question, answer, sources, grounded, engine, searchEngine, sessionVia, cached: false, eventId, timings,
+    ...(decisiveSourceId ? { decisiveSourceId } : {}), ...(decision ? { decision } : {}),
+  };
   const trace: AskTrace = {
     eventId, sessionId, origin, ...(opts.evalRunId ? { evalRunId: opts.evalRunId } : {}),
     question, searchQuestion, answer,
@@ -968,7 +1065,16 @@ export async function runAsk(env: AskEnv, input: AskInput, opts: AskOptions = {}
     ...(usage ? { usage } : {}),
     aigLogIds,
     userId: viewer?.id ?? null, // 0021: 질문한 사용자 (익명·평가 null)
+    userRole: viewer?.role ?? null,
+    ...(whatIfContext ? { whatIfContext } : {}), ...(decisiveSourceId ? { decisiveSourceId } : {}), ...(decision ? { decision } : {}),
   };
+  // Workers Logs (전체 점검 2026-11-18): 숫자·식별자만. 질문·답변·근거 제목은 싣지 않는다 (src/obs/log.ts 규칙).
+  logEvent("ask.complete", {
+    eventId, origin, pool, status: trace.status, grounded, engine, searchEngine,
+    sources: sources.length, totalMs: timings.total, llmMs: timings.llm ?? null,
+    promptTokens: usage?.promptTokens ?? null, completionTokens: usage?.completionTokens ?? null,
+    userId: viewer?.id ?? null, evalRunId: opts.evalRunId ?? null,
+  });
   // C7 답변 감사: 질문 1건마다 ask_events 행 1건. 기록 실패가 질문 자체를
   // 망가뜨리지는 않게 try/catch로 감싼다. 캐시된 답은 원본 호출의 행을
   // 공유하므로(같은 eventId) 새로 기록하지 않는다.
