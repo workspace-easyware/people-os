@@ -24,8 +24,10 @@ import {
   type JudgeEvidence, type KeptSource, type SystemStatus,
 } from "./judge";
 import { getActivePrompt } from "./prompts";
+import { logEvent } from "./log";
 import { classifyVerdict, detectVerdictEngine, VERDICT_FALLBACK_MODEL, VERDICT_MODEL_CLEF, type VerdictEngine } from "./verdict";
 import { verifyActionsForRun } from "./gaps";
+import { estimateRoleCheckUsd, loadRoleCheckRoles, roleCheckEligible, runRoleCheck, type RoleCheckResult } from "./role-check";
 import type { EvalItem, EvalItemMessage, EvalRun, EvalRunStatus, ExpectedSource, JudgeResult, ObsEnv, TraceSink, Verdict } from "./types";
 
 export type EvalEnv = ObsEnv & AskEnv;
@@ -66,6 +68,8 @@ export type RunConfig = {
   cost_cap_usd: number;
   cost_estimate_pre_usd: number;
   trigger: EvalRun["trigger"];
+  /** XAI 보완 (2026-11-19): 역할 일관성 축 역할 목록 (빈 배열 = 끔, 개인 데이터셋은 항상 빈 배열). config_hash에는 넣지 않는다 — 기존 지표에 영향 없음. */
+  role_check_roles?: string[];
 };
 
 // ---- 행 매핑 ----------------------------------------------------------------------------
@@ -164,7 +168,10 @@ export async function startRun(env: EvalEnv, input: StartRunInput): Promise<Star
 
   const engine = await detectVerdictEngine(env);
   const epoch = await getKnowledgeEpoch(env);
-  const costPre = estimateRunUsd(picked.length);
+  // XAI 보완: 역할 일관성 축 — 공용 HR 데이터셋에서만. 사전 추정에 역할별 ask + (최악) verdict를 더한다.
+  const roleCheckRoles = /personal/i.test(ds.id) ? [] : await loadRoleCheckRoles(env);
+  const roleEligible = picked.filter((i) => roleCheckEligible(ds.id, i)).length;
+  const costPre = estimateRunUsd(picked.length) + (roleCheckRoles.length ? roleEligible * estimateRoleCheckUsd(roleCheckRoles.length) : 0);
   if (costPre > guard.costCapUsd) {
     return { ok: false, status: 400, error: `estimated cost $${costPre.toFixed(3)} exceeds cap $${guard.costCapUsd.toFixed(2)} — lower limit` };
   }
@@ -175,6 +182,7 @@ export async function startRun(env: EvalEnv, input: StartRunInput): Promise<Star
     knowledge_epoch: epoch, dataset_version: ds.version, pass_threshold: PASS_THRESHOLD, max_items: guard.maxItems,
     truncated, items_available: items.length, item_ids: picked.map((i) => i.id), cost_cap_usd: guard.costCapUsd, cost_estimate_pre_usd: costPre,
     trigger: input.trigger,
+    role_check_roles: roleCheckRoles,
   };
   // 해시 = 결과에 영향을 주는 설정만 (§6.4: 모델·prompt·epoch·데이터셋 버전·judge 버전).
   const configHash = await stableHash({
@@ -264,6 +272,23 @@ export async function processEvalItem(env: EvalEnv, msg: EvalItemMessage, deps: 
   else if (!itemRow) draft.error = "item_not_found";
   else await evaluateItem(env, msg, mapItem(itemRow), config, deps, draft);
 
+  // XAI 보완 (2026-11-19): 역할 일관성 축. 기본 평가가 오류 없이 끝난 공용 HR 항목만.
+  // 결과는 role_check_json에만 쓴다 — passed·judge·verdict는 건드리지 않는다. 실패해도 항목은 그대로 진행.
+  let roleCheck: RoleCheckResult | null = null;
+  const roles = config.role_check_roles ?? [];
+  if (!draft.error && itemRow && roles.length >= 2 && roleCheckEligible(runRow.dataset_id, mapItem(itemRow))) {
+    try {
+      roleCheck = await runRoleCheck(env, {
+        item: mapItem(itemRow), runId: msg.runId, roles,
+        ...(config.prompt_version_id ? { promptVersionId: config.prompt_version_id } : {}),
+        verdictEngine: config.verdict_engine === "clef" ? "clef" : "llm-fallback",
+      }, { runAsk: deps.runAsk, hooks: { traceSink: deps.traceSink, ctx: deps.ctx } });
+      draft.costUsd += roleCheck.costUsd;
+    } catch (e) {
+      console.log("[eval] role check failed:", e instanceof Error ? e.message : String(e));
+    }
+  }
+
   const resultId = newId("res");
   const ins = await env.DB.prepare(
     `INSERT INTO eval_results (id, run_id, item_id, event_id, answer, grounded, retrieved_ids, retrieval_hit, judge_score, judge_dims_json, judge_reason,
@@ -279,12 +304,22 @@ export async function processEvalItem(env: EvalEnv, msg: EvalItemMessage, deps: 
   let finalResultId = resultId;
   if (inserted) {
     await writeTraceScores(env, msg.runId, draft);
+    if (roleCheck) {
+      // 0037 마이그레이션 전이면 컬럼이 없다 — 실패해도 항목 결과는 이미 저장됐다.
+      try { await env.DB.prepare("UPDATE eval_results SET role_check_json = ? WHERE id = ?").bind(JSON.stringify(roleCheck), resultId).run(); }
+      catch (e) { console.log("[eval] role_check_json write failed:", e instanceof Error ? e.message : String(e)); }
+    }
   } else {
     // 동시 재전달 경합에서 진 쪽 — 이긴 행을 쓴다. 비용은 더하지 않는다.
     const won = await env.DB.prepare("SELECT id FROM eval_results WHERE run_id = ? AND item_id = ?").bind(msg.runId, msg.itemId).first<{ id: string }>();
     finalResultId = won?.id ?? resultId;
   }
   const finalized = await recountAndMaybeFinalize(env, msg.runId, inserted ? draft.costUsd : 0);
+  // Workers Logs: 평가 항목 1건 (점수·식별자만 — 답변·판정 사유는 싣지 않는다).
+  logEvent("eval.item", {
+    runId: msg.runId, itemId: msg.itemId, eventId: draft.eventId, duplicate: !inserted, grounded: draft.grounded, retrievalHit: draft.retrievalHit,
+    judgeScore: draft.judgeScore, verdict: draft.verdict, passed: draft.passed, hasError: !!draft.error, latencyMs: draft.latencyMs, finalized,
+  });
   const sleep = deps.sleep ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
   if (!finalized) await sleep(ITEM_GAP_MS);
   return { outcome: inserted ? "processed" : "duplicate", resultId: finalResultId, finalized };
@@ -491,6 +526,10 @@ export async function finalizeRun(env: EvalEnv, runId: string, opts: { force?: E
   let actions = { verified: 0, regressed: 0 };
   try { actions = await verifyActionsForRun(env, runId); } catch (e) { console.log("[eval] verifyActionsForRun failed:", e instanceof Error ? e.message : String(e)); }
   await releaseLock(env, runId);
+  logEvent("eval.run_finished", {
+    runId, status, items: rows.length, passCount: agg.passCount, passRate: agg.passRate, avgJudge: agg.avgJudge,
+    retrievalHitRate: agg.retrievalHitRate, errors: agg.errors, baseRunId, regressions: regressions.length,
+  });
   return { finalized: true, status, baseRunId, regressions, actions };
 }
 
@@ -634,6 +673,7 @@ type ResultDetailRow = {
   retrieval_hit: number | null; judge_score: number | null; judge_dims_json: string | null; judge_reason: string | null; judge_comment: string | null; judge_snapped: number;
   judge_skipped: string | null; verdict: string | null; verdict_engine: string | null; passed: number | null; error: string | null;
   latency_ms: number | null; created_at: string; question: string | null; expected_verdict: string | null; expected_answer: string | null;
+  role_check_json?: string | null; // 0037 (XAI 보완). 마이그레이션 전이면 컬럼 자체가 없다.
 };
 
 export type Comparison = "new_fail" | "new_pass" | "same" | "new" | "error";
@@ -669,10 +709,18 @@ export async function getRunDetail(env: Pick<ObsEnv, "DB">, runId: string) {
       judgeSnapped: r.judge_snapped === 1, judgeSkipped: r.judge_skipped, verdict: r.verdict, verdictEngine: r.verdict_engine,
       passed: intToBool(r.passed), error: r.error, latencyMs: r.latency_ms, createdAt: r.created_at,
       result: r.error ? "error" : r.passed === 1 ? "pass" : "fail", comparison, prevPassed: p ? intToBool(p.passed) : null,
+      roleCheck: parseJson<RoleCheckResult | null>(r.role_check_json ?? null, null),
     };
   });
   items.sort((a, b) => order[a.comparison] - order[b.comparison]);
-  return { run: mapRun(run), baseRunId: baseId, items };
+  // XAI 보완: 역할 일관성 요약 (검사한 항목 수 · 불일치 수 · 역할 목록).
+  const checked = items.filter((i) => i.roleCheck);
+  const roleCheckSummary = {
+    roles: (parseJson<Partial<RunConfig>>(run.config_json, {}).role_check_roles) ?? [],
+    checked: checked.length,
+    inconsistent: checked.filter((i) => i.roleCheck?.inconsistent).length,
+  };
+  return { run: mapRun(run), baseRunId: baseId, items, roleCheckSummary };
 }
 
 const MARKER_KEYS: Array<[keyof RunConfig, string]> = [

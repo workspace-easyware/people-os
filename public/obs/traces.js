@@ -236,13 +236,110 @@
       }).join('') + '</tbody></table></div>';
   }
 
+  // ---- XAI 보완 (2026-11-19): 설명서 발급 ----
+  // 트레이스 상세 응답에 이미 있는 값만으로 문서를 만든다. LLM을 다시 부르지 않는다.
+  // 없는 값은 "기록 없음"으로 적고 지어내지 않는다.
+  var ROLE_LABEL = { hr_admin: 'HR 관리자 (hr_admin)', user: '일반 사용자 (user)' };
+  var STATUS_LABEL = { grounded: '근거 있음 (grounded)', no_evidence: '근거 없음 (no_evidence)', off_topic: '업무 외 차단 (off_topic)', error: '오류 (error)' };
+  var VERDICT_LABEL = { grounded: 'grounded — 근거에 기반', partial: 'partial — 일부만 근거에 기반', ungrounded: 'ungrounded — 근거에 없음', off_topic: 'off_topic — 업무 외' };
+  function explainSources(t) {
+    var x = t.explain || {};
+    var decisive = x.decisiveSourceId || null;
+    if (x.sources && x.sources.length) {
+      return x.sources.map(function (s) {
+        return { title: s.title, section: s.section, pool: s.pool, kind: s.kind, decisive: !!decisive && s.id === decisive };
+      });
+    }
+    // 관리자가 아니면 R2 근거 목록이 없다 — ask_events.source_ids와 검색 후보(kept) 표의 제목·조항으로 대신한다.
+    var byChunk = {};
+    (t.retrievals || []).forEach(function (r) { if (!byChunk[r.chunkId]) byChunk[r.chunkId] = r; });
+    return (t.sourceIds || []).map(function (sid) {
+      var r = byChunk[sid];
+      return { title: r ? r.title : null, section: r ? r.article : null, id: sid, decisive: !!decisive && sid === decisive };
+    });
+  }
+  function explainDecisionText(t) {
+    var x = t.explain || {};
+    if (x.decision && x.decision.message) return x.decision.message;
+    if (x.router && x.router.redirect) return '의도 라우터가 다른 검색 창으로 안내함 (판별: ' + (x.router.intent || '—') + ', 신뢰도 ' + O.fmtScore(x.router.confidence) + ')';
+    if (x.router && x.router.offTopic) return '의도 라우터가 업무 외 질문으로 판단해 차단함 (신뢰도 ' + O.fmtScore(x.router.confidence) + ')';
+    if (x.topicGuard && x.topicGuard.offTopic) return '토픽 가드가 업무 외 질문으로 판단해 차단함 (신뢰도 ' + O.fmtScore(x.topicGuard.confidence) + ')';
+    return null;
+  }
+  function buildExplainDoc(t) {
+    var x = t.explain || {};
+    var row = function (k, v) { return '<tr><th>' + esc(k) + '</th><td>' + v + '</td></tr>'; };
+    var none = '<span class="muted">기록 없음</span>';
+    var srcs = explainSources(t);
+    var srcHtml = srcs.length ? '<ol>' + srcs.map(function (s) {
+      var label = (s.title ? esc(s.title) : '<span class="mono">' + esc(s.id || '') + '</span>') + (s.section ? ' › ' + esc(s.section) : '');
+      var tags = (s.pool ? ' <span class="tag">' + (s.pool === 'personal' ? '개인' : '공용') + '</span>' : '') + (s.kind === 'tacit' ? ' <span class="tag">사내 암묵지</span>' : '') + (s.decisive ? ' <span class="tag strong">결정적 근거 (재순위 1순위)</span>' : '');
+      return '<li>' + label + tags + '</li>';
+    }).join('') + '</ol>' : '<p>인용된 근거 없음' + (t.status === 'no_evidence' ? ' — 등록된 근거에서 답을 찾지 못해 "근거 없음"으로 답함.' : '.') + '</p>';
+    var scores = (t.scores || []).filter(function (s) { return s.name === 'verdict' || s.name === 'judge_score' || s.source === 'human'; });
+    var verdictHtml = scores.length ? '<ul>' + scores.map(function (s) {
+      var head = s.name === 'verdict' ? '판정: <b>' + esc(VERDICT_LABEL[s.label] || s.label || '—') + '</b>'
+        : s.name === 'judge_score' ? '품질 점수(judge): <b>' + esc(O.fmtScore(s.value)) + '</b>' + (s.label ? ' (' + esc(s.label) + ')' : '')
+        : '사람 점수: <b>' + esc(O.fmtScore(s.value)) + '</b>';
+      return '<li>' + head + ' <span class="muted">· ' + esc(s.source || '') + ' · ' + esc(O.kst(s.created_at)) + '</span>' + (s.comment ? '<div class="reason">이유: ' + esc(s.comment) + '</div>' : '') + '</li>';
+    }).join('') + '</ul>' : '<p class="muted">판정 기록 없음 (이 트레이스는 아직 판정 표본으로 뽑히지 않았거나 평가 실행이 아님).</p>';
+    var models = [];
+    if (t.model) models.push('답변 생성: <span class="mono">' + esc(t.model) + '</span>');
+    (t.spans || []).forEach(function (s) {
+      var a = s.attrs || {};
+      if (s.name === 'router' && a.engine && a.engine !== 'none') models.push('의도 라우터: <span class="mono">' + esc(a.engine) + '</span>');
+      if (s.name === 'topic_guard' && a.engine) models.push('토픽 가드: <span class="mono">' + esc(a.engine) + '</span>');
+      if (s.name === 'what_if' && a.model) models.push('What-If: <span class="mono">' + esc(a.model) + '</span>');
+    });
+    var decisionText = explainDecisionText(t);
+    var rows = [
+      row('질문', esc(t.question)),
+      row('답변', '<div class="pre">' + esc(t.answer) + '</div>'),
+      row('처리 결과', esc(STATUS_LABEL[t.status] || t.status || '—')),
+      decisionText ? row('전환·차단 사유', esc(decisionText)) : '',
+      row('인용된 근거', srcHtml),
+      row('판정과 그 이유', verdictHtml),
+      x.whatIf ? row('이 답이 달라지려면', esc(x.whatIf)) : '',
+      row('사용된 모델', models.length ? models.join('<br>') : none),
+      row('프롬프트 버전 · 지식 epoch', '<span class="mono">' + esc(t.promptVersion || '—') + '</span> · ' + esc(t.knowledgeEpoch == null ? '—' : t.knowledgeEpoch)),
+      row('판단 시각 (KST)', esc(O.kst(t.createdAt, true))),
+      row('질문자 역할', x.viewerRole ? esc(ROLE_LABEL[x.viewerRole] || x.viewerRole) : '<span class="muted">기록 없음 (익명·평가 호출이거나 역할 기록 이전의 트레이스)</span>'),
+      row('트레이스 ID', '<span class="mono">' + esc(t.id) + '</span>' + (t.origin ? ' · 출처 ' + esc(originLabel(t.origin)) : '')),
+    ].join('');
+    var css = 'body{font-family:system-ui,-apple-system,"Apple SD Gothic Neo","Malgun Gothic",sans-serif;max-width:820px;margin:24px auto;padding:0 20px;color:#1a1a1a;line-height:1.6}' +
+      'h1{font-size:20px;margin:0 0 4px}p.sub{color:#666;font-size:13px;margin:0 0 16px}table{width:100%;border-collapse:collapse;font-size:14px}' +
+      'th{width:170px;text-align:left;vertical-align:top;background:#f5f6f8;padding:8px 10px;border:1px solid #ddd;font-weight:600}td{padding:8px 10px;border:1px solid #ddd;vertical-align:top}' +
+      'ol,ul{margin:0;padding-left:20px}.pre{white-space:pre-wrap}.mono{font-family:ui-monospace,Menlo,monospace;font-size:12px}.muted{color:#777}.reason{color:#444;font-size:13px;margin-top:2px}' +
+      '.tag{display:inline-block;border:1px solid #bbb;border-radius:10px;padding:0 6px;font-size:11px;margin-left:4px}.tag.strong{border-color:#2e7d32;color:#2e7d32;font-weight:700}' +
+      '.note{font-size:12px;color:#666;margin-top:16px;border-top:1px solid #ddd;padding-top:8px}.bar{margin:0 0 16px}.bar button{padding:6px 14px;margin-right:6px;cursor:pointer}@media print{.bar{display:none}body{margin:0}}';
+    return '<!doctype html><html lang="ko"><head><meta charset="utf-8"><title>AI 판단 설명서 — ' + esc(t.id) + '</title><style>' + css + '</style></head><body>' +
+      '<div class="bar"><button onclick="window.print()">인쇄 / PDF로 저장</button><button onclick="window.close()">닫기</button></div>' +
+      '<h1>AI 판단 설명서</h1><p class="sub">People OS · 발급 시각 ' + esc(O.kst(new Date().toISOString(), true)) + ' (KST)' + (t.__masked ? ' · 개인정보 마스킹 적용' : '') + '</p>' +
+      '<table>' + rows + '</table>' +
+      '<p class="note">이 문서는 해당 질문의 처리 기록(트레이스)에 저장된 값만 옮겨 적은 것입니다. 별도의 AI 호출로 설명을 새로 만들지 않았으며, 기록에 없는 항목은 "기록 없음"으로 표시했습니다.</p>' +
+      '</body></html>';
+  }
+  function openExplainDoc(t) {
+    var w = global.open('', '_blank');
+    if (!w) { global.alert('팝업이 차단되었습니다. 이 사이트의 팝업을 허용한 뒤 다시 눌러 주세요.'); return; }
+    w.document.open();
+    w.document.write(buildExplainDoc(t));
+    w.document.close();
+  }
+
   function renderDetail(el, opts, id) {
     el.innerHTML = '<div class="obs-root"><button type="button" class="obs-back" data-back>← 트레이스 목록</button><div data-body><div class="obs-empty loading">불러오는 중…</div></div></div>';
     var body = el.querySelector('[data-body]');
-    function onClick(ev) { if (ev.target.closest('[data-back]')) nav(opts, 'traces'); }
+    var current = null;
+    function onClick(ev) {
+      if (ev.target.closest('[data-back]')) nav(opts, 'traces');
+      else if (ev.target.closest('[data-explain]') && current) openExplainDoc(current);
+    }
     el.addEventListener('click', onClick);
     O.obsFetch('/api/obs/traces/' + encodeURIComponent(id)).then(function (res) {
       var t = res.trace;
+      t.__masked = !!res.masked;
+      current = t;
       var tk = t.tokens || {};
       var cost = t.cost || {};
       var costTxt = cost.usd == null ? '—' : O.fmtUsd(cost.usd, false);
@@ -262,6 +359,7 @@
       ];
       body.innerHTML =
         '<div class="obs-section obs-head">' +
+        (t.origin === 'metadata' ? '' : '<div class="obs-explain-bar"><button type="button" class="secondary" data-explain title="이 판단의 설명 문서를 새 창으로 엽니다 (트레이스 기록만 사용, AI 재호출 없음)">설명서 발급</button></div>') +
         '<div class="obs-question">' + esc(t.question) + '</div>' +
         '<div class="obs-answer">' + esc(t.answer) + '</div>' +
         '<dl class="obs-meta">' + meta.map(function (m) { return '<div><dt>' + esc(m[0]) + '</dt><dd>' + m[1] + '</dd></div>'; }).join('') + '</dl>' +
@@ -287,5 +385,5 @@
     return { unmount: function () { if (cleanup) cleanup(); el.innerHTML = ''; } };
   }
 
-  O.traces = { mount: mount, version: 'obs-traces-1' };
+  O.traces = { mount: mount, buildExplainDoc: buildExplainDoc, version: 'obs-traces-1' };
 })(typeof window !== 'undefined' ? window : globalThis);

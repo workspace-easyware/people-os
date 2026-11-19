@@ -74,7 +74,8 @@ tracesApp.get("/traces", async (c) => {
     where.push("e.origin = ?"); binds.push(origin);
   }
   if (q.status) {
-    if (!["grounded", "no_evidence", "error"].includes(q.status)) return c.json({ ok: false, error: "status must be grounded | no_evidence | error" }, 400);
+    // 전체 점검(2026-11-18) P2: off_topic은 실제로 저장되는 상태인데(ask-pipeline) 필터에서만 400이었다.
+    if (!["grounded", "no_evidence", "off_topic", "error"].includes(q.status)) return c.json({ ok: false, error: "status must be grounded | no_evidence | off_topic | error" }, 400);
     where.push(`${STATUS_EXPR} = ?`); binds.push(q.status);
   }
   if (q.feedback) {
@@ -196,14 +197,33 @@ tracesApp.get("/traces/:id", async (c) => {
 
   // 프롬프트/응답 블록 — O5 권장안: 관리자만 원문 블록을 받는다(그래도 기본은 마스킹).
   let promptBlock: Record<string, unknown>;
+  let blob: Awaited<ReturnType<typeof readTraceBlob>> = null;
   if (!ev.trace_r2_key) promptBlock = { available: false, reason: "no_r2_key" };
   else if (!isAdmin) promptBlock = { available: true, restricted: true, reason: "admin_only" };
   else {
-    const blob = await readTraceBlob(c.env, ev.trace_r2_key);
+    blob = await readTraceBlob(c.env, ev.trace_r2_key);
     promptBlock = blob
       ? { available: true, restricted: false, masked: !unmask, messages: m(blob.prompt?.messages ?? []), rawResponse: m(blob.rawResponse ?? null), searchQuestion: m(blob.searchQuestion) }
       : { available: false, reason: "r2_missing" };
   }
+
+  // XAI 보완 (2026-11-19): 설명서 원천 — 트레이스에 이미 기록된 값만 모은다 (LLM 호출 없음).
+  // 단계(span) 속성은 공개 범위와 같고, R2 원문(What-If 문장·근거 상세)은 관리자만 받는다.
+  const spanAttrs = (name: string) => spans.find((s) => s.name === name)?.attrs;
+  const sessionAttrs = spanAttrs("session");
+  const routerAttrs = spanAttrs("router");
+  const guardAttrs = spanAttrs("topic_guard");
+  const rerankAttrs = spanAttrs("rerank");
+  const viewerRole = typeof sessionAttrs?.viewerRole === "string" ? sessionAttrs.viewerRole : typeof blob?.userRole === "string" ? blob.userRole : null;
+  const explain = {
+    viewerRole,
+    router: routerAttrs ? { intent: routerAttrs.intent ?? null, confidence: routerAttrs.confidence ?? null, redirect: routerAttrs.redirect === true, offTopic: routerAttrs.offTopic === true } : null,
+    topicGuard: guardAttrs ? { offTopic: guardAttrs.offTopic === true, confidence: guardAttrs.confidence ?? null, engine: guardAttrs.engine ?? null } : null,
+    decisiveSourceId: typeof rerankAttrs?.decisiveId === "string" ? rerankAttrs.decisiveId : blob?.decisiveSourceId ?? null,
+    decision: blob?.decision ? m(blob.decision) : null,
+    // 관리자면 R2의 근거 목록(제목·조항·풀), 아니면 null — 화면은 ask_events.source_ids + 검색 후보 표로 대신한다.
+    sources: blob?.sources ? blob.sources.map((s) => ({ ...s, title: m(s.title), section: m(s.section) })) : null,
+  };
 
   return c.json({
     ok: true,
@@ -242,6 +262,7 @@ tracesApp.get("/traces/:id", async (c) => {
       thresholds: { scoreFloor: SCORE_FLOOR, keywordGateMin: KEYWORD_GATE_MIN },
       scores: ((scoreRes.results || []) as Array<Record<string, unknown>>).map((s) => ({ ...s, comment: m(s.comment as string | null) })),
       prompt: promptBlock,
+      explain,
     },
   });
 });

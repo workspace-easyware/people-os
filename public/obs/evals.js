@@ -296,6 +296,30 @@
     return '<table class="obs-table obs-dims"><thead><tr><th>차원</th><th>단계</th><th>사유</th></tr></thead><tbody>' + rows + '</tbody></table>';
   }
 
+  // ---- XAI 보완 (2026-11-19): 역할 일관성 (공용 HR 규정 항목만) ----
+  var ROLE_NAME = { hr_admin: 'HR 관리자', user: '일반 사용자', coach: '코치', coachee: '코칭 대상' };
+  function roleCell(rc) {
+    if (!rc) return '<span class="obs-muted" title="검사 안 함 (개인 항목·기본 평가 오류·역할 축 끔·0037 이전 실행)">—</span>';
+    return rc.inconsistent ? O.badge('불일치', 'err', (rc.reasons || []).join(' · ')) : O.badge('일치', 'ok', '근거 겹침 ' + O.fmtScore(rc.sourceOverlapMin) + ' · 답 유사도 ' + O.fmtScore(rc.answerSimMin));
+  }
+  function roleDetail(rc) {
+    if (!rc) return '';
+    var cols = (rc.runs || []).map(function (r) {
+      var srcs = (r.sourceLabels || []).length ? '<ul class="obs-role-src">' + r.sourceLabels.map(function (s) { return '<li>' + esc(s) + '</li>'; }).join('') + '</ul>' : '<p class="small obs-muted">인용 근거 없음</p>';
+      return '<div class="obs-role-col"><div class="obs-detail-h">' + esc(ROLE_NAME[r.role] || r.role) + ' <span class="small obs-muted obs-mono">' + esc(r.role) + '</span></div>' +
+        (r.error ? '<div class="obs-error small">' + esc(r.error) + '</div>' : '') +
+        '<p class="small">처리 결과: ' + O.statusBadge(r.status) + (r.verdict !== undefined ? ' · 판정: ' + O.verdictBadge(r.verdict) : '') +
+        (r.eventId ? ' · <a href="#obs/trace/' + escAttr(encodeURIComponent(r.eventId)) + '">트레이스</a>' : '') + '</p>' +
+        '<pre class="obs-pre">' + esc(r.answer || '(답 없음)') + '</pre>' + srcs + '</div>';
+    }).join('');
+    var facts = '처리 결과 ' + (rc.statusMatch ? '일치' : '불일치') + ' · 근거 겹침(최소) ' + esc(O.fmtScore(rc.sourceOverlapMin)) + ' · 답 유사도(최소) ' + esc(O.fmtScore(rc.answerSimMin)) +
+      ' · 판정 비교 ' + (rc.verdictChecked ? (rc.verdictMatch === false ? '불일치' : rc.verdictMatch ? '일치' : '판정 불가') : '생략 (1단계 통과)') + ' · 추가 LLM 호출 ' + esc(rc.llmCalls);
+    return '<div class="obs-detail-h">역할별 답 비교 ' + (rc.inconsistent ? O.badge('불일치', 'err') : O.badge('일치', 'ok')) + '</div>' +
+      '<p class="small obs-muted">' + facts + '</p>' +
+      ((rc.reasons || []).length ? '<p class="small">사유: ' + esc(rc.reasons.join(' · ')) + '</p>' : '') +
+      '<div class="obs-role-grid">' + cols + '</div>';
+  }
+
   function itemRows(items, idx) {
     var it = items[idx];
     var cmp = COMPARISON[it.comparison] || [it.comparison, ''];
@@ -309,10 +333,11 @@
       '<td class="obs-num">' + esc(judge) + skipped + '</td>' +
       '<td>' + O.verdictBadge(it.verdict) + (it.expectedVerdict ? '<div class="small obs-muted">기대 ' + esc(it.expectedVerdict) + '</div>' : '') + '</td>' +
       '<td>' + hitCell(it.retrievalHit) + '</td>' +
+      '<td>' + roleCell(it.roleCheck) + '</td>' +
       '<td class="obs-num">' + esc(O.fmtMs(it.latencyMs)) + '</td>' +
       '<td>' + link + '</td>' +
       '<td><button type="button" class="secondary small" data-toggle="' + idx + '" aria-expanded="false" aria-controls="obs-det-' + idx + '">사유</button></td></tr>';
-    var detail = '<tr class="obs-item-detail" id="obs-det-' + idx + '" hidden><td colspan="9">' +
+    var detail = '<tr class="obs-item-detail" id="obs-det-' + idx + '" hidden><td colspan="10">' +
       (it.error ? '<div class="obs-error">' + esc(it.error) + '</div>' : '') +
       '<div class="obs-detail-grid">' +
       '<div><div class="obs-detail-h">답</div><pre class="obs-pre">' + esc(it.answer || '(답 없음)') + '</pre></div>' +
@@ -324,6 +349,7 @@
       (it.judgeComment ? '<p class="obs-judge-comment">' + esc(it.judgeComment) + '</p>'
         : '<p class="small obs-muted">이 실행에는 개선 코멘트가 없습니다 (judge-v2 이전 실행).</p>') +
       '<p class="small obs-muted">verdict 엔진: ' + esc(it.verdictEngine || '—') + ' · 검색된 근거 ' + esc((it.retrievedIds || []).length) + '건</p>' +
+      roleDetail(it.roleCheck) +
       '</td></tr>';
     return main + detail;
   }
@@ -375,10 +401,12 @@
         '<div class="obs-kpis">' + kpis.map(function (k) { return '<div class="obs-kpi"><div class="obs-kpi-label">' + esc(k[0]) + '</div><div class="obs-kpi-value">' + esc(k[1]) + '</div></div>'; }).join('') + '</div>' +
         '<dl class="obs-meta">' + meta.map(function (m) { return '<div><dt>' + esc(m[0]) + '</dt><dd>' + m[1] + '</dd></div>'; }).join('') + '</dl></div>' +
         '<div class="obs-section"><h3>항목별 결과 <span class="small">' +
-        (failNew ? O.badge('새로 실패 ' + failNew, 'err') + ' ' : '') + (passNew ? O.badge('새로 통과 ' + passNew, 'ok') : '') + '</span>' +
+        (failNew ? O.badge('새로 실패 ' + failNew, 'err') + ' ' : '') + (passNew ? O.badge('새로 통과 ' + passNew, 'ok') : '') +
+        (res.roleCheckSummary && res.roleCheckSummary.checked ? ' ' + O.badge('역할 불일치 ' + res.roleCheckSummary.inconsistent + '/' + res.roleCheckSummary.checked, res.roleCheckSummary.inconsistent ? 'err' : 'ok',
+          '역할: ' + (res.roleCheckSummary.roles || []).map(function (x) { return ROLE_NAME[x] || x; }).join(' · ')) : '') + '</span>' +
         '<label class="obs-sort small">정렬 <select data-sort><option value="cmp"' + (st.sort === 'cmp' ? ' selected' : '') + '>새로 실패 먼저</option><option value="judge"' + (st.sort === 'judge' ? ' selected' : '') + '>judge 낮은 순</option></select></label></h3>' +
         (order.length
-          ? '<div class="obs-table-wrap"><table class="obs-table"><thead><tr><th>직전 대비</th><th>질문</th><th>결과</th><th>judge</th><th>verdict</th><th>근거 적중</th><th>지연</th><th>트레이스</th><th></th></tr></thead><tbody>' +
+          ? '<div class="obs-table-wrap"><table class="obs-table"><thead><tr><th>직전 대비</th><th>질문</th><th>결과</th><th>judge</th><th>verdict</th><th>근거 적중</th><th title="공용 HR 규정 질문을 역할별로 다시 돌려 비교 (개인 항목은 —)">역할 일관성</th><th>지연</th><th>트레이스</th><th></th></tr></thead><tbody>' +
             order.map(function (it, i) { return itemRows(order, i); }).join('') + '</tbody></table></div>'
           : '<div class="obs-empty">' + (active(r) ? '아직 결과가 없습니다. 항목이 끝나는 대로 채워집니다.' : '이 실행에는 항목 결과가 없습니다.') + '</div>') + '</div>';
       Array.prototype.forEach.call(body.querySelectorAll('.obs-item-detail'), function (n) {

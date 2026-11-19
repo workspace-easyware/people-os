@@ -31,6 +31,7 @@ const WF_KST_MS = 9 * 3600_000;
 let wfList = [], wfCur = null /* {id|null, name, description, status, steps[], shared?, canCopy?} */, wfRuns = [], wfRun = null;
 let wfShared = [] /* WF-9: 공유받은 워크플로우 + 템플릿 */, wfShares = [] /* 내 워크플로우의 공유 행 */;
 const WF_VIA_KO = { department: '부서 공유', all: '전체 공유', template: '템플릿' };
+let wfTemplates = [] /* 기업용 템플릿 (GET /api/workflows/templates) */, wfTplInput = null /* {id, json}: 템플릿으로 만든 워크플로우의 실행 입력 예시 */;
 let wfEditIdx = null /* null: 폼 닫힘, -1: 새 단계, n: n번째 편집 */, wfSeq = 0, wfPoll = null, wfDirty = false;
 
 // ---------- 작은 DOM 도우미 (textContent만 사용) ----------
@@ -121,6 +122,7 @@ async function workflowOpen(mountEl, sub) {
   await wfLoadList();
   await wfLoadSharedList();
   await wfLoadPending();
+  await wfLoadTemplates();
   if (seq !== wfSeq) return;
   if (id) {
     await wfSelect(id, run, true);
@@ -144,6 +146,7 @@ function wfBuildShell(root) {
       wfEl('div', { class: 'wf-layout' },
         wfEl('aside', { class: 'wf-side' },
           wfBtn('+ 새 워크플로우', 'primary', wfNew),
+          wfBtn('템플릿으로 시작하기', 'secondary', wfShowIntro),
           wfEl('ul', { id: 'wfList', class: 'wf-list' }),
           wfEl('h3', { class: 'wf-side-h', text: '공유받은 워크플로우' }),
           wfEl('ul', { id: 'wfSharedList', class: 'wf-list' })),
@@ -220,6 +223,57 @@ function wfNew() {
   wfSetHash(null);
   wfRender();
 }
+// ---------- 기업용 템플릿 (2026-11-19) ----------
+const WF_APPROVAL_TYPES = ['send_email', 'webhook'];
+async function wfLoadTemplates() {
+  try { wfTemplates = (await wfApi('/api/workflows/templates')).templates || []; }
+  catch (e) { wfTemplates = []; if (e.status === 401) wfFail(e); }
+}
+function wfShowIntro() {
+  if (!wfConfirmLeave()) return;
+  wfCur = null; wfRuns = []; wfRun = null; wfEditIdx = null; wfDirty = false;
+  wfSetHash(null);
+  wfRender();
+}
+// 빈 화면: 한 줄 설명 + 템플릿 카드
+function wfRenderIntro(main) {
+  main.append(
+    wfEl('div', { class: 'wf-intro' },
+      wfEl('h3', { text: '워크플로우가 뭐예요?' }),
+      wfEl('p', { class: 'small', text: '할 일을 순서대로 이어붙인 자동화입니다. 템플릿을 골라 시작하거나 빈 워크플로우를 만드세요.' })),
+    wfEl('h3', { text: '템플릿으로 시작하기' }),
+    wfEl('div', { class: 'wf-tpl-grid', id: 'wfTplGrid' }));
+  const grid = $('wfTplGrid');
+  if (!wfTemplates.length) { grid.append(wfEl('p', { class: 'small', text: '템플릿을 불러오지 못했습니다. 새로고침하거나 "+ 새 워크플로우"로 시작하세요.' })); return; }
+  for (const t of wfTemplates) {
+    const needsApproval = t.steps.some((s) => WF_APPROVAL_TYPES.includes(s.type));
+    grid.append(wfEl('div', { class: 'wf-tpl-card' },
+      wfEl('b', { class: 'wf-tpl-name', text: t.name }),
+      wfEl('p', { class: 'small', text: t.description }),
+      wfEl('div', { class: 'wf-tpl-meta' },
+        wfBadge(`${t.steps.length}단계`),
+        needsApproval ? wfBadge('승인이 필요한 단계', 'warn') : ''),
+      needsApproval ? wfEl('p', { class: 'small wf-tpl-warn', text: '메일 발송·웹훅 단계는 사람이 승인해야 실행됩니다.' }) : '',
+      wfEl('ol', { class: 'small wf-tpl-steps' }, t.steps.map((s) => wfEl('li', { text: s.name }))),
+      wfBtn('이 템플릿으로 만들기', 'primary', () => wfUseTemplate(t.id), { 'data-tpl': t.id })));
+  }
+}
+async function wfUseTemplate(tplId) {
+  const t = wfTemplates.find((x) => x.id === tplId);
+  if (!t) return;
+  const btns = () => document.querySelectorAll('.wf-tpl-card button');
+  for (const b of btns()) b.disabled = true;
+  try {
+    const j = await wfApi('/api/workflows', { method: 'POST', body: JSON.stringify({ name: t.name, description: t.description, definition: { version: 1, steps: t.steps } }) });
+    const ex = {};
+    for (const i of t.inputs || []) ex[i.key] = i.example;
+    wfTplInput = { id: j.workflow.id, json: JSON.stringify(ex, null, 2) };
+    wfDirty = false;
+    await wfLoadList();
+    await wfSelect(j.workflow.id, null, true);
+    wfMsg(`"${t.name}" 템플릿으로 만들었습니다. 이름을 바꾸고, 각 단계의 설정을 바꾼 뒤 저장하세요. 실행 입력 예시는 "고급 입력"에 채워져 있습니다.`);
+  } catch (e) { wfFail(e, '템플릿으로 만들지 못했습니다'); for (const b of btns()) b.disabled = false; }
+}
 function wfConfirmLeave() { return !wfDirty || confirm('저장하지 않은 변경이 있습니다. 버리고 이동할까요?'); }
 
 async function wfSelect(id, runId, force) {
@@ -247,7 +301,7 @@ function wfRender() {
   const main = $('wfMain');
   if (!main) return;
   main.textContent = '';
-  if (!wfCur) { main.append(wfEl('p', { class: 'small', text: '왼쪽에서 워크플로우를 고르거나 새로 만드세요.' })); return; }
+  if (!wfCur) { wfRenderIntro(main); return; }
   if (wfCur.shared) { wfRenderSharedView(main); return; }
   const hasSend = wfCur.steps.some((s) => s.type === 'send_email');
 
@@ -275,8 +329,9 @@ function wfRender() {
       wfBtn('워크플로우 저장', 'primary', wfSave, { id: 'wfSaveBtn' }),
       wfCur.id ? wfBtn('삭제', 'secondary wf-danger', wfDelete) : null,
       hasSend ? wfEl('span', { class: 'wf-note', text: '메일 발송 단계는 실행 중 승인이 필요합니다' }) : null),
-    wfCur.id ? wfEl('div', { id: 'wfShareArea', class: 'wf-sharearea' }) : null,
-    wfCur.id ? wfEl('div', { id: 'wfScheduleArea', class: 'wf-sharearea' }) : null,
+    // 주의: Element.append(null)은 글자 "null"을 붙인다 — 조건부 항목은 null 대신 빈 문자열을 쓴다 (브라우저 검증 2026-11-18, 문제 4).
+    wfCur.id ? wfEl('div', { id: 'wfShareArea', class: 'wf-sharearea' }) : '',
+    wfCur.id ? wfEl('div', { id: 'wfScheduleArea', class: 'wf-sharearea' }) : '',
     wfCur.id ? wfEl('div', { id: 'wfRunArea', class: 'wf-runarea' }) : wfEl('p', { class: 'small', text: '저장하면 실행할 수 있습니다.' }));
   wfRenderStepsArea(); // workflow-canvas.js — 폼 목록(wfRenderSteps) 또는 캔버스
   wfRenderStepForm();
@@ -287,7 +342,7 @@ function wfRender() {
 function wfRenderSharedView(main) {
   main.append(
     wfEl('h3', { text: wfCur.name }),
-    wfCur.description ? wfEl('p', { class: 'small', text: wfCur.description }) : null,
+    wfCur.description ? wfEl('p', { class: 'small', text: wfCur.description }) : '',
     wfEl('p', { class: 'wf-note', text: '공유받은 워크플로우는 직접 실행할 수 없습니다. 복사한 뒤 내 복사본에서 실행하세요.' }),
     wfEl('div', { class: 'wf-actions' },
       wfCur.canCopy ? wfBtn('내 워크플로우로 복사', 'primary wf-copy', wfCopy, { id: 'wfCopyBtn' }) : wfEl('span', { class: 'small', text: '이 워크플로우는 보기만 가능합니다 (복사 권한 없음).' })),
@@ -740,10 +795,12 @@ function wfRenderRunArea() {
   area.textContent = '';
   const docIn = wfEl('input', { type: 'text', id: 'wfDocId', placeholder: 'docId (선택)' });
   const adv = wfEl('textarea', { id: 'wfAdv', rows: '3', placeholder: '{"question": "..."}' });
+  const tplEx = wfTplInput && wfCur && wfTplInput.id === wfCur.id ? wfTplInput.json : '';
+  if (tplEx) adv.value = tplEx;
   area.append(
     wfEl('h3', { text: '실행' }),
     wfEl('label', { class: 'wf-label', for: 'wfDocId', text: '실행 입력: docId' }), docIn,
-    wfEl('details', { class: 'wf-adv' }, wfEl('summary', { text: '고급 입력(JSON)' }), adv),
+    wfEl('details', { class: 'wf-adv', open: tplEx ? true : null }, wfEl('summary', { text: '고급 입력(JSON)' }), adv),
     wfEl('div', { class: 'wf-actions' },
       wfBtn('실행', 'primary', wfRunNow, { id: 'wfRunBtn' }),
       wfDirty ? wfEl('span', { class: 'wf-note', text: '저장하지 않은 변경은 실행에 반영되지 않습니다' }) : null),

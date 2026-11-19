@@ -409,6 +409,9 @@ async function calOpenById(id) {
 // ---------- 추가·수정 폼 ----------
 function calTimeOpts(sel) {
   let h = '';
+  // 15분 단위가 아닌 시각(워크플로우 "일정 만들기" 노드 등으로 만든 일정)은 목록에 없어 00:00으로 바뀌어 저장됐다 —
+  // 현재 값을 선택된 항목으로 먼저 넣는다.
+  if (/^\d{2}:\d{2}$/.test(sel || '') && Number(sel.slice(3)) % 15 !== 0) h += `<option value="${sel}" selected>${sel}</option>`;
   for (let m = 0; m < 1440; m += 15) {
     const v = calPad(Math.floor(m / 60)) + ':' + calPad(m % 60);
     h += `<option value="${v}"${v === sel ? ' selected' : ''}>${v}</option>`;

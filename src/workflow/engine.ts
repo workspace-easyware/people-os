@@ -27,6 +27,7 @@
 // - 30분 상한(4번)은 agent 단계에도 매 턴 그대로 적용된다. run 전체 LLM 30회 캡은 단계 행 기준이라 agent 턴은
 //   세지 않는다 — 대신 DO가 agent 단계 안에서 도구 선택 호출을 20회로 따로 막는다.
 import { executeNode } from "./nodes";
+import { logEvent } from "../obs/log";
 import { requestWorkflowApproval } from "./approvals";
 import { advanceAgentTurn, type AgentStepHooks } from "./agent";
 import {
@@ -70,7 +71,10 @@ async function finishRun(env: Env, runId: string, status: "succeeded" | "failed"
   const r = await env.DB.prepare(
     `UPDATE workflow_runs SET status=?, error=?, output_json=COALESCE(?, output_json), finished_at=? WHERE id=? AND status IN ('queued','running','waiting_approval')`,
   ).bind(status, p.error ?? null, p.output === undefined ? null : JSON.stringify(p.output), nowIso(), runId).run();
-  return (r.meta?.changes ?? 0) > 0;
+  const changed = (r.meta?.changes ?? 0) > 0;
+  // Workers Logs: run 종료 1줄 (상태·식별자만 — 출력·오류 본문은 싣지 않는다. 오류 본문은 D1 workflow_runs.error에 있다).
+  if (changed) logEvent("workflow.run_finished", { runId, status, hasError: !!p.error });
+  return changed;
 }
 
 async function setStep(env: Env, runId: string, stepIndex: number, fromStatus: string, p: { status: string; output?: unknown; error?: string | null; finished?: boolean }): Promise<void> {
@@ -227,6 +231,17 @@ export async function processWorkflowStep(env: Env, msg: WorkflowStepMessage): P
     "SELECT step_index, node_type, status, input_json, output_json, started_at, finished_at FROM workflow_run_steps WHERE run_id = ? ORDER BY step_index",
   ).bind(runId).all<StepDb>();
 
+  // 전체 점검(2026-11-18) P1: 오래된 승인 메시지 차단. 큐는 at-least-once라 이미 처리된 승인 메시지가 다시 올 수 있다.
+  // 그 사이 같은 단계(에이전트의 다음 턴)가 새로 승인을 요청했다면, 이 메시지는 그 요청보다 **먼저** 만들어진 것이므로
+  // 새 요청의 승인이 아니다 — 무시한다. 정상 승인 메시지는 항상 승인 요청(requestedAt) 뒤에 만들어진다.
+  if (approved) {
+    const cur = steps.find((s) => s.step_index === stepIndex);
+    const meta = cur ? (parseJson(cur.input_json) as { approval?: string; requestedAt?: string } | null) : null;
+    const reqAt = meta?.approval === "requested" && meta.requestedAt ? Date.parse(meta.requestedAt) : NaN;
+    const enqAt = Date.parse(msg.enqueuedAt);
+    if (Number.isFinite(reqAt) && Number.isFinite(enqAt) && enqAt < reqAt) return;
+  }
+
   // 4. 활성 시간 30분 상한
   const activeSinceMs = activeSince(run, steps, approved ? msg.enqueuedAt : undefined);
   if (Date.now() - activeSinceMs > RUN_MAX_ACTIVE_MS) {
@@ -289,7 +304,8 @@ export async function processWorkflowStep(env: Env, msg: WorkflowStepMessage): P
     }
 
     // 9. 실행
-    const u = await env.DB.prepare("SELECT id, email, name, role, coaching_role FROM users WHERE id = ?")
+    // 전체 점검(2026-11-18) P1: 비활성 계정의 스케줄·이벤트 run이 계속 도는 것을 막는다 (로그인 세션과 같은 status='active' 조건).
+    const u = await env.DB.prepare("SELECT id, email, name, role, coaching_role FROM users WHERE id = ? AND status = 'active'")
       .bind(run.owner_id).first<{ id: string; email: string; name: string | null; role: string; coaching_role: string | null }>();
     if (!u) {
       const error = "실행한 사용자를 찾을 수 없습니다.";

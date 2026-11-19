@@ -284,6 +284,9 @@ lmsApp.post("/admin/lessons", async (c) => {
     if (b.youtube_url || b.youtube_id) return fail(c, 400, "youtube와 r2_key를 함께 줄 수 없습니다.");
     source = "r2";
     r2Key = b.r2_key.trim();
+    // 전체 점검(2026-11-18) P2: 같은 버킷에 개인 녹음·문서 원본·메일 원문·덱·트레이스가 함께 있다.
+    // 그 경로를 강의 영상으로 등록하면 로그인한 모든 사용자에게 스트리밍된다 — 개인 데이터 경로는 거부한다.
+    if (/^(recordings|docs|documents|emails|decks|traces|obs)\//i.test(r2Key)) return fail(c, 400, "이 경로의 객체는 강의 영상으로 등록할 수 없습니다.");
     const head = await c.env.FILES.head(r2Key);
     if (!head) return fail(c, 400, "R2에 해당 객체가 없습니다.");
     sizeBytes = head.size;

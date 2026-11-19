@@ -146,6 +146,17 @@ async function latestSeq(env: Env, key: string, me: SessionUser, memberIds: stri
   return Number(j.messages?.[j.messages.length - 1]?.seq ?? 0);
 }
 
+/**
+ * 전체 점검(2026-11-18) P2: 방의 최신 seq를 D1 chat_rooms.last_seq(migration 0032)에도 적어 둔다.
+ * 방 목록(/rooms)이 방마다 DO를 깨워 최신 seq를 묻던 것(최대 200방 × 30초 폴링)을 없애기 위한 캐시다.
+ * best-effort — 컬럼이 아직 없거나(마이그레이션 전) D1이 실패해도 메시지 전송은 그대로 성공한다.
+ */
+async function bumpLastSeq(db: D1Database, roomId: string, seq: number): Promise<void> {
+  if (!(seq > 0)) return;
+  try { await db.prepare("UPDATE chat_rooms SET last_seq = MAX(COALESCE(last_seq, 0), ?) WHERE id = ?").bind(seq, roomId).run(); }
+  catch (e) { console.error("chat last_seq update failed", e instanceof Error ? e.message : String(e)); }
+}
+
 function doRequest(me: SessionUser, other: string, path: string, init: RequestInit = {}): Request {
   const headers = new Headers(init.headers);
   headers.set("x-chat-user", me.id);
@@ -189,6 +200,7 @@ chatApp.post("/dm/:userId/messages", async (c) => {
     // 보낸 사람은 자기 메시지까지 읽은 것으로 친다 (DM 미읽음에 자기 글이 세지지 않게 — 그룹과 같은 규칙)
     try { await c.env.DB.prepare("UPDATE chat_room_members SET last_read_seq = MAX(last_read_seq, ?) WHERE room_id = ? AND user_id = ?").bind(seq, key, me.id).run(); }
     catch (e) { console.error("chat dm read-self failed", e); }
+    await bumpLastSeq(c.env.DB, key, seq);
     await background(c, notifyLobby(c.env, [other], key, seq));
   }
   return new Response(text, { status: res.status, headers: { "content-type": "application/json" } });
@@ -222,16 +234,21 @@ chatApp.get("/presence", async (c) => {
 /** 내 방 목록. DM 행은 peer(id·이름·이메일·코칭 역할), 그룹 행은 name. 메시지를 보낸 적 없는 방은 행이 없어 안 나온다. */
 chatApp.get("/rooms", async (c) => {
   const me = await requireUser(c);
-  const rows = await c.env.DB.prepare(
-    `SELECT r.id, r.type, r.name, r.updated_at, m.last_read_seq, pu.id AS peer_id, pu.name AS peer_name, pu.email AS peer_email, pu.coaching_role AS peer_coaching_role
+  const roomsSql = (withLastSeq: boolean) =>
+    `SELECT r.id, r.type, r.name, r.updated_at, ${withLastSeq ? "r.last_seq, " : ""}m.last_read_seq, pu.id AS peer_id, pu.name AS peer_name, pu.email AS peer_email, pu.coaching_role AS peer_coaching_role
      FROM chat_room_members m
      JOIN chat_rooms r ON r.id = m.room_id
      LEFT JOIN chat_room_members pm ON pm.room_id = r.id AND pm.user_id != m.user_id AND r.type = 'dm'
      LEFT JOIN users pu ON pu.id = pm.user_id
      WHERE m.user_id = ?
-     ORDER BY r.updated_at DESC, r.id LIMIT 200`,
-  ).bind(me.id).all<Record<string, string | number | null>>();
-  const list = rows.results || [];
+     ORDER BY r.updated_at DESC, r.id LIMIT 200`;
+  // last_seq 컬럼(migration 0032)이 아직 없으면 기존 쿼리로 폴백한다 — 그때는 아래에서 방마다 DO에 묻는 기존 경로가 돈다.
+  let list: Record<string, string | number | null>[];
+  try {
+    list = (await c.env.DB.prepare(roomsSql(true)).bind(me.id).all<Record<string, string | number | null>>()).results || [];
+  } catch {
+    list = (await c.env.DB.prepare(roomsSql(false)).bind(me.id).all<Record<string, string | number | null>>()).results || [];
+  }
   // 그룹·DM 모두 unread (2026-11-18 presence·읽음 작업부터 DM도 센다). 방마다 DO에서 최신 seq를 읽는다.
   const groupIds = list.filter((r) => r.type === "group").map((r) => String(r.id));
   const membersByRoom = new Map<string, string[]>();
@@ -245,9 +262,13 @@ chatApp.get("/rooms", async (c) => {
   const unreadOf = async (r: Record<string, string | number | null>): Promise<number> => {
     try {
       const id = String(r.id);
+      // D1에 최신 seq가 적혀 있으면(0032 이후 메시지가 한 번이라도 오간 방) DO를 깨우지 않는다.
+      if (typeof r.last_seq === "number") return Math.max(0, r.last_seq - Number(r.last_read_seq ?? 0));
       const latest = r.type === "dm"
         ? await latestSeq(c.env, id, me, [me.id, String(r.peer_id ?? "")].filter(Boolean)) // DM: D1 id = DO 방 키
         : await latestSeq(c.env, groupRoomKey(id), me, membersByRoom.get(id) ?? [me.id]);
+      // 0032 이전부터 있던 방: 한 번 DO에서 읽은 값을 적어 두면 다음 목록 조회부터는 D1만 본다 (메시지가 있는 방만).
+      await bumpLastSeq(c.env.DB, id, latest);
       return Math.max(0, latest - Number(r.last_read_seq ?? 0));
     } catch (e) {
       console.error("chat unread failed", e);
@@ -268,6 +289,44 @@ chatApp.get("/dm/:userId/ws", async (c) => {
   // Hono 헬퍼가 아니라 Worker가 DO stub에 직접 업그레이드 요청을 전달한다.
   return roomStub(c.env, dmRoomKey(me.id, other)).fetch(doRequest(me, other, "/ws", { headers: { upgrade: "websocket" } }));
 });
+
+// ====================== 다른 기능이 부르는 채팅 헬퍼 (화상회의 V1+V2, 2026-11-19) ======================
+// D1 방 id(DM은 `chat:dm:a:b`, 그룹은 chatg_…)를 받아 DO 방 키로 바꿔 부른다. 인증은 부르는 쪽(meet 라우트·크론)이 끝낸 뒤다.
+export const SYSTEM_SENDER_ID = "system:people-os";
+
+async function roomTarget(env: Env, roomId: string): Promise<{ key: string; type: string; memberIds: string[] } | null> {
+  const room = await env.DB.prepare("SELECT id, type FROM chat_rooms WHERE id = ?").bind(roomId).first<{ id: string; type: string }>();
+  if (!room) return null;
+  const memberIds = ((await env.DB.prepare("SELECT user_id FROM chat_room_members WHERE room_id = ?").bind(roomId).all<{ user_id: string }>()).results || []).map((r) => r.user_id);
+  return { key: room.type === "group" ? groupRoomKey(roomId) : roomId, type: room.type, memberIds };
+}
+
+/** 방 소켓 전부에 이벤트 (meeting_started·meeting_ended 등). 방이 없으면 false. */
+export async function broadcastRoomEvent(env: Env, roomId: string, ev: Record<string, unknown>): Promise<boolean> {
+  const t = await roomTarget(env, roomId);
+  if (!t) return false;
+  const res = await roomEvent(env, t.key, ev) as Response;
+  return !!res?.ok;
+}
+
+/** 시스템 메시지(보낸 사람 "People OS")를 방에 남긴다 — 일반 메시지와 같은 경로(DO 저장 + 방 소켓 + 로비 알림 + last_seq).
+ *  DO 멤버 확인은 방의 실제 멤버 한 명을 x-chat-user로 넘겨 통과한다 (시스템 발신자는 멤버가 아니다). 성공하면 seq. */
+export async function postSystemMessage(env: Env, roomId: string, body: string): Promise<number | null> {
+  const t = await roomTarget(env, roomId);
+  if (!t || !t.memberIds.length) return null;
+  const text = body.slice(0, MAX_BODY_CHARS);
+  const headers = new Headers({ "content-type": "application/json", "x-chat-user": t.memberIds[0], "x-chat-members": [...t.memberIds].sort().join(",") });
+  const res = await roomStub(env, t.key).fetch(new Request("https://chat-room/messages", {
+    method: "POST", headers, body: JSON.stringify({ sender_id: SYSTEM_SENDER_ID, sender_name: "People OS", body: text }),
+  }));
+  if (res.status !== 201) { console.error("chat system message failed", res.status); return null; }
+  let seq = 0;
+  try { seq = Number(((await res.json()) as { message?: { seq?: number } }).message?.seq ?? 0); } catch { /* seq 0 */ }
+  try { await env.DB.prepare("UPDATE chat_rooms SET updated_at = ? WHERE id = ?").bind(new Date().toISOString(), roomId).run(); } catch (e) { console.error("chat system updated_at failed", e); }
+  await bumpLastSeq(env.DB, roomId, seq);
+  try { await notifyLobby(env, t.memberIds, roomId, seq); } catch (e) { console.error("chat system lobby failed", e); }
+  return seq;
+}
 
 // ====================== 그룹채팅 (DO-1c, 2026-11-18) ======================
 // 방 id = uid("chatg"), DO 방 키 = `chat:group:<id>`. 멤버십의 기준은 D1 chat_room_members (DO members 표는 sync-members로 따라간다).
@@ -449,7 +508,9 @@ chatApp.delete("/groups/:roomId/members/:userId", async (c) => {
   }
   await c.env.DB.batch(stmts);
   // 제거된 멤버(방이 지워졌다면 전원)의 WebSocket은 DO가 닫는다.
-  await syncDoMembers(c.env, me, roomId, roomDeleted ? [] : members.filter((m) => m.id !== target).map((m) => m.id));
+  // 전체 점검(2026-11-18) P1: 동기화가 한 번 실패하면 제거된 멤버의 열린 소켓이 계속 새 메시지를 받는다 — 한 번 더 시도한다.
+  const remaining = roomDeleted ? [] : members.filter((m) => m.id !== target).map((m) => m.id);
+  if (!(await syncDoMembers(c.env, me, roomId, remaining))) await syncDoMembers(c.env, me, roomId, remaining);
   return c.json({ ok: true, removed: target, room_deleted: roomDeleted, creator_id: roomDeleted ? null : creatorId });
 });
 
@@ -472,6 +533,7 @@ chatApp.post("/groups/:roomId/messages", async (c) => {
         c.env.DB.prepare("UPDATE chat_rooms SET updated_at = ? WHERE id = ?").bind(new Date().toISOString(), roomId),
         c.env.DB.prepare("UPDATE chat_room_members SET last_read_seq = MAX(last_read_seq, ?) WHERE room_id = ? AND user_id = ?").bind(seq, roomId, me.id),
       ]);
+      await bumpLastSeq(c.env.DB, roomId, seq);
       await background(c, notifyLobby(c.env, memberIds.filter((x) => x !== me.id), roomId, seq));
     } catch (e) { console.error("chat group updated_at failed", e); }
   }

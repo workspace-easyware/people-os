@@ -36,7 +36,8 @@ import {
   type SharePermission, type ShareScope,
 } from "./sharing";
 import { cancelWorkflowRun, checkWorkflowRateLimit, resumeWorkflowRun, stepMessage } from "./engine";
-import { validateDefinition, WORKFLOW_STATUSES, type Env, type WorkflowStatus } from "./types";
+import { WORKFLOW_TEMPLATES } from "./templates";
+import { validateDefinition, WORKFLOW_STATUSES, type Env, type WorkflowDefinition, type WorkflowStatus } from "./types";
 
 export const workflowApp = new Hono<{ Bindings: Env }>();
 type C = Context<{ Bindings: Env }>;
@@ -121,6 +122,12 @@ workflowApp.get("/", async (c) => {
   return c.json({ workflows: await listWorkflows(c.env.DB, u.id, { limit: 100 }) });
 });
 
+// WF 템플릿 (2026-11-19): 코드 내장 기업용 템플릿 5개. /:id보다 먼저 등록한다. 읽기 전용.
+workflowApp.get("/templates", async (c) => {
+  await requireUser(c);
+  return c.json({ templates: WORKFLOW_TEMPLATES });
+});
+
 workflowApp.post("/", async (c) => {
   const u = await requireUser(c, true);
   const b = await readJson(c);
@@ -139,11 +146,25 @@ workflowApp.get("/runs/:runId", async (c) => {
   return c.json({ run });
 });
 
+// 전체 점검(2026-11-18) P1: 공유·템플릿·복사로 남에게 나가는 정의에서는 웹훅 헤더 **값**을 비운다 (키는 유지).
+// 헤더 값은 Authorization 토큰 같은 비밀일 수 있고, 승인 요약(engine.ts)도 이미 이름만 보여 준다.
+// 소유자 본인 응답은 그대로다. 복사한 사람은 헤더 값을 직접 다시 넣어야 한다.
+function redactShared<T extends { definition: WorkflowDefinition }>(wf: T): T {
+  const def = wf.definition;
+  if (!def || !Array.isArray(def.steps)) return wf;
+  const steps = def.steps.map((s) => {
+    const h = s?.type === "webhook" ? (s.config as Record<string, unknown> | undefined)?.headers : undefined;
+    if (!h || typeof h !== "object" || Array.isArray(h)) return s;
+    return { ...s, config: { ...s.config, headers: Object.fromEntries(Object.keys(h as object).map((k) => [k, ""])) } };
+  });
+  return { ...wf, definition: { ...def, steps } };
+}
+
 // WF-9: 공유받은 워크플로우 + 템플릿. /:id보다 먼저 등록한다 ("shared"가 id로 잡히지 않게).
 workflowApp.get("/shared", async (c) => {
   const u = await requireUser(c);
   const entries = await listSharedEntries(c.env.DB, u.id);
-  return c.json({ workflows: entries.map((e) => ({ ...e.workflow, shared_via: e.via, can_copy: e.can_copy })) });
+  return c.json({ workflows: entries.map((e) => ({ ...redactShared(e.workflow), shared_via: e.via, can_copy: e.can_copy })) });
 });
 
 workflowApp.get("/:id", async (c) => {
@@ -155,7 +176,8 @@ workflowApp.get("/:id", async (c) => {
   const other = await getWorkflowById(c.env.DB, id);
   const access = other ? await canViewWorkflow(c.env.DB, u.id, other) : null;
   if (!other || !access?.view) throw new WfError(404, "워크플로우를 찾을 수 없습니다.");
-  return c.json({ workflow: other, steps: other.definition.steps, shared: true, can_copy: access.copy });
+  const safe = redactShared(other);
+  return c.json({ workflow: safe, steps: safe.definition.steps, shared: true, can_copy: access.copy });
 });
 
 // WF-9: 복사. 새 워크플로우는 복사한 사람 소유·비공개·비템플릿. 원본의 공유 행·run·스케줄은 이어받지 않는다.
@@ -165,7 +187,7 @@ workflowApp.post("/:id/copy", async (c) => {
   const access = other ? await canViewWorkflow(c.env.DB, u.id, other) : null;
   if (!other || !access?.copy) throw new WfError(404, "워크플로우를 찾을 수 없습니다.");
   const workflow = await createWorkflow(c.env.DB, u.id, {
-    name: `${other.name} (복사)`.slice(0, MAX_NAME), description: other.description, definition: other.definition,
+    name: `${other.name} (복사)`.slice(0, MAX_NAME), description: other.description, definition: redactShared(other).definition,
   });
   return c.json({ workflow }, 201);
 });

@@ -395,7 +395,7 @@ approvalApp.post("/notifications/read", async (c) => {
   const v = await requireWriter(c);
   const b = await readJson(c);
   const now = new Date().toISOString();
-  const ids = Array.isArray(b.ids) ? b.ids.filter((x): x is string => typeof x === "string").slice(0, 100) : null;
+  const ids = Array.isArray(b.ids) ? b.ids.filter((x): x is string => typeof x === "string").slice(0, 98) : null; // D1 바인드 상한 100 = now + user_id + id 98개
   if (ids && !ids.length) return c.json({ ok: true, updated: 0 });
   const r = ids
     ? await c.env.DB.prepare(`UPDATE notifications SET read_at = ? WHERE user_id = ? AND read_at IS NULL AND id IN (${ids.map(() => "?").join(",")})`)

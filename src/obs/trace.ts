@@ -63,6 +63,11 @@ export type TraceBlob = {
   prompt?: AskTrace["prompt"];
   rawResponse?: unknown;
   sources: AskTrace["sources"];
+  // XAI 보완 (2026-11-19): 설명서 원천. 없던 트레이스(이전 버전)는 필드 없음.
+  userRole?: string | null;
+  whatIfContext?: AskTrace["whatIfContext"];
+  decisiveSourceId?: string;
+  decision?: AskTrace["decision"];
 };
 
 export function buildTraceBlob(trace: AskTrace, recordedAt = new Date().toISOString()): TraceBlob {
@@ -87,6 +92,10 @@ export function buildTraceBlob(trace: AskTrace, recordedAt = new Date().toISOStr
     ...(trace.prompt ? { prompt: trace.prompt } : {}),
     ...(trace.rawResponse !== undefined ? { rawResponse: trace.rawResponse } : {}),
     sources: trace.sources,
+    ...(trace.userRole !== undefined ? { userRole: trace.userRole } : {}),
+    ...(trace.whatIfContext ? { whatIfContext: trace.whatIfContext } : {}),
+    ...(trace.decisiveSourceId ? { decisiveSourceId: trace.decisiveSourceId } : {}),
+    ...(trace.decision ? { decision: trace.decision } : {}),
   };
 }
 
@@ -104,7 +113,7 @@ function intOrNull(n: unknown): number | null {
 }
 
 /** 단계 이름 순서 — 같은 시작 오프셋일 때 파이프라인 순서로 정렬한다. */
-const SPAN_ORDER: Record<string, number> = { cache: 0, session: 1, router: 1, topic_guard: 1, embed: 2, vectorize: 3, gate: 4, d1_merge: 5, rerank: 5, llm: 6, session_save: 7 };
+const SPAN_ORDER: Record<string, number> = { cache: 0, session: 1, router: 1, topic_guard: 1, embed: 2, vectorize: 3, gate: 4, d1_merge: 5, rerank: 5, llm: 6, what_if: 6.5, session_save: 7 };
 
 export function sortSpans(spans: TraceSpan[]): TraceSpan[] {
   return [...spans].sort((a, b) => a.startMs - b.startMs || (SPAN_ORDER[a.name] ?? 99) - (SPAN_ORDER[b.name] ?? 99));

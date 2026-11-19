@@ -1,0 +1,458 @@
+// 캘린더 C2 (2026-11-17) — /api/calendar/* 화면. 계획서 calendar-plan.md 5장.
+// index.html 인라인 스크립트의 전역($, api, esc, escAttr, currentUser)을 쓴다. 마운트 지점: #calendarMount.
+// FullCalendar는 캘린더 탭을 처음 열 때만 동적으로 불러온다 (index.html에 <script>를 넣지 않는다).
+//
+// 시간대: 저장은 UTC, 화면은 항상 KST(Asia/Seoul, +9 고정). FullCalendar는 timeZone:'UTC'로 두고
+// KST 벽시계 값('YYYY-MM-DDTHH:MM:SS', 오프셋 없음)을 넘긴다 → 브라우저 시간대와 무관하게 KST로 보인다.
+// 아래 cal* 순수 함수(시간 변환)는 DOM 없이 검증할 수 있게 분리했다.
+const CAL_KST_MS = 9 * 3600_000;
+const CAL_CATS = { general: '일반', meeting: '회의', coaching: '코칭', training: '교육', deadline: '기한' };
+const CAL_REMIND_TIMED = [[null, '없음'], [15, '15분 전'], [30, '30분 전'], [60, '1시간 전'], [1440, '1일 전']];
+const CAL_REMIND_ALLDAY = [[null, '없음'], [-540, '당일 오전 9시'], [900, '전날 오전 9시']]; // 시작(00:00 KST) 기준 분
+const CAL_WEEKDAYS = ['일', '월', '화', '수', '목', '금', '토'];
+const CAL_LIB = '/vendor/fullcalendar/index.global.min.js';
+const CAL_LIB_KO = '/vendor/fullcalendar/ko.global.min.js';
+
+let calObj = null, calMode = 'month', calLibPromise = null, calMq = null, calSeq = 0;
+let calFilter = { mine: true, team: true };
+let calModalEl = null, calLastFocus = null, calSubHandled = null, calLoadErr = false;
+
+// ---------- 시간 변환 (순수 함수) ----------
+function calPad(n) { return String(n).padStart(2, '0'); }
+/** UTC epoch ms → KST 벽시계 'YYYY-MM-DDTHH:MM:SS' */
+function calMsToWall(ms) { return new Date(ms + CAL_KST_MS).toISOString().slice(0, 19); }
+/** UTC ISO('...Z') → KST 벽시계 */
+function calUtcToWall(iso) { return calMsToWall(Date.parse(iso)); }
+/** KST 날짜('YYYY-MM-DD') + 시각('HH:MM') → UTC ISO 'YYYY-MM-DDTHH:MM:SSZ' */
+function calWallToUtc(date, time) {
+  const ms = Date.parse(date + 'T' + (time || '00:00') + ':00Z');
+  if (Number.isNaN(ms)) return null;
+  return new Date(ms - CAL_KST_MS).toISOString().slice(0, 19) + 'Z';
+}
+/** FullCalendar가 돌려준 Date(timeZone:'UTC' → KST 벽시계를 UTC 필드에 담은 값) → 실제 UTC ISO */
+function calFcDateToUtc(d) { return new Date(d.getTime() - CAL_KST_MS).toISOString().slice(0, 19) + 'Z'; }
+function calAddDays(date, n) { return new Date(Date.parse(date + 'T00:00:00Z') + n * 86400_000).toISOString().slice(0, 10); }
+function calTodayKst() { return calMsToWall(Date.now()).slice(0, 10); }
+function calWeekday(date) { return CAL_WEEKDAYS[new Date(date + 'T00:00:00Z').getUTCDay()]; }
+function calKorDate(date) { const [y, m, d] = date.split('-').map(Number); return `${y}년 ${m}월 ${d}일 (${calWeekday(date)})`; }
+/** 서버 일정 → 사람이 읽는 KST 범위 문자열 */
+function calFmtRange(ev) {
+  if (ev.all_day) {
+    const last = calAddDays(ev.end_date, -1);
+    return last <= ev.start_date ? calKorDate(ev.start_date) + ' · 종일' : `${calKorDate(ev.start_date)} ~ ${calKorDate(last)} · 종일`;
+  }
+  const s = calUtcToWall(ev.start_at), e = calUtcToWall(ev.end_at);
+  const sd = s.slice(0, 10), ed = e.slice(0, 10);
+  return sd === ed
+    ? `${calKorDate(sd)} ${s.slice(11, 16)} ~ ${e.slice(11, 16)}`
+    : `${calKorDate(sd)} ${s.slice(11, 16)} ~ ${calKorDate(ed)} ${e.slice(11, 16)}`;
+}
+/** 서버 일정 → FullCalendar 이벤트 (KST 벽시계 값) */
+function calToFcEvent(ev) {
+  const base = { id: ev.id, title: ev.title, extendedProps: { raw: ev } };
+  return ev.all_day
+    ? Object.assign(base, { allDay: true, start: ev.start_date, end: ev.end_date })
+    : Object.assign(base, { allDay: false, start: calUtcToWall(ev.start_at), end: calUtcToWall(ev.end_at) });
+}
+function calEventClasses(ev) {
+  const c = ['cal-ev', ev.visibility === 'team' ? 'cal-ev-team' : 'cal-ev-private'];
+  if (ev.category === 'coaching') c.push('cal-ev-coaching');
+  return c;
+}
+function calTitleOf(view) {
+  const s = view.currentStart, e = new Date(view.currentEnd.getTime() - 86400_000);
+  const y = s.getUTCFullYear(), m = s.getUTCMonth() + 1;
+  if (view.type === 'dayGridMonth') return `${y}년 ${m}월`;
+  const em = e.getUTCMonth() + 1;
+  if (s.getUTCFullYear() !== e.getUTCFullYear()) return `${y}년 ${m}월 ${s.getUTCDate()}일 ~ ${e.getUTCFullYear()}년 ${em}월 ${e.getUTCDate()}일`;
+  return m === em ? `${y}년 ${m}월 ${s.getUTCDate()}일 ~ ${e.getUTCDate()}일` : `${y}년 ${m}월 ${s.getUTCDate()}일 ~ ${em}월 ${e.getUTCDate()}일`;
+}
+
+// ---------- FullCalendar 지연 로딩 ----------
+function calLoadScript(src) {
+  return new Promise((resolve, reject) => {
+    const s = document.createElement('script');
+    s.src = src; s.onload = () => resolve(); s.onerror = () => reject(new Error('불러오지 못했습니다: ' + src));
+    document.head.appendChild(s);
+  });
+}
+function calLoadLib() {
+  if (window.FullCalendar && window.FullCalendar.Calendar) return Promise.resolve();
+  if (!calLibPromise) {
+    calLibPromise = calLoadScript(CAL_LIB).then(() => calLoadScript(CAL_LIB_KO)).catch((e) => { calLibPromise = null; throw e; });
+  }
+  return calLibPromise;
+}
+
+// ---------- 탭 진입·이탈 ----------
+function calNarrow() { return !!(window.matchMedia && window.matchMedia('(max-width: 720px)').matches); }
+function calViewName() { return calMode === 'month' ? 'dayGridMonth' : (calNarrow() ? 'listWeek' : 'timeGridWeek'); }
+
+async function calendarOpen(sub) {
+  const root = $('calendarMount');
+  if (!root) return;
+  if (!root.dataset.ready) {
+    root.innerHTML =
+      '<div class="card cal-card">' +
+      '<div class="cal-toolbar" role="toolbar" aria-label="캘린더 도구">' +
+      '<div class="cal-nav"><button type="button" class="secondary" id="calToday">오늘</button>' +
+      '<button type="button" class="secondary cal-arrow" id="calPrev" aria-label="이전">‹</button>' +
+      '<button type="button" class="secondary cal-arrow" id="calNext" aria-label="다음">›</button>' +
+      '<h2 class="cal-title" id="calTitle" aria-live="polite"></h2></div>' +
+      '<div class="cal-right"><div class="cal-seg" role="group" aria-label="보기">' +
+      '<button type="button" id="calViewMonth" aria-pressed="true">월</button>' +
+      '<button type="button" id="calViewWeek" aria-pressed="false">주</button></div>' +
+      '<button type="button" class="primary cal-add" id="calAdd">+ 일정 추가</button></div></div>' +
+      '<div class="cal-filters"><label><input type="checkbox" id="calFMine" checked /> 내 일정</label>' +
+      '<label><input type="checkbox" id="calFTeam" checked /> 팀 일정</label>' +
+      '<span class="cal-legend small"><i class="cal-dot cal-dot-private"></i>내 일정 <i class="cal-dot cal-dot-team"></i>팀 공유(<b>팀</b> 배지) <i class="cal-dot cal-dot-coaching"></i>코칭(보라 띠)</span></div>' +
+      '<div class="cal-msg" id="calMsg" role="status"></div>' +
+      '<div id="calGrid" class="cal-grid"></div></div>';
+    root.dataset.ready = '1';
+    $('calToday').onclick = () => calObj && calObj.today();
+    $('calPrev').onclick = () => calObj && calObj.prev();
+    $('calNext').onclick = () => calObj && calObj.next();
+    $('calViewMonth').onclick = () => calSetMode('month');
+    $('calViewWeek').onclick = () => calSetMode('week');
+    $('calAdd').onclick = () => calShowForm(null, { date: calTodayKst(), time: '09:00' });
+    $('calFMine').onchange = (e) => { calFilter.mine = e.target.checked; calRefetch(); };
+    $('calFTeam').onchange = (e) => { calFilter.team = e.target.checked; calRefetch(); };
+  }
+  const seq = ++calSeq;
+  if (!calObj) {
+    calMsg('달력을 불러오는 중…');
+    try { await calLoadLib(); } catch (e) { if (seq === calSeq) calMsg('달력 구성요소를 불러오지 못했습니다. 새로고침 후 다시 시도하세요.', true); return; }
+    if (seq !== calSeq) return; // 그 사이 탭을 떠났거나 다시 열었다
+    calMsg('');
+    calInit();
+  } else {
+    calObj.updateSize();
+    calRefetch();
+  }
+  if (sub) { if (calSubHandled !== sub || !calModalEl) { calSubHandled = sub; calOpenById(sub); } } else calSubHandled = null;
+}
+
+function calendarLeave() {
+  calSeq++; // 늦게 도착한 로딩·응답이 화면을 건드리지 않게
+  calCloseModal(true);
+}
+
+function calMsg(text, isErr) {
+  const el = $('calMsg');
+  if (!el) return;
+  el.textContent = text || '';
+  el.className = 'cal-msg' + (isErr ? ' err' : '');
+}
+
+// ---------- FullCalendar 생성 ----------
+function calInit() {
+  const timeFmt = { hour: '2-digit', minute: '2-digit', hour12: false };
+  calObj = new FullCalendar.Calendar($('calGrid'), {
+    initialView: calViewName(),
+    locale: 'ko',
+    timeZone: 'UTC', // 값 자체가 KST 벽시계다 (calToFcEvent). 브라우저 시간대의 영향을 받지 않는다.
+    now: () => new Date(Date.now() + CAL_KST_MS), // "오늘"·현재 시각선도 KST 기준
+    headerToolbar: false,
+    height: 'auto',
+    firstDay: 0,
+    fixedWeekCount: false,
+    dayMaxEvents: 3,
+    eventDisplay: 'block',
+    nowIndicator: true,
+    allDayText: '종일',
+    slotMinTime: '00:00:00', slotMaxTime: '24:00:00', scrollTime: '07:00:00', slotDuration: '00:30:00',
+    slotLabelFormat: timeFmt, eventTimeFormat: timeFmt,
+    dayCellContent: (a) => a.dayNumberText.replace('일', ''),
+    moreLinkContent: (a) => '+' + a.num + '개',
+    noEventsContent: () => '이 기간에 일정이 없습니다',
+    events: (info, ok, fail) => calFetchRange(info).then(ok, fail),
+    eventClassNames: (a) => calEventClasses(a.event.extendedProps.raw),
+    eventContent: calEventContent,
+    eventClick: (a) => { a.jsEvent.preventDefault(); calShowDetail(a.event.extendedProps.raw); },
+    dateClick: (a) => calShowForm(null, a.allDay ? { date: a.dateStr.slice(0, 10), allDay: true } : { date: a.dateStr.slice(0, 10), time: a.dateStr.slice(11, 16) }),
+    datesSet: (a) => { $('calTitle').textContent = calTitleOf(a.view); },
+  });
+  calObj.render();
+  calApplyHeight();
+  if (window.matchMedia && !calMq) {
+    calMq = window.matchMedia('(max-width: 720px)');
+    const onChange = () => { if (calObj && calMode === 'week') calObj.changeView(calViewName()); calApplyHeight(); };
+    if (calMq.addEventListener) calMq.addEventListener('change', onChange); else if (calMq.addListener) calMq.addListener(onChange);
+  }
+}
+
+/** 주 보기(시간 격자)는 07:00~21:00이 한눈에 보이는 고정 높이, 나머지는 내용 높이. */
+function calApplyHeight() {
+  if (!calObj) return;
+  calObj.setOption('height', calObj.view.type === 'timeGridWeek' ? 760 : 'auto');
+}
+
+function calSetMode(mode) {
+  calMode = mode === 'week' ? 'week' : 'month';
+  $('calViewMonth').setAttribute('aria-pressed', calMode === 'month' ? 'true' : 'false');
+  $('calViewWeek').setAttribute('aria-pressed', calMode === 'week' ? 'true' : 'false');
+  if (calObj) { calObj.changeView(calViewName()); calApplyHeight(); }
+}
+
+function calRefetch() { if (calObj) calObj.refetchEvents(); }
+
+async function calFetchRange(info) {
+  const q = `from=${encodeURIComponent(calFcDateToUtc(info.start))}&to=${encodeURIComponent(calFcDateToUtc(info.end))}`;
+  let j;
+  try { j = await api('/api/calendar/events?' + q); } catch { j = { ok: false, error: '네트워크 오류' }; }
+  if (!j.ok) { calLoadErr = true; calMsg('일정을 불러오지 못했습니다. ' + (j.error || ''), true); throw new Error(j.error || 'load failed'); }
+  if (calLoadErr) { calLoadErr = false; calMsg(''); } // 저장·삭제·충돌 안내는 남기고 "불러오기 실패"만 지운다
+  const uid = currentUser && currentUser.id;
+  return (j.events || [])
+    .filter((e) => (e.visibility === 'team' ? calFilter.team : (e.owner_id === uid ? calFilter.mine : false)))
+    .map(calToFcEvent);
+}
+
+/** 이벤트 모양: 팀 배지 + 시각 + 제목. 제목은 textContent로만 넣는다 (스크립트 주입 방지). */
+function calEventContent(arg) {
+  const ev = arg.event.extendedProps.raw;
+  const wrap = document.createElement('div');
+  wrap.className = 'cal-ev-inner';
+  if (ev.visibility === 'team') {
+    const b = document.createElement('span');
+    b.className = 'cal-badge'; b.textContent = '팀';
+    wrap.appendChild(b);
+  }
+  if (arg.timeText && !arg.event.allDay && !String(arg.view.type).startsWith('list')) {
+    const t = document.createElement('span');
+    t.className = 'cal-ev-time'; t.textContent = arg.timeText;
+    wrap.appendChild(t);
+  }
+  const title = document.createElement('span');
+  title.className = 'cal-ev-title'; title.textContent = ev.title;
+  wrap.appendChild(title);
+  return { domNodes: [wrap] };
+}
+
+// ---------- 모달 ----------
+function calOpenModal(html, labelId) {
+  calCloseModal(true);
+  calLastFocus = document.activeElement;
+  const wrap = document.createElement('div');
+  wrap.className = 'cal-modal-back';
+  wrap.innerHTML = `<div class="cal-modal" role="dialog" aria-modal="true" aria-labelledby="${labelId}">${html}</div>`;
+  wrap.addEventListener('mousedown', (e) => { if (e.target === wrap) calCloseModal(); });
+  wrap.addEventListener('keydown', (e) => { if (e.key === 'Escape') { e.stopPropagation(); calCloseModal(); } });
+  $('calendarMount').appendChild(wrap);
+  calModalEl = wrap;
+  const first = wrap.querySelector('input:not([type=hidden]),select,textarea,button');
+  if (first) first.focus();
+  return wrap;
+}
+function calCloseModal(silent) {
+  if (calModalEl) { calModalEl.remove(); calModalEl = null; }
+  if (!silent && calLastFocus && calLastFocus.focus) { try { calLastFocus.focus(); } catch { /* 사라진 요소 */ } }
+}
+function calRemindLabel(ev) {
+  if (ev.remind_minutes === null || ev.remind_minutes === undefined) return '없음';
+  const list = ev.all_day ? CAL_REMIND_ALLDAY : CAL_REMIND_TIMED;
+  const hit = list.find((r) => r[0] === ev.remind_minutes);
+  return hit ? hit[1] : ev.remind_minutes + '분 전';
+}
+
+// ---------- 상세 ----------
+function calShowDetail(ev) {
+  const isMine = currentUser && ev.owner_id === currentUser.id;
+  const team = ev.visibility === 'team';
+  const row = (k, v) => (v ? `<div class="cal-row"><dt>${esc(k)}</dt><dd>${v}</dd></div>` : '');
+  const html =
+    `<h2 id="calDetailTitle" class="cal-detail-title">${team ? '<span class="cal-badge">팀</span> ' : ''}${esc(ev.title)}</h2>` +
+    '<dl class="cal-dl">' +
+    row('일시', esc(calFmtRange(ev)) + ' <span class="small muted">(한국 시간)</span>') +
+    row('공개 범위', team ? '팀 공유 (전원이 봅니다)' : '나만 보기') +
+    row('분류', esc(CAL_CATS[ev.category] || ev.category)) +
+    row('장소', ev.location ? esc(ev.location) : '') +
+    row('메모', ev.description ? `<div class="cal-pre">${esc(ev.description)}</div>` : '') +
+    row('알림', esc(calRemindLabel(ev))) +
+    (team && !isMine ? row('작성자', esc(ev.owner_name || '알 수 없음')) : '') +
+    '</dl>' +
+    '<div class="cal-modal-btns">' +
+    (ev.editable ? '<button type="button" class="primary" data-act="edit">수정</button><button type="button" class="secondary cal-danger" data-act="delete">삭제</button>' : '') +
+    '<button type="button" class="secondary" data-act="close">닫기</button></div>' +
+    (!ev.editable && team ? '<p class="small muted">다른 사람이 만든 팀 일정은 수정할 수 없습니다.</p>' : '');
+  const m = calOpenModal(html, 'calDetailTitle');
+  m.querySelector('[data-act=close]').onclick = () => calCloseModal();
+  const ed = m.querySelector('[data-act=edit]');
+  if (ed) ed.onclick = () => calShowForm(ev);
+  const del = m.querySelector('[data-act=delete]');
+  if (del) del.onclick = () => calDelete(ev);
+}
+
+async function calOpenById(id) {
+  const seq = calSeq;
+  let j;
+  try { j = await api('/api/calendar/events/' + encodeURIComponent(id)); } catch { j = { ok: false, error: '네트워크 오류' }; }
+  if (seq !== calSeq) return;
+  if (!j.ok) { calMsg('일정을 열지 못했습니다. ' + (j.error || ''), true); return; }
+  const ev = j.event;
+  if (calObj) calObj.gotoDate(ev.all_day ? ev.start_date : calUtcToWall(ev.start_at).slice(0, 10));
+  calShowDetail(ev);
+}
+
+// ---------- 추가·수정 폼 ----------
+function calTimeOpts(sel) {
+  let h = '';
+  for (let m = 0; m < 1440; m += 15) {
+    const v = calPad(Math.floor(m / 60)) + ':' + calPad(m % 60);
+    h += `<option value="${v}"${v === sel ? ' selected' : ''}>${v}</option>`;
+  }
+  return h;
+}
+function calRemindOpts(allDay, sel) {
+  return (allDay ? CAL_REMIND_ALLDAY : CAL_REMIND_TIMED).map((r) =>
+    `<option value="${r[0] === null ? '' : r[0]}"${r[0] === sel ? ' selected' : ''}>${esc(r[1])}</option>`).join('');
+}
+/** 'HH:MM'에 분을 더한 (날짜, 시각). 15분 단위로 맞춘다. */
+function calShift(date, time, addMin) {
+  const ms = Date.parse(date + 'T' + time + ':00Z') + addMin * 60_000;
+  const w = new Date(ms).toISOString();
+  return { date: w.slice(0, 10), time: w.slice(11, 16) };
+}
+
+/** ev가 있으면 수정, 없으면 pre({date, time?, allDay?})로 새 일정. */
+function calShowForm(ev, pre) {
+  const isNew = !ev;
+  const own = isNew || (currentUser && ev.owner_id === currentUser.id);
+  let v;
+  if (ev) {
+    const s = ev.all_day ? { date: ev.start_date, time: '09:00' } : { date: calUtcToWall(ev.start_at).slice(0, 10), time: calUtcToWall(ev.start_at).slice(11, 16) };
+    const e = ev.all_day ? { date: calAddDays(ev.end_date, -1), time: '10:00' } : { date: calUtcToWall(ev.end_at).slice(0, 10), time: calUtcToWall(ev.end_at).slice(11, 16) };
+    v = { title: ev.title, all_day: ev.all_day, sd: s.date, st: s.time, ed: e.date, et: e.time, visibility: ev.visibility, category: ev.category, location: ev.location || '', description: ev.description || '', remind: ev.remind_minutes };
+  } else {
+    const st = pre.time || '09:00';
+    const e = calShift(pre.date, st, 60);
+    v = { title: '', all_day: !!pre.allDay, sd: pre.date, st, ed: pre.allDay ? pre.date : e.date, et: e.time, visibility: 'private', category: 'general', location: '', description: '', remind: null };
+  }
+  const html =
+    `<h2 id="calFormTitle" class="cal-detail-title">${isNew ? '일정 추가' : '일정 수정'}</h2>` +
+    '<form id="calForm" class="cal-form" novalidate>' +
+    `<label>제목<input id="calFTitle" type="text" maxlength="200" required value="${escAttr(v.title)}" /></label>` +
+    `<label class="cal-check"><input id="calFAllDay" type="checkbox"${v.all_day ? ' checked' : ''} /> 종일</label>` +
+    '<div class="cal-when">' +
+    `<label>시작<span class="cal-pair"><input id="calFSD" type="date" required value="${escAttr(v.sd)}" /><select id="calFST" aria-label="시작 시각">${calTimeOpts(v.st)}</select></span></label>` +
+    `<label>종료<span class="cal-pair"><input id="calFED" type="date" required value="${escAttr(v.ed)}" /><select id="calFET" aria-label="종료 시각">${calTimeOpts(v.et)}</select></span></label>` +
+    '</div><p class="small muted cal-tz">한국 시간(KST) 기준입니다.</p>' +
+    `<label>공개 범위<select id="calFVis"${own ? '' : ' disabled'}>` +
+    `<option value="private"${v.visibility === 'private' ? ' selected' : ''}>나만 보기</option>` +
+    `<option value="team"${v.visibility === 'team' ? ' selected' : ''}>팀 공유 (전원이 봅니다)</option></select></label>` +
+    '<p class="cal-warn" id="calFTeamNote" hidden>팀 공유 일정은 모든 사용자의 달력에 표시됩니다. 개인 정보나 민감한 내용은 넣지 마세요.</p>' +
+    `<label>분류<select id="calFCat">${Object.keys(CAL_CATS).map((k) => `<option value="${k}"${k === v.category ? ' selected' : ''}>${esc(CAL_CATS[k])}</option>`).join('')}</select></label>` +
+    `<label>장소 (선택)<input id="calFLoc" type="text" maxlength="200" value="${escAttr(v.location)}" /></label>` +
+    `<label>메모 (선택)<textarea id="calFDesc" rows="3" maxlength="2000">${esc(v.description)}</textarea></label>` +
+    `<label>알림<select id="calFRemind">${calRemindOpts(v.all_day, v.remind)}</select></label>` +
+    '<div class="cal-msg err" id="calFErr" role="alert" hidden></div>' +
+    '<div class="cal-modal-btns"><button type="submit" class="primary" id="calFSave">저장</button>' +
+    '<button type="button" class="secondary" data-act="cancel">취소</button>' +
+    (isNew ? '' : '<button type="button" class="secondary cal-danger" data-act="delete">삭제</button>') + '</div></form>';
+  const m = calOpenModal(html, 'calFormTitle');
+  const g = (id) => m.querySelector('#' + id);
+  const syncAllDay = () => {
+    const ad = g('calFAllDay').checked;
+    g('calFST').hidden = ad; g('calFET').hidden = ad;
+    const cur = g('calFRemind').value;
+    g('calFRemind').innerHTML = calRemindOpts(ad, cur === '' ? null : Number(cur));
+  };
+  const syncTeam = () => { g('calFTeamNote').hidden = g('calFVis').value !== 'team'; };
+  // 시작을 바꾸면 종료도 같은 간격으로 따라간다.
+  let prevStart = Date.parse(g('calFSD').value + 'T' + g('calFST').value + ':00Z');
+  const onStart = () => {
+    const cur = Date.parse(g('calFSD').value + 'T' + g('calFST').value + ':00Z');
+    if (Number.isNaN(cur) || Number.isNaN(prevStart)) { prevStart = cur; return; }
+    const ee = Date.parse(g('calFED').value + 'T' + g('calFET').value + ':00Z');
+    if (!Number.isNaN(ee)) {
+      const t = new Date(ee + (cur - prevStart)).toISOString();
+      g('calFED').value = t.slice(0, 10);
+      g('calFET').value = t.slice(11, 16);
+    }
+    prevStart = cur;
+  };
+  g('calFAllDay').onchange = syncAllDay;
+  g('calFVis').onchange = syncTeam;
+  g('calFSD').onchange = onStart; g('calFST').onchange = onStart;
+  syncAllDay(); syncTeam();
+  g('calFRemind').value = v.remind === null || v.remind === undefined ? '' : String(v.remind);
+  m.querySelector('[data-act=cancel]').onclick = () => calCloseModal();
+  const del = m.querySelector('[data-act=delete]');
+  if (del) del.onclick = () => calDelete(ev);
+  g('calForm').addEventListener('submit', (e) => { e.preventDefault(); calSubmit(ev, own, m); });
+}
+
+/** 폼 값 → API 본문. 검증 실패면 { error }. */
+function calBuildPayload(f) {
+  const title = f.title.trim();
+  if (!title) return { error: '제목을 입력하세요.' };
+  if (title.length > 200) return { error: '제목은 200자 이하여야 합니다.' };
+  if (!f.sd || !f.ed) return { error: '시작과 종료 날짜를 입력하세요.' };
+  let start_at, end_at;
+  if (f.all_day) {
+    if (f.ed < f.sd) return { error: '종료일은 시작일보다 빠를 수 없습니다.' };
+    start_at = calWallToUtc(f.sd, '00:00');
+    end_at = calWallToUtc(calAddDays(f.ed, 1), '00:00'); // 서버는 종일의 끝을 "다음 날 00:00"으로 둔다
+  } else {
+    start_at = calWallToUtc(f.sd, f.st);
+    end_at = calWallToUtc(f.ed, f.et);
+  }
+  if (!start_at || !end_at) return { error: '날짜 형식이 올바르지 않습니다.' };
+  if (end_at <= start_at) return { error: '종료는 시작보다 뒤여야 합니다.' };
+  if (Date.parse(end_at) - Date.parse(start_at) > 31 * 86400_000) return { error: '일정은 최대 31일까지입니다.' };
+  return {
+    body: {
+      title, all_day: !!f.all_day, start_at, end_at, category: f.category,
+      location: f.location.trim() || null, description: f.description.trim() || null,
+      remind_minutes: f.remind === '' || f.remind === null ? null : Number(f.remind),
+    },
+  };
+}
+
+async function calSubmit(ev, own, m) {
+  const g = (id) => m.querySelector('#' + id);
+  const errBox = g('calFErr');
+  const showErr = (t) => { errBox.textContent = t; errBox.hidden = false; };
+  errBox.hidden = true;
+  const r = calBuildPayload({
+    title: g('calFTitle').value, all_day: g('calFAllDay').checked, sd: g('calFSD').value, st: g('calFST').value,
+    ed: g('calFED').value, et: g('calFET').value, category: g('calFCat').value, location: g('calFLoc').value,
+    description: g('calFDesc').value, remind: g('calFRemind').value,
+  });
+  if (r.error) { showErr(r.error); return; }
+  const body = r.body;
+  if (own) body.visibility = g('calFVis').value; // 남의 팀 일정을 고치는 hr_admin은 공개 범위를 못 바꾼다 (서버도 403)
+  if (body.visibility === 'team' && (!ev || ev.visibility !== 'team')) {
+    if (!confirm('이 일정은 모든 사용자의 달력에 표시됩니다. 저장할까요?')) return;
+  }
+  const save = g('calFSave');
+  save.disabled = true;
+  let j;
+  try {
+    j = ev
+      ? await api('/api/calendar/events/' + encodeURIComponent(ev.id), { method: 'PATCH', body: JSON.stringify(Object.assign({ version: ev.version }, body)) })
+      : await api('/api/calendar/events', { method: 'POST', body: JSON.stringify(body) });
+  } catch { j = { ok: false, error: '네트워크 오류' }; }
+  save.disabled = false;
+  if (!j.ok) {
+    if (j.error && /다른 곳에서 먼저 수정/.test(j.error)) {
+      calCloseModal(true); calMsg('다른 곳에서 먼저 수정됐습니다. 새로 불러옵니다.', true); calRefetch(); return;
+    }
+    showErr(j.error || '저장하지 못했습니다.');
+    return;
+  }
+  calCloseModal();
+  calMsg(ev ? '일정을 저장했습니다.' : '일정을 추가했습니다.');
+  calRefetch();
+}
+
+async function calDelete(ev) {
+  const ok = confirm(ev.visibility === 'team' ? `"${ev.title}" 팀 일정을 삭제할까요? 전원의 달력에서 사라집니다.` : `"${ev.title}" 일정을 삭제할까요?`);
+  if (!ok) return;
+  let j;
+  try { j = await api('/api/calendar/events/' + encodeURIComponent(ev.id), { method: 'DELETE' }); } catch { j = { ok: false, error: '네트워크 오류' }; }
+  if (!j.ok) { calMsg('삭제하지 못했습니다. ' + (j.error || ''), true); calCloseModal(true); calRefetch(); return; }
+  calCloseModal();
+  calMsg('일정을 삭제했습니다.');
+  calRefetch();
+}

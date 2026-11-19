@@ -227,6 +227,9 @@ authApp.post("/auth/change-password", async (c) => {
   const next = typeof body.newPassword === "string" ? body.newPassword : "";
   if (!passwordOk(next)) return fail(c, 400, "새 비밀번호는 12~128자로 입력하세요.");
   if (!current || current.length > 128) return fail(c, 401, "현재 비밀번호를 확인하세요.");
+  // 전체 점검(2026-11-18) P2: 세션만 있으면 현재 비밀번호를 무제한으로 추측할 수 있었다. 로그인과 같은 계수기(15분 8회)를 쓴다.
+  const chpwKey = await loginAttemptKey("chpw:" + user.id, "self");
+  if (await loginBlocked(c.env, chpwKey)) return fail(c, 429, "시도가 많습니다. 15분 후 다시 시도해 주세요.");
   const account = await c.env.DB.prepare("SELECT * FROM users WHERE id = ? AND status = 'active'").bind(user.id).first<{
     password_hash: string | null; password_salt: string | null;
   }>();
@@ -237,8 +240,10 @@ authApp.post("/auth/change-password", async (c) => {
     return fail(c, 503, "로그인 서비스를 사용할 수 없습니다. 잠시 후 다시 시도하세요.");
   }
   if (!account || !account.password_hash || !timingSafeEqual(currentDigest, account.password_hash)) {
+    await recordLoginFailure(c.env, chpwKey);
     return fail(c, 401, "현재 비밀번호가 올바르지 않습니다.");
   }
+  await clearLoginFailures(c.env, chpwKey);
   if (current === next) return fail(c, 400, "현재 비밀번호와 다른 새 비밀번호를 입력하세요.");
   const salt = randomToken();
   const digest = await hashPassword(next, salt, c.env.PASSWORD_PEPPER);
@@ -349,6 +354,12 @@ authApp.post("/admin/users/:id/reset", async (c) => {
   }>();
   if (!target) return fail(c, 404, "계정을 찾을 수 없습니다.");
   if (target.status === "inactive") return fail(c, 403, "비활성 계정은 초기화할 수 없습니다.");
+  // 전체 점검(2026-11-18) P1: "초기화"인데 옛 비밀번호가 그대로 살아 있었다 (세션만 끊김 — 유출된 비밀번호로 계속 로그인 가능).
+  // 옛 해시를 지운다: 로그인은 해시가 없으면 거부하고, 설정 링크로 새 비밀번호를 정하면 다시 채워진다.
+  // 단, 관리자가 자기 계정을 초기화한 경우는 지우지 않는다 (링크를 잃으면 스스로 잠기는 것을 막는다 — 기존 동작 유지).
+  if (admin === "secret" || admin.id !== id) {
+    await c.env.DB.prepare("UPDATE users SET password_hash = NULL, password_salt = NULL WHERE id = ?").bind(id).run();
+  }
   await revokeSessions(c.env, id);
   const issuedBy = admin === "secret" ? "admin-secret" : admin.id;
   const setupPath = await issueSetupLink(c.env, id, issuedBy);

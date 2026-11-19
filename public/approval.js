@@ -300,6 +300,8 @@ async function ntfToggle(ev) {
 async function ntfClick(id, link) {
   $('ntfPanel').classList.remove('open');
   api(`${APV}/notifications/read`, { method: 'POST', body: JSON.stringify({ ids: [id] }) }).then(apvHome).catch(() => {});
+  // 화상회의 V1 (2026-11-19): 통화 알림 링크(/meet?m=…)는 해시 탭이 아니라 별도 페이지 — 새 탭으로 연다.
+  if (/^\/meet(\?|$)/.test(String(link || ''))) { const w = window.open(String(link), '_blank'); if (w) { try { w.opener = null; } catch (e) { /* 무시 */ } } else location.href = String(link); return; }
   const h = String(link || '').replace(/^.*#/, '');
   if (!h) return;
   if (location.hash === '#' + h) switchTab(h, true); else location.hash = h;

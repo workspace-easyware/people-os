@@ -66,7 +66,7 @@
     <div class="pt-card"><h3>답에는 항상 출처</h3><p>규정 검색은 문서명 › 조문 › 발췌를 함께 보여 줍니다. 근거가 기준에 못 미치면 모델을 부르지 않고 "근거를 찾지 못했다"고 답합니다.</p></div>
     <div class="pt-card"><h3>모르는 것이 자산이 된다</h3><p>답하지 못한 질문은 답변 대기 목록에 쌓입니다. 담당자가 답을 게시하면 그 답이 색인되고, 시스템이 같은 질문을 다시 돌려 근거로 잡히는지 검증합니다.</p></div>
     <div class="pt-card"><h3>역할마다 다른 결과</h3><p>코치와 코칭 대상은 같은 기록에서 서로 다른 도움을 받습니다.</p></div>
-    <div class="pt-card"><h3>AI를 감독할 수 있다</h3><p>질문 하나하나의 처리 과정이 기록되고, 매일 새벽 골든 질문 세트로 자동 평가가 돕니다.</p></div>
+    <div class="pt-card"><h3>AI를 감독할 수 있다</h3><p>질문 하나하나의 처리 과정이 기록되고, 매일 새벽 실제 질문 표본을 판정하고, 골든 질문 세트 평가는 설정이 바뀌었거나 7일이 지났을 때 다시 돕니다.</p></div>
     <div class="pt-card"><h3>운영할 서버가 없다</h3><p>한 사람이 만들고 운영할 수 있는 구조입니다.</p></div>
   </div>
   <p class="pt-src">근거: 큐 파이프라인 <code>src/index.ts</code> (queue 핸들러), 근거 하한·게이트 <code>src/ask-pipeline.ts</code>, 게시 검증 <code>src/index.ts</code>, 평가 크론 <code>src/index.ts</code> (scheduled)</p>
@@ -89,7 +89,7 @@
   <div class="pt-tags"><span class="badge">R2</span><span class="badge">D1</span><span class="badge">Workers AI</span><span class="badge">Vectorize</span></div>
 
   <h3>장면 4 — 단계를 이어 붙여 업무 흐름을 만든다 (누구나)</h3>
-  <p>워크플로우 메뉴에서 "전사 → 요약 → 메일 초안 → 메일 발송" 같은 단계를 이어 붙입니다. 실행하면 큐가 단계를 차례로 처리하고, 밖으로 나가는 <code>send_email</code> 단계에서 멈춰 승인을 기다립니다. 화면에 알림 토스트가 뜨고, 사람이 승인하면 그때 메일이 나갑니다.</p>
+  <p>워크플로우 메뉴에서 "전사본 가져오기 → 요약 → 메일 초안 → 메일 발송" 같은 단계를 이어 붙입니다. 실행하면 큐가 단계를 차례로 처리하고, 밖으로 나가는 <code>send_email</code> 단계에서 멈춰 승인을 기다립니다. 화면에 알림 토스트가 뜨고, 사람이 승인하면 그때 메일이 나갑니다.</p>
   <div class="pt-flow"><span>워크플로우 실행</span><em>큐</em><span>단계 처리</span><span>승인 대기</span><span>알림 토스트</span><span>사람이 승인</span><span>발송·완료</span></div>
   <div class="pt-tags"><span class="badge">Queues</span><span class="badge">Durable Objects</span><span class="badge">Cron Triggers</span><span class="badge">D1</span><span class="badge">Workers AI</span></div>
 </article>
@@ -105,7 +105,7 @@
         <tr><td>같은 질문에 반복해 답하지 않는다</td><td>한 번 게시한 답이 다음 질문의 근거가 된다</td><td>답변 대기 질문 수와 해결 수 (<code>knowledge_gaps</code>)</td></tr>
         <tr><td>규정 답의 근거를 바로 확인한다</td><td>답마다 조문 출처가 붙는다</td><td>질문별 근거 채택 기록 (<code>trace_retrievals</code>)</td></tr>
         <tr><td>코칭이 세션 사이에 이어진다</td><td>리플렉션과 액션 플랜이 남고 검색된다</td><td>리플렉션 수, 액션에서 만든 할 일 수</td></tr>
-        <tr><td>AI 답의 품질 변화를 놓치지 않는다</td><td>매일 자동 평가, 회귀는 개선 목록에 뜬다</td><td>평가 실행별 통과율 추이 (<code>eval_runs</code>)</td></tr>
+        <tr><td>AI 답의 품질 변화를 놓치지 않는다</td><td>새벽 자동 평가(표본 판정은 매일, 골든셋은 설정 변경·7일 주기), 회귀는 개선 목록에 뜬다</td><td>평가 실행별 통과율 추이 (<code>eval_runs</code>)</td></tr>
         <tr><td>운영 부담이 작다</td><td>서버·컨테이너·DB 서버가 없다</td><td>배포 = <code>wrangler deploy</code> 한 번</td></tr>
       </tbody>
     </table>
@@ -159,9 +159,9 @@
     <table class="pt-table">
       <thead><tr><th>Durable Object</th><th>맡은 일</th><th>쓴 기능</th></tr></thead>
       <tbody>
-        <tr><td><code>AgentSession</code></td><td>세션별 대화 기억(최근 20턴)</td><td>질문(RAG)의 후속 질문 맥락</td></tr>
+        <tr><td><code>AgentSession</code></td><td>세션별 대화 기억(최근 메시지 20개 = 질문·답 10쌍)</td><td>질문(RAG)의 후속 질문 맥락</td></tr>
         <tr><td><code>WorkflowAgent</code></td><td>워크플로우 에이전트 루프의 상태 (생각 → 도구 호출 → 관찰)</td><td>에이전트 노드</td></tr>
-        <tr><td><code>ChatRoom</code></td><td>채팅방 하나 = DO 하나. 메시지 저장·실시간 전달, 접속 로비(누가 접속 중인지)</td><td>채팅 (WebSocket Hibernation)</td></tr>
+        <tr><td><code>ChatRoom</code></td><td>채팅방 하나 = DO 하나. 메시지 저장(방마다 최근 200개)·실시간 전달, 접속 로비(누가 접속 중인지)</td><td>채팅 (WebSocket Hibernation)</td></tr>
         <tr><td><code>NotificationHub</code></td><td>사용자별 실시간 알림 푸시</td><td>승인 대기 토스트</td></tr>
         <tr><td><code>RateLimiter</code></td><td>질문 횟수 토큰 버킷(용량 20, 3초당 1개 보충), Alarm으로 정리</td><td>질문 레이트 리밋</td></tr>
       </tbody>
@@ -172,7 +172,7 @@
   <div class="pt-flow"><span>KV 캐시 확인</span><span>Durable Objects 직전 대화</span><span>Vectorize 가까운 조문</span><span>D1 키워드·원문</span><span>답 생성</span><span>D1 질문 기록</span><span>R2 프롬프트·응답 원문</span><span>KV 캐시 저장</span></div>
   <p><strong>저장소끼리 서로를 받쳐 줍니다.</strong> Vectorize가 응답하지 않으면 D1 텍스트 검색으로 답합니다. KV가 실패하면 D1 캐시 테이블을, Durable Objects가 실패하면 D1 세션 테이블을 씁니다. 레이트 리미터 DO가 1초 안에 응답하지 않으면 KV 카운터로 내려가고, 그것도 안 되면 질문을 막지 않습니다(fail-open). 응답에는 어느 경로로 답했는지(<code>engine</code>, <code>searchEngine</code>, <code>sessionVia</code>)가 표시됩니다.</p>
   <p><strong>개인 자료는 저장 단계부터 나뉩니다.</strong> 문서·녹음·메일 행에는 소유자가 있고, 벡터에는 <code>user_id</code>가 붙습니다. 개인 업무 검색은 내 것만, HR 규정 검색은 공용만 조회합니다.</p>
-  <p class="pt-src">근거: <code>src/ask-pipeline.ts</code> (단계 순서), <code>src/obs/trace.ts</code>, <code>src/approval/machine.ts</code>, <code>src/email/inbound.ts</code>, <code>src/chat/</code>, <code>src/notifications/</code>, <code>src/ratelimit/</code>, <code>migrations/</code> (0001~0031)</p>
+  <p class="pt-src">근거: <code>src/ask-pipeline.ts</code> (단계 순서), <code>src/obs/trace.ts</code>, <code>src/approval/machine.ts</code>, <code>src/email/inbound.ts</code>, <code>src/chat/</code>, <code>src/notifications/</code>, <code>src/ratelimit/</code>, <code>migrations/</code> (0001~0032)</p>
 </article>
 
 <article class="pt-sec pt-key" id="pt-agentic" data-key="agentic" data-nav="에이전트" data-group="tech" data-keyno="3">
@@ -204,13 +204,13 @@
   <p>사람이 누른 것은 업로드뿐입니다. 단계 사이를 큐가 잇고, 각 단계는 다시 실행해도 결과가 같게 만들어져 재시도가 안전합니다.</p>
 
   <h3>에이전트 루프 ③ — 스스로 채점하고, 고칠 곳을 가져온다</h3>
-  <p>매일 03:00, 사람이 없는 시간에 Worker가 깨어나 ① AI Gateway 로그에서 비용을 가져오고 ② 어제 실제 질문 중 표본을 뽑아 판정하고 ③ 골든 질문 세트를 다시 풀어 채점합니다. 지난번에 통과했다가 이번에 실패한 항목(회귀), 낮은 점수, 근거가 있다고 했지만 판정이 어긋난 답이 "개선 루프" 목록에 올라옵니다. 사람이 암묵지 게시·문서 수정·프롬프트 조정 중 하나를 고르면, 다음 평가가 그 조치가 통했는지 검증합니다.</p>
+  <p>매일 03:00, 사람이 없는 시간에 Worker가 깨어나 ① AI Gateway 로그에서 비용을 가져오고 ② 어제 실제 질문 중 표본을 뽑아 판정하고 ③ 골든 질문 세트를 다시 풀어 채점합니다(설정이 그대로이고 7일이 지나지 않았으면 건너뜁니다). 지난번에 통과했다가 이번에 실패한 항목(회귀), 낮은 점수, 근거가 있다고 했지만 판정이 어긋난 답이 "개선 루프" 목록에 올라옵니다. 사람이 암묵지 게시·문서 수정·프롬프트 조정 중 하나를 고르면, 다음 평가가 그 조치가 통했는지 검증합니다.</p>
 
   <h3>에이전트 루프 ④ — 단계를 이어 붙이고, 목표만 주면 도구를 고른다 (워크플로우)</h3>
   <div class="pt-flow"><span>단계 정의(폼·캔버스)</span><span>실행</span><em>큐</em><span>단계 1건 처리</span><span>조건 분기</span><span>에이전트 노드(ReAct)</span><span>승인 대기</span><em>큐</em><span>완료</span></div>
-  <p>워크플로우는 사용자가 만든 단계의 목록입니다. 노드는 <strong>15종</strong>(도구 노드 13종 + 에이전트 + 조건 분기)입니다. 질문·전사·요약·리플렉션·PPTX 개요·메일 초안·메일 발송·할 일·캘린더 일정·LLM·웹훅 같은 기능이 그대로 노드가 됩니다.</p>
+  <p>워크플로우는 사용자가 만든 단계의 목록입니다. 노드는 <strong>15종</strong>(도구 노드 13종 + 에이전트 + 조건 분기)입니다. 질문·전사본 가져오기·요약·리플렉션·PPTX 초안·메일 초안·메일 발송·할 일·캘린더 일정·LLM·웹훅 같은 기능이 그대로 노드가 됩니다.</p>
   <ul>
-    <li><strong>Queues 기반 실행 엔진.</strong> 단계 하나가 큐 메시지 하나입니다. 같은 단계를 두 번 집어도 한 번만 실행되도록 (실행, 단계 번호)를 먼저 선점하고, 실패한 단계는 다시 시도합니다.</li>
+    <li><strong>Queues 기반 실행 엔진.</strong> 단계 하나가 큐 메시지 하나입니다. 같은 단계를 두 번 집어도 한 번만 실행되도록 (실행, 단계 번호)를 먼저 선점합니다. 큐·D1 오류로 엔진이 멈추면 큐가 다시 시도하고(3회 뒤 DLQ), 노드가 실패로 끝난 단계는 다시 돌리지 않고 실행을 실패로 기록합니다.</li>
     <li><strong>승인 게이트.</strong> <code>send_email</code>과 <code>webhook</code>은 실행 직전에 멈춰 "승인 대기"가 됩니다. 사람이 승인해야 이어서 실행되고, 승인이 필요 없다고 적은 정의는 저장이 거부됩니다. 대기가 생기면 NotificationHub가 화면에 알림을 밀어 줍니다.</li>
     <li><strong>에이전트 노드.</strong> 목표를 적으면 모델이 도구를 골라 부르고 결과를 보고 다시 판단하는 ReAct 루프로 돕니다. 상태는 <code>WorkflowAgent</code> DO가 갖고, 최대 10스텝입니다. 에이전트가 메일·웹훅을 고르면 똑같이 승인 게이트에 걸립니다.</li>
     <li><strong>조건 분기·폼 빌더·비주얼 캔버스.</strong> 조건 단계의 참/거짓에 따라 다음 단계가 갈립니다. 폼으로 만들고, 캔버스(SVG로 직접 그림, 빌드 없음)로 단계와 분기를 한눈에 봅니다.</li>
@@ -228,9 +228,9 @@
       <tbody>
         <tr><td>전사, 요약, 색인, 구조 분석</td><td>요약의 액션을 할 일로 옮길지</td></tr>
         <tr><td>근거 검색, 업무 외 질문 거절, 근거 없는 질문 기록</td><td>답변 대기 질문에 무엇이라고 답할지 (게시)</td></tr>
-        <tr><td>메일 수신·분류·스레드 묶기, 답장 <b>초안</b> 작성</td><td>메일을 <b>보낼지</b> (초안은 자동 발송되지 않는다)</td></tr>
+        <tr><td>메일 수신·소유자 매칭·스레드 묶기, 답장 <b>초안</b> 작성</td><td>메일을 <b>보낼지</b> (초안은 자동 발송되지 않는다)</td></tr>
         <tr><td>PPTX 개요 초안</td><td>개요를 고치고 생성할지</td></tr>
-        <tr><td>매일 자기 평가, 회귀·낮은 점수 수집</td><td>어떤 개선 조치를 적용할지, 프롬프트 버전을 바꿀지</td></tr>
+        <tr><td>새벽 자기 평가(표본 판정은 매일, 골든셋은 설정 변경·7일 주기), 회귀·낮은 점수 수집</td><td>어떤 개선 조치를 적용할지, 프롬프트 버전을 바꿀지</td></tr>
         <tr><td>워크플로우 단계 실행, 에이전트 노드의 도구 선택·호출</td><td>메일 발송·웹훅 호출을 <b>승인할지</b> (승인 대기에서 멈춘다)</td></tr>
         <tr><td>아침 다이제스트 작성</td><td>— (읽기 전용)</td></tr>
       </tbody>
@@ -263,7 +263,7 @@
 </article>
 
 <article class="pt-sec" id="pt-stack" data-key="stack" data-nav="기술 맵" data-group="tech">
-  <header class="pt-sec-head"><span class="pt-num">10</span><h2>Cloudflare 기능 13가지, 어디에 왜 썼나</h2></header>
+  <header class="pt-sec-head"><span class="pt-num">10</span><h2>Cloudflare 기능 14가지, 어디에 왜 썼나</h2></header>
   <div class="pt-table-wrap">
     <table class="pt-table">
       <thead><tr><th>기능</th><th>어디에 쓰나</th><th>왜 이것인가</th><th>상태</th></tr></thead>
@@ -280,6 +280,7 @@
         <tr><td>Durable Objects</td><td>AgentSession(대화 기억), WorkflowAgent(에이전트 루프 상태), ChatRoom(채팅·접속 로비), NotificationHub(알림 푸시), RateLimiter(토큰 버킷)</td><td>한 대상(세션·채팅방·사용자·버킷)마다 일관된 상태 하나. WebSocket Hibernation과 Alarm도 쓴다</td><td>코드 있음</td></tr>
         <tr><td>Cron Triggers (3개)</td><td>아침 다이제스트, 새벽 자기 평가, 15분마다 워크플로우 스케줄</td><td>사람이 없는 시간에 에이전트가 일한다</td><td>코드 있음</td></tr>
         <tr><td>Email Routing</td><td><code>@peopleos.site</code> 수신 → Worker</td><td>메일 서버 없이 메일이 Worker의 이벤트가 된다</td><td>코드 있음 · 외부 메일 수신 확인 전</td></tr>
+        <tr><td>Workers Logs</td><td>질문·평가·워크플로우 종료·큐 실패를 구조화 로그(식별자·상태·숫자만)로 남긴다</td><td>D1 + R2 트레이스는 내용을 보고, Workers Logs는 "느렸던 요청·실패한 메시지"를 화면 밖에서 빨리 찾는다. 질문·답변 원문은 싣지 않는다</td><td>코드 있음 · 대시보드 확인 전</td></tr>
         <tr><td>Turnstile</td><td>질문 폼 봇 확인</td><td>공개 데모의 AI 호출 남용을 막는다 (키 설정 시 동작)</td><td>코드 있음 · 키 미설정이면 건너뜀</td></tr>
       </tbody>
     </table>
@@ -311,7 +312,7 @@
     <table class="pt-table">
       <thead><tr><th>지금 없는 것</th><th>이유</th><th>다음 단계</th></tr></thead>
       <tbody>
-        <tr><td>사람의 승인 없이 나가는 외부 행동</td><td>메일·웹훅은 승인 게이트를 반드시 지나게 했다 (구현됨)</td><td>승인 대상 노드 확대, 승인자 지정</td></tr>
+        <tr><td>사람의 승인 없이 나가는 외부 행동</td><td>워크플로우·에이전트의 메일·웹훅은 승인 게이트를 반드시 지나게 했다 (구현됨). 결재 알림 메일(제목·링크만)은 시스템이 자동 발송한다</td><td>승인 대상 노드 확대, 승인자 지정</td></tr>
         <tr><td>결재 완료 후 자동 처리 (수강 승인·휴가 확정)</td><td>후처리 자리는 있고 처리기가 비어 있다</td><td>처리기 연결, 실패 재시도</td></tr>
         <tr><td>조직 여러 곳(멀티테넌시)</td><td>프로토타입은 한 조직 기준</td><td>조직 구분 열 도입</td></tr>
         <tr><td>실제 조직에서의 효과 측정</td><td>아직 운영 전</td><td><a href="#pt-impact">5번 섹션</a>의 지표로 측정</td></tr>
