@@ -26,6 +26,10 @@
 .obs-item-row.obs-regress td{background:var(--obs-err-bg)}
 .obs-item-detail td{background:var(--obs-surface-soft)}
 .obs-detail-grid{display:grid;grid-template-columns:1fr 1fr;gap:var(--obs-gap)}
+/* XAI 보완 (2026-11-19): 역할별 답 나란히 */
+.obs-role-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:var(--obs-gap)}
+.obs-role-col{min-width:0}
+.obs-role-src{margin:4px 0 0;padding-left:18px;font-size:12px}
 .obs-detail-h{font-size:var(--obs-text-xs);color:var(--obs-muted);margin:6px 0 4px}
 .obs-improve{margin-top:6px;font-size:var(--obs-text-xs);line-height:1.5}
 .obs-dims{margin:6px 0}

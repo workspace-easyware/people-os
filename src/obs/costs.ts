@@ -65,6 +65,8 @@ function tagOf(log: GatewayLog, meta: Record<string, unknown>): string | null {
   if (typeof meta.tag === "string") return meta.tag;
   if (Array.isArray(log.tags) && typeof log.tags[0] === "string") return log.tags[0];
   if (typeof log.tags === "string" && log.tags) return log.tags;
+  // Whisper 로그는 REST 응답에 태그가 안 올 수 있다 — 모델명으로 보완 (Workers AI 로그의 model은 `@cf/` 접두어가 없을 수 있음)
+  if (typeof log.model === "string" && /whisper/i.test(log.model)) return "whisper";
   return null;
 }
 
@@ -129,7 +131,7 @@ export async function syncGatewayCosts(
     return {
       ok: false,
       error: "AIG_LOGS_TOKEN not set",
-      hint: "대시보드에서 AI Gateway 읽기 권한 API 토큰을 만든 뒤 `wrangler secret put AIG_LOGS_TOKEN`으로 넣으세요. 그 전까지 비용은 토큰 기반 추정(\"추정\")으로만 표시됩니다.",
+      hint: "Cloudflare 대시보드 → My Profile → API Tokens → Create Token에서 권한 'Account › AI Gateway › Read'(계정은 이 Worker의 계정만)로 토큰을 만든 뒤 `wrangler secret put AIG_LOGS_TOKEN`으로 넣으세요. 그 전까지 비용은 토큰 기반 추정(\"추정\")으로만 표시되고, Whisper 실제 청구 뉴런은 들어오지 않습니다.",
     };
   }
   if (!env.CF_ACCOUNT_ID) {
@@ -156,6 +158,7 @@ export async function syncGatewayCosts(
 
     let synced = 0, estimated = 0, matched = 0, unmatched = 0, tokensBackfilled = 0, pages = 0;
     let truncated = false;
+    let lastLogAt: string | null = null; // 이번 실행에서 저장까지 끝낸 마지막 로그의 시각 (오름차순 조회)
     for (let page = 1; page <= maxPages; page++) {
       const qs = new URLSearchParams({
         start_date: since, end_date: until, per_page: String(PER_PAGE), page: String(page),
@@ -171,6 +174,7 @@ export async function syncGatewayCosts(
       const stmts: D1PreparedStatement[] = [];
       for (const log of res.logs) {
         if (!log || !log.id) continue;
+        if (typeof log.created_at === "string" && !Number.isNaN(Date.parse(log.created_at))) lastLogAt = log.created_at;
         const meta = metaOf(log);
         const eventId = (typeof meta.eventId === "string" && meta.eventId) || byLogId.get(String(log.id)) || null;
         const row = costRowFromLog(log, eventId);
@@ -207,6 +211,11 @@ export async function syncGatewayCosts(
     }
     if (!truncated) {
       await env.DB.prepare("INSERT OR REPLACE INTO meta (key, value, updated_at) VALUES (?, ?, datetime('now'))").bind(COSTS_LAST_SYNC_KEY, until).run();
+    } else if (!opts.since && lastLogAt && Date.parse(lastLogAt) > Date.parse(since)) {
+      // 전체 점검(2026-11-18) P1: 잘렸을 때 동기화 지점을 그대로 두면 다음 실행이 같은 앞쪽 1,000건만 다시 읽어
+      // 영원히 진도가 안 나갔다. 저장을 끝낸 마지막 로그 시각까지 지점을 옮긴다 (UPSERT라 경계 로그를 다시 읽어도 안전).
+      // 수동 재동기화(opts.since 지정)는 지점을 건드리지 않는다.
+      await env.DB.prepare("INSERT OR REPLACE INTO meta (key, value, updated_at) VALUES (?, ?, datetime('now'))").bind(COSTS_LAST_SYNC_KEY, new Date(lastLogAt).toISOString()).run();
     }
     return { ok: true, synced, estimated, matched, unmatched, tokensBackfilled, pages, since, until, truncated };
   } catch (e) {

@@ -4,7 +4,7 @@
 // ---- §7.1 수집 계약 ---------------------------------------------------------
 
 export type TraceSpan = {
-  name: "cache" | "session" | "router" | "topic_guard" | "embed" | "vectorize" | "gate" | "d1_merge" | "rerank" | "llm" | "session_save";
+  name: "cache" | "session" | "router" | "topic_guard" | "embed" | "vectorize" | "gate" | "d1_merge" | "rerank" | "llm" | "what_if" | "session_save";
   product: "kv" | "durable-objects" | "workers-ai" | "vectorize" | "d1";
   startMs: number;
   durationMs: number;
@@ -49,6 +49,23 @@ export type AskTrace = {
   aigLogIds: string[];
   // 0021: 질문한 사용자 (viewer id). 익명·평가는 null.
   userId?: string | null;
+  // XAI 보완 (2026-11-19): 질문 시점의 질문자 역할 (hr_admin / user, 익명·평가 null).
+  userRole?: string | null;
+  // XAI 보완: What-If 엔드포인트 입력(근거 요약, R2 원문에만 저장) · 결정적 근거(재순위 1순위) · 전환/차단 사유.
+  whatIfContext?: WhatIfSource[];
+  decisiveSourceId?: string;
+  decision?: AskDecision;
+};
+
+/** What-If 프롬프트용 근거 요약 (제목·조항 경로·180자 발췌). */
+export type WhatIfSource = { title: string; section: string; snippet: string };
+
+/** 라우터 전환·토픽 가드 차단 사유 (XAI 보완). 라우터/가드가 이미 계산한 confidence를 그대로 쓴다. */
+export type AskDecision = {
+  kind: "redirect_personal" | "redirect_hr" | "off_topic";
+  by: "router" | "topic_guard";
+  confidence: number;
+  message: string;
 };
 
 export interface TraceSink {

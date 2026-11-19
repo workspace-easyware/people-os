@@ -58,3 +58,14 @@ button.wf-big{height:44px;padding:0 28px;font-size:var(--text-base)}
 button.wf-copy{height:44px;padding:0 24px}
 .wf-hdr-row{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,2fr);gap:var(--space-2);margin:4px 0}
 .badge.err{background:var(--color-err-bg);border-color:var(--color-err-line);color:var(--color-err)}
+/* 기업용 템플릿 카드 (2026-11-19) */
+.wf-intro{background:var(--color-surface-2,#f3f7fc);border:1px solid var(--color-line);border-radius:8px;padding:var(--space-3);margin-bottom:var(--space-3)}
+.wf-intro h3{margin:0 0 var(--space-1)}
+.wf-intro p{margin:0}
+.wf-tpl-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:var(--space-3)}
+.wf-tpl-card{border:1px solid var(--color-line);border-radius:8px;padding:var(--space-3);display:flex;flex-direction:column;gap:var(--space-2)}
+.wf-tpl-card p{margin:0}
+.wf-tpl-meta{display:flex;gap:var(--space-1);flex-wrap:wrap}
+.wf-tpl-warn{color:#8a5a00}
+.wf-tpl-steps{margin:0;padding-left:1.2em}
+.wf-tpl-card button{margin-top:auto}

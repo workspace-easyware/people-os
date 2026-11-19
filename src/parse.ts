@@ -46,7 +46,8 @@ export function detectDocumentFormat(bytes: Uint8Array): DetectedFormat {
     startsWith(bytes, JPEG_MAGIC) ||
     startsWith(bytes, PNG_MAGIC) ||
     startsWith(bytes, GIF_MAGIC) ||
-    startsWith(bytes, BMP_MAGIC) ||
+    // BMP는 매직이 2바이트("BM")뿐이라 "BM팀 회의록…"으로 시작하는 텍스트도 걸렸다 — 헤더의 예약 필드(6~9바이트 = 0)까지 본다.
+    (startsWith(bytes, BMP_MAGIC) && bytes.length >= 26 && bytes[6] === 0 && bytes[7] === 0 && bytes[8] === 0 && bytes[9] === 0) ||
     (startsWith(bytes, RIFF_MAGIC) && bytes.length >= 12 && startsWith(bytes.subarray(8), WEBP_MAGIC))
   ) {
     return { format: "image", detail: "이미지 (매직 바이트)" };

@@ -27,6 +27,8 @@ export interface ChatMessage {
 // 마지막 ping이 STALE_MS보다 오래된 소켓(끊겼는데 close가 안 온 유령)은 접속 중으로 세지 않는다.
 // 방 인스턴스는 Worker가 /event로 넘긴 읽음(read)·반응(reaction) 이벤트를 방 소켓 전부에 브로드캐스트한다.
 export const LOBBY_KEY = "chat:lobby";
+/** /event로 받는 방 이벤트 종류. 화상회의 V1(2026-11-19)이 meeting_started·meeting_ended를 더했다. */
+export const ROOM_EVENT_TYPES = ["read", "reaction", "meeting_started", "meeting_ended"];
 const STALE_MS = 90_000;
 
 type LobbyAttachment = { user_id: string; lobby: true; at: number };
@@ -200,11 +202,12 @@ export class ChatRoom {
       return Response.json({ ok: true, delivered });
     }
 
-    // ---- 방 이벤트 브로드캐스트 (읽음·반응). Worker가 D1 갱신 뒤에 부른다 ----
+    // ---- 방 이벤트 브로드캐스트 (읽음·반응·화상회의 시작/종료). Worker가 D1 갱신 뒤에 부른다 ----
+    // meeting_started·meeting_ended (화상회의 V1, 2026-11-19): {type, meeting:{id,title,created_by,...}} — 방 안에 "통화 중" 카드를 그리고 닫는다.
     if (path === "/event" && req.method === "POST") {
       let ev: Record<string, unknown>;
       try { ev = await req.json(); } catch { return Response.json({ error: "invalid json" }, { status: 400 }); }
-      if (!ev || (ev.type !== "read" && ev.type !== "reaction")) return Response.json({ error: "invalid event" }, { status: 400 });
+      if (!ev || !ROOM_EVENT_TYPES.includes(String(ev.type))) return Response.json({ error: "invalid event" }, { status: 400 });
       const payload = JSON.stringify(ev);
       for (const ws of this.state.getWebSockets()) {
         try { ws.send(payload); } catch { /* 끊김 */ }

@@ -66,7 +66,9 @@ function parseTopicClefAnswer(raw: unknown): { offTopic: boolean; confidence: nu
   };
   // bare string choice — 확률 없이 선택만 온 경우, 선택 자체를 신호로 본다.
   const direct = asChoice(a);
-  if (direct) return { offTopic: direct === "off_topic", confidence: 1, reason: `clef choice=${direct}` };
+  // 전체 점검(2026-11-18) P1: confidence는 앙상블에서 "업무 외일 확률"로 읽힌다 (아래 object 경로와 같은 뜻).
+  // work_related에 1을 주면 업무 질문이 업무 외로 뒤집혀 거절된다 — off_topic일 때만 1, 아니면 0.
+  if (direct) return { offTopic: direct === "off_topic", confidence: direct === "off_topic" ? 1 : 0, reason: `clef choice=${direct}` };
   if (!a || typeof a !== "object") return null;
   const o = a as Record<string, unknown>;
   let choice: "work_related" | "off_topic" | null = null;

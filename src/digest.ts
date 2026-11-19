@@ -111,26 +111,29 @@ async function queryCount(db: D1Database, sql: string, ...params: unknown[]): Pr
 }
 
 /** D1에서 다이제스트 재료를 모은다. 각 조회는 개별적으로 실패해도 빈 값으로 둔다. */
+// 전체 점검(2026-11-18) P0: 다이제스트는 모든 사용자에게 같은 한 건이 보이므로, 제목·요약·패턴 같은 **내용**은
+// 공용(owner_id NULL, 참여자 미기록) 행에서만 가져온다. 건수(counts)는 전체 기준 그대로다 (숫자만, 내용 없음).
+// 이전에는 남의 개인 전사본 제목·요약·할 일·코칭 패턴이 본문과 JSON에 실렸다.
 async function collectSnapshot(db: D1Database, windowStart: string, windowEnd: string): Promise<DigestSnapshot> {
   const [documents, tasks, reflections, recordings, docCount, summaryCount, openTaskCount, reflectionCount, recStatus] =
     await Promise.all([
       queryAll<DigestDoc>(
         db,
-        "SELECT id, title, kind, summary, created_at FROM documents WHERE created_at >= ? AND created_at < ? ORDER BY created_at DESC LIMIT 10",
+        "SELECT id, title, kind, summary, created_at FROM documents WHERE created_at >= ? AND created_at < ? AND owner_id IS NULL ORDER BY created_at DESC LIMIT 10",
         windowStart, windowEnd
       ),
       queryAll<DigestTask>(
         db,
-        "SELECT id, title, source, created_at FROM tasks WHERE done = 0 ORDER BY created_at DESC LIMIT 10"
+        "SELECT id, title, source, created_at FROM tasks WHERE done = 0 AND owner_id IS NULL ORDER BY created_at DESC LIMIT 10"
       ),
       queryAll<DigestReflection>(
         db,
-        "SELECT id, patterns, created_at FROM reflections WHERE created_at >= ? AND created_at < ? ORDER BY created_at DESC LIMIT 5",
+        "SELECT id, patterns, created_at FROM reflections WHERE created_at >= ? AND created_at < ? AND coach_id IS NULL AND coachee_id IS NULL ORDER BY created_at DESC LIMIT 5",
         windowStart, windowEnd
       ),
       queryAll<DigestRecording>(
         db,
-        "SELECT id, title, transcript_status, created_at FROM recordings WHERE created_at >= ? AND created_at < ? ORDER BY created_at DESC LIMIT 5",
+        "SELECT id, title, transcript_status, created_at FROM recordings WHERE created_at >= ? AND created_at < ? AND owner_id IS NULL ORDER BY created_at DESC LIMIT 5",
         windowStart, windowEnd
       ),
       queryCount(
@@ -197,14 +200,14 @@ export function buildTemplateBody(runDate: string, s: DigestSnapshot): string {
   const lines: string[] = [`[${runDate} 아침 브리핑]`];
   if (c.documents > 0) {
     const titles = s.documents.map((d) => `「${d.title}」`).join(", ");
-    lines.push(`어제 새 문서 ${c.documents}건이 들어왔습니다: ${titles}.`);
+    lines.push(titles ? `어제 새 문서 ${c.documents}건이 들어왔습니다 (공용 문서: ${titles}).` : `어제 새 문서 ${c.documents}건이 들어왔습니다.`);
     if (c.summaries > 0) lines.push(`그중 요약이 달린 문서는 ${c.summaries}건입니다.`);
   } else {
     lines.push("어제 새로 들어온 문서는 없습니다.");
   }
   if (c.openTasks > 0) {
     const titles = s.tasks.slice(0, 5).map((t) => `「${t.title}」`).join(", ");
-    lines.push(`열린 할 일 ${c.openTasks}건: ${titles}${c.openTasks > 5 ? " 외" : ""}.`);
+    lines.push(titles ? `열린 할 일 ${c.openTasks}건 (담당자 미지정: ${titles}${s.tasks.length > 5 ? " 외" : ""}).` : `열린 할 일 ${c.openTasks}건.`);
   } else {
     lines.push("열린 할 일이 없습니다.");
   }
@@ -224,10 +227,10 @@ function factsBlock(runDate: string, s: DigestSnapshot): string {
   const c = s.counts;
   const lines: string[] = [`오늘 날짜(KST): ${runDate}`];
   lines.push(
-    `전날 새 문서: ${c.documents}건${s.documents.length ? ` (${s.documents.map((d) => d.title).join(", ")})` : ""}`
+    `전날 새 문서: ${c.documents}건${s.documents.length ? ` (그중 공용 문서 제목: ${s.documents.map((d) => d.title).join(", ")})` : ""}`
   );
   lines.push(`그중 요약 완료: ${c.summaries}건`);
-  lines.push(`열린 할 일: ${c.openTasks}건${s.tasks.length ? ` (${s.tasks.slice(0, 5).map((t) => t.title).join(", ")})` : ""}`);
+  lines.push(`열린 할 일: ${c.openTasks}건${s.tasks.length ? ` (그중 담당자 미지정: ${s.tasks.slice(0, 5).map((t) => t.title).join(", ")})` : ""}`);
   lines.push(`전날 새 리플렉션: ${c.reflections}건`);
   const first = firstPattern(s.reflections[0]);
   if (first) lines.push(`리플렉션 핵심 패턴: ${first}`);

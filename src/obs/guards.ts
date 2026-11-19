@@ -40,7 +40,7 @@ export function estimateRunUsd(items: number): number {
 
 export type GuardConfig = { enabled: boolean; maxItems: number; manualPerDay: number; costCapUsd: number };
 
-async function metaGet(db: D1Database, key: string): Promise<string | null> {
+export async function metaGet(db: D1Database, key: string): Promise<string | null> {
   try {
     const row = await db.prepare("SELECT value FROM meta WHERE key = ?").bind(key).first<{ value: string }>();
     return row ? row.value : null;

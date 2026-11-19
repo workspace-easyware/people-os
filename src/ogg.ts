@@ -82,6 +82,7 @@ export function splitOggOpus(
   if (!firstHead.startsWith("OpusHead")) return null;
   let headerEnd = 0;
   while (headerEnd < pages.length && pages[headerEnd].granule === 0n) headerEnd++;
+  if (headerEnd === 0) return null; // 헤더 페이지의 granule이 0이 아닌 비정상 파일 — 쪼개지 않고 통째로 전사한다 (pages[-1] 예외 방지)
   const headerBytes = bytes.slice(0, pages[headerEnd - 1].end);
   const audio = pages.slice(headerEnd);
   if (audio.length === 0) return null;

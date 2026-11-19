@@ -1,0 +1,172 @@
+<!-- 검증용 가짜 조각 (O-A). 실제 문구가 아니다. S-A는 public/pitch-content.html에 진짜 내용을 쓴다.
+     계약의 모든 클래스를 한 번 이상 쓰고, 14개 섹션 길이를 실제와 비슷하게 맞췄다. -->
+<header class="pt-hero" id="pt-top" data-key="top" data-nav="처음">
+  <p class="pt-hero-eyebrow">일잇 People OS</p>
+  <h1>[가짜] 서버 없이, Worker 하나로 돌아가는 업무 공간</h1>
+  <p class="pt-hero-sub">[가짜] 히어로 부제. 녹음·규정·메일을 올리면 Workers AI가 전사하고, 요약하고, 근거를 찾아 답합니다.</p>
+  <p class="pt-hero-meta">검증용 조각 · fixture.html</p>
+</header>
+<div class="pt-keys">
+  <a class="pt-keycard" href="#pt-serverless" data-keyno="1"><strong>백엔드 서버가 없습니다</strong><p>[가짜] Worker 하나가 API, 화면, 메일 수신, 큐, 예약 작업을 맡습니다.</p></a>
+  <a class="pt-keycard" href="#pt-data" data-keyno="2"><strong>데이터베이스가 다 있습니다</strong><p>[가짜] D1, R2, KV, Vectorize가 바인딩 한 줄씩으로 붙습니다.</p></a>
+  <a class="pt-keycard" href="#pt-agentic" data-keyno="3"><strong>AI가 에이전트로 일합니다</strong><p>[가짜] 여러 모델이 단계를 나눠 맡고, 사람이 승인합니다.</p></a>
+</div>
+<div class="pt-live" data-live="health"><span class="pt-live-text">지금 이 페이지를 서빙하는 Worker의 바인딩 상태입니다.</span></div>
+
+<article class="pt-sec" id="pt-problem" data-key="problem" data-nav="문제" data-group="biz">
+  <header class="pt-sec-head"><span class="pt-num">01</span><h2>[가짜] 기록은 쌓이는데, 일은 이어지지 않는다</h2></header>
+  <p class="pt-lead">리드 문단. 섹션의 주장을 두 문장으로 풉니다. 본문은 16px, 줄 간격 1.7입니다.</p>
+  <div class="pt-table-wrap"><table class="pt-table">
+    <thead><tr><th>지금</th><th>그래서</th></tr></thead>
+    <tbody>
+      <tr><td>녹음을 다시 듣는 데 회의만큼 시간이 든다</td><td>정리되지 않은 녹음이 쌓인다</td></tr>
+      <tr><td>규정 질문이 담당자에게 메신저로 온다</td><td>같은 답을 반복해 쓴다</td></tr>
+      <tr><td>전사·요약·챗봇·메일이 각각 다른 도구다</td><td>사람이 결과를 복사해 옮긴다</td></tr>
+    </tbody>
+  </table></div>
+  <p>도구를 하나 더 붙이는 것으로는 풀리지 않습니다. <strong>기록이 들어오면 다음 단계가 알아서 이어지는 구조</strong>가 필요합니다.</p>
+</article>
+
+<article class="pt-sec" id="pt-users" data-key="users" data-nav="사용자" data-group="biz">
+  <header class="pt-sec-head"><span class="pt-num">02</span><h2>[가짜] 세 사람이 같은 자료를 다르게 쓴다</h2></header>
+  <div class="pt-table-wrap"><table class="pt-table">
+    <thead><tr><th></th><th>HR 담당자</th><th>코치</th><th>코칭 대상 (구성원)</th></tr></thead>
+    <tbody>
+      <tr><td>하는 일</td><td>규정 문의 응대, 사내 지식 관리, AI 품질 관리</td><td>코칭 세션 진행과 기록</td><td>코칭 받기, 자기 업무</td></tr>
+      <tr><td>겪는 불편</td><td>반복 질문, 규정에 없는 예외</td><td>세션 정리 시간, 지난 세션 맥락</td><td>다짐을 잊음, 규정을 찾기 어려움</td></tr>
+      <tr><td>People OS에서</td><td>답변 대기 질문에 답 게시, 관측·평가</td><td>녹음 업로드 → 리플렉션 → PPTX 초안</td><td>자기 성찰 포인트 + 액션 플랜</td></tr>
+    </tbody>
+  </table></div>
+  <p class="pt-src">근거: <code>src/auth.ts</code></p>
+</article>
+
+<article class="pt-sec" id="pt-value" data-key="value" data-nav="가치" data-group="biz">
+  <header class="pt-sec-head"><span class="pt-num">03</span><h2>[가짜] 올리면 끝까지 가고, 근거 없이는 답하지 않는다</h2></header>
+  <div class="pt-grid" data-cols="3">
+    <div class="pt-card"><h3>입력 한 번</h3><p>녹음을 올리면 전사 → 요약 → 색인이 큐를 타고 이어집니다.</p></div>
+    <div class="pt-card"><h3>답에는 출처</h3><p>문서명 › 조문 › 발췌를 함께 보여 줍니다.</p></div>
+    <div class="pt-card"><h3>모르는 것이 자산</h3><p>답하지 못한 질문은 답변 대기 목록에 쌓입니다.</p></div>
+    <div class="pt-card"><h3>역할마다 다른 결과</h3><p>코치와 코칭 대상은 같은 기록에서 다른 도움을 받습니다.</p></div>
+    <div class="pt-card"><h3>AI 감독</h3><p>질문 하나하나의 처리 과정이 기록됩니다.</p></div>
+    <div class="pt-card"><h3>운영할 서버 없음</h3><p>한 사람이 만들고 운영할 수 있습니다.</p></div>
+  </div>
+</article>
+
+<article class="pt-sec" id="pt-scenarios" data-key="scenarios" data-nav="장면" data-group="biz">
+  <header class="pt-sec-head"><span class="pt-num">04</span><h2>[가짜] 하루 안에서 일어나는 네 장면</h2></header>
+  <h3>장면 1 — 월요일 팀 회의 녹음</h3>
+  <div class="pt-flow"><span>업로드</span><span>전사</span><em>큐</em><span>요약</span><span>색인</span><span>완료</span></div>
+  <p>97분짜리 녹음을 올립니다. 화면에 단계가 차례로 켜집니다.</p>
+  <div class="pt-tags"><span class="badge">R2</span><span class="badge">Workers AI (Whisper)</span><span class="badge">Queues</span><span class="badge">D1</span><span class="badge">Vectorize</span></div>
+  <h3>장면 2 — 규정 질문</h3>
+  <div class="pt-flow"><span>질문</span><span>판단 모델</span><span>벡터 검색</span><span>답 생성</span></div>
+  <p>앱 탭 링크 시험: <a data-tab="ask" href="#">HR 규정 검색 열기</a> · <a data-tab="upload">녹음 올리기</a></p>
+  <div class="pt-tags"><span class="badge">KV</span><span class="badge">Vectorize</span><span class="badge">Durable Objects</span></div>
+</article>
+
+<article class="pt-sec" id="pt-impact" data-key="impact" data-nav="효과" data-group="biz">
+  <header class="pt-sec-head"><span class="pt-num">05</span><h2>[가짜] 무엇이 달라지는가</h2></header>
+  <div class="pt-table-wrap"><table class="pt-table">
+    <thead><tr><th>달라지는 것</th><th>이유</th><th>People OS 안에서 재는 방법</th></tr></thead>
+    <tbody>
+      <tr><td>녹음 정리 시간이 줄어든다</td><td>전사·요약·색인을 사람이 하지 않는다</td><td>녹음별 파이프라인 단계와 완료 시각 (<code>recordings</code>)</td></tr>
+      <tr><td>같은 질문에 반복해 답하지 않는다</td><td>게시한 답이 다음 질문의 근거가 된다</td><td>답변 대기 질문 수와 해결 수 (<code>knowledge_gaps</code>)</td></tr>
+    </tbody>
+  </table></div>
+  <div class="pt-callout" data-tone="note"><p><b>측정 계획.</b> 이 표는 측정 계획입니다. 숫자를 만들지 않습니다.</p></div>
+</article>
+
+<article class="pt-sec pt-key" id="pt-serverless" data-key="serverless" data-nav="서버 없음" data-group="tech" data-keyno="1">
+  <header class="pt-sec-head"><span class="pt-num">06</span><h2>[가짜] 백엔드 서버가 없다. Worker 하나가 전부다</h2></header>
+  <p class="pt-lead">Worker 하나가 네 가지 방식으로 깨어납니다.</p>
+  <div class="pt-table-wrap"><table class="pt-table">
+    <thead><tr><th>진입점</th><th>깨우는 것</th><th>하는 일</th></tr></thead>
+    <tbody>
+      <tr><td><code>fetch</code></td><td>브라우저 요청</td><td>API + 정적 화면</td></tr>
+      <tr><td><code>email</code></td><td>Email Routing</td><td>원문 R2 저장 → 파싱 → 메일함</td></tr>
+      <tr><td><code>queue</code></td><td>Queues 메시지</td><td>요약·색인, 트리, 평가 항목</td></tr>
+      <tr><td><code>scheduled</code></td><td>Cron Triggers</td><td>다이제스트, 자기 평가</td></tr>
+    </tbody>
+  </table></div>
+  <pre class="pt-code">export default {
+  fetch: app.fetch,
+  async email(message, env) { await handleInboundEmail(message, env); },
+  async scheduled(event, env, ctx) { /* 03:00 평가 · 07:00 다이제스트 */ },
+  async queue(batch, env, ctx) { /* 전사 파이프라인 · 트리 · 평가 항목 — 아주 긴 줄이 가로 스크롤되는지 확인용 */ },
+};</pre>
+  <p class="pt-src">근거: <code>src/index.ts</code></p>
+</article>
+
+<article class="pt-sec pt-key" id="pt-data" data-key="data" data-nav="데이터 4종" data-group="tech" data-keyno="2">
+  <header class="pt-sec-head"><span class="pt-num">07</span><h2>[가짜] 데이터베이스 네 개가 각자 잘하는 일을 한다</h2></header>
+  <div class="pt-grid" data-cols="4">
+    <div class="pt-card"><h3>D1</h3><p>관계·상태·감사</p></div>
+    <div class="pt-card"><h3>R2</h3><p>원본 파일</p></div>
+    <div class="pt-card"><h3>KV</h3><p>캐시·횟수</p></div>
+    <div class="pt-card"><h3>Vectorize</h3><p>의미 검색</p></div>
+  </div>
+  <h3>질문 하나가 네 저장소를 모두 지나갑니다</h3>
+  <div class="pt-flow"><span>KV 캐시</span><span>DO 대화</span><span>Vectorize</span><span>D1 병합</span><span>답 생성</span><span>D1 기록</span><span>R2 원문</span><span>KV 저장</span></div>
+  <p>본문 단락을 길게 둡니다. 스크롤 위치 추적이 섹션 사이에서 바르게 바뀌는지 확인하려면 섹션마다 높이가 있어야 합니다. 저장소끼리 서로를 받쳐 줍니다. Vectorize가 응답하지 않으면 D1 텍스트 검색으로 답합니다.</p>
+</article>
+
+<article class="pt-sec pt-key" id="pt-agentic" data-key="agentic" data-nav="에이전트" data-group="tech" data-keyno="3">
+  <header class="pt-sec-head"><span class="pt-num">08</span><h2>[가짜] Workers AI 위에서 에이전트가 일하고, 사람이 승인한다</h2></header>
+  <div class="pt-table-wrap"><table class="pt-table">
+    <thead><tr><th>에이전트가 스스로 한다</th><th>사람이 확인하고 결정한다</th></tr></thead>
+    <tbody>
+      <tr><td>전사, 요약, 색인</td><td>액션을 할 일로 옮길지</td></tr>
+      <tr><td>답장 초안 작성</td><td>메일을 보낼지</td></tr>
+    </tbody>
+  </table></div>
+  <div class="pt-callout" data-tone="limit"><p><b>지금의 한계.</b> [가짜] 정해진 단계를 따라가는 파이프라인형입니다.</p></div>
+</article>
+
+<article class="pt-sec" id="pt-architecture" data-key="architecture" data-nav="구조" data-group="tech">
+  <header class="pt-sec-head"><span class="pt-num">09</span><h2>[가짜] 한 장으로 보는 구조</h2></header>
+  <figure class="pt-figure"><a href="/architecture.svg"><img src="/architecture.svg" width="1200" height="760" alt="[가짜] 아키텍처 그림 대체 텍스트" /></a><figcaption>그림을 누르면 새 탭에서 크게 열립니다.</figcaption></figure>
+  <pre class="pt-code">[1층 — 들어오는 길]  브라우저 · 외부 메일 · 시간
+[2층 — Worker 하나]  fetch · email · scheduled · queue</pre>
+</article>
+
+<article class="pt-sec" id="pt-stack" data-key="stack" data-nav="기술 맵" data-group="tech">
+  <header class="pt-sec-head"><span class="pt-num">10</span><h2>[가짜] Cloudflare 기능, 어디에 왜 썼나</h2></header>
+  <div class="pt-table-wrap"><table class="pt-table">
+    <thead><tr><th>기능</th><th>어디에 쓰나</th><th>왜 이것인가</th></tr></thead>
+    <tbody>
+      <tr><td>Workers</td><td>API·화면·메일 수신·큐·예약 작업</td><td>배포 단위가 하나다</td></tr>
+      <tr><td>D1</td><td>관계형 데이터와 감사 기록</td><td>SQL과 트랜잭션</td></tr>
+      <tr><td>R2</td><td>음성·문서·메일 원문</td><td>큰 원본을 그대로 둔다</td></tr>
+      <tr><td>KV</td><td>답변 캐시</td><td>만료가 있는 단순 값</td></tr>
+      <tr><td>Vectorize</td><td>의미 검색</td><td>메타데이터 필터</td></tr>
+      <tr><td>Workers AI</td><td>전사·임베딩·판단·생성</td><td>외부 API 키가 없다</td></tr>
+    </tbody>
+  </table></div>
+</article>
+
+<article class="pt-sec" id="pt-trust" data-key="trust" data-nav="신뢰" data-group="tech">
+  <header class="pt-sec-head"><span class="pt-num">11</span><h2>[가짜] AI를 업무에 넣기 위해 지킨 원칙</h2></header>
+  <ul>
+    <li><strong>지어내지 않는다.</strong> 근거가 기준에 못 미치면 모델을 부르지 않는다.</li>
+    <li><strong>AI 단계는 실패해도 길을 막지 않는다.</strong> 라우터·가드가 실패하면 건너뛴다.</li>
+    <li><strong>개인 자료 격리.</strong> 소유자 기준 저장·검색.</li>
+  </ul>
+</article>
+
+<article class="pt-sec" id="pt-limits" data-key="limits" data-nav="한계" data-group="end">
+  <header class="pt-sec-head"><span class="pt-num">12</span><h2>[가짜] 아직 없는 것과 다음 단계</h2></header>
+  <div class="pt-table-wrap"><table class="pt-table">
+    <thead><tr><th>지금 없는 것</th><th>이유</th><th>다음 단계</th></tr></thead>
+    <tbody><tr><td>멀티테넌시</td><td>한 조직 기준</td><td><code>tenant_id</code> 도입</td></tr></tbody>
+  </table></div>
+</article>
+
+<article class="pt-sec" id="pt-demo" data-key="demo" data-nav="데모" data-group="end">
+  <header class="pt-sec-head"><span class="pt-num">13</span><h2>[가짜] 3분 따라 하기</h2></header>
+  <ol>
+    <li><a data-tab="upload">녹음전사</a>에서 녹음을 올립니다.</li>
+    <li><a data-tab="ask">HR 규정 검색</a>에서 묻습니다.</li>
+    <li>섹션 링크 시험: <a href="#pt-agentic">핵심 3으로 돌아가기</a></li>
+    <li>외부 링크 시험: <a href="https://developers.cloudflare.com/workers/">Workers 문서</a></li>
+  </ol>
+</article>

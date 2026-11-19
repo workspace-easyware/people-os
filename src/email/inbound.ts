@@ -95,6 +95,10 @@ export async function ingestRawEmail(
   let parsed: ReturnType<typeof parseEmail> | null = null;
   let parseError: string | undefined;
   try {
+    // 전체 점검(2026-11-18) P2: 파싱은 원문의 몇 배 메모리를 쓴다(문자열 복사·base64 디코드). 큰 메일은 128MB isolate를
+    // 넘겨 죽을 수 있고, 그러면 R2 원문만 남고 보낸 쪽이 재시도해 고아 원문이 쌓인다. 10MB를 넘으면 파싱을 건너뛰고
+    // 아래의 봉투 정보만으로 행을 만든다 (원문은 이미 R2에 있다).
+    if (raw.byteLength > 10 * 1024 * 1024) throw new Error("too large to parse (over 10MB) — raw .eml kept in R2");
     parsed = parseEmail(raw);
   } catch (e) {
     parseError = e instanceof Error ? e.message : String(e);
