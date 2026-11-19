@@ -1,0 +1,75 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>[검증] 앱 안 발표자료 탭 모의</title>
+<!-- index.html의 껍데기를 줄여 흉내 낸다: 사이드바 + 공통 .hero + section 탭 + switchTab(해시) + S-B가 넣을 연결(6.4).
+     실제 index.html은 S-B 범위라 건드리지 않는다. -->
+<link rel="stylesheet" href="/styles.css" />
+<link rel="stylesheet" href="/pitch.css" />
+</head>
+<body>
+<div class="shell">
+  <aside class="sidebar">
+    <div class="side-head"><button class="logo" type="button" data-go="home"><b>일</b><span>일잇 <i>People OS</i></span></button></div>
+    <nav class="tabs">
+      <button data-tab="home"><span class="nav-label">홈</span></button>
+      <button data-tab="upload"><span class="nav-label">녹음전사</span></button>
+      <button data-tab="ask"><span class="nav-label">HR 규정 검색</span></button>
+      <button data-tab="obs"><span class="nav-label">관측</span></button>
+      <button data-tab="about"><span class="nav-label">소개</span></button>
+      <button data-tab="pitch"><span class="nav-label">발표자료</span></button>
+    </nav>
+  </aside>
+  <div class="content">
+  <main>
+    <div class="hero"><h1>일잇 People OS</h1><p class="sub">공통 히어로 (모든 탭 위)</p></div>
+    <section id="tab-home"><div class="card"><h2>홈</h2><p>홈 탭</p><div style="height:1400px"></div></div></section>
+    <section id="tab-upload"><div class="card"><h2>녹음전사</h2><p>녹음전사 탭</p></div></section>
+    <section id="tab-ask"><div class="card"><h2>HR 규정 검색</h2><p>질문 탭</p></div></section>
+    <section id="tab-obs"><div class="card"><h2>관측</h2><p id="obsSub"></p></div></section>
+    <section id="tab-about"><div class="card"><h2>소개</h2><p><a href="#pitch">발표자료 보기 →</a> · <a href="#pitch/agentic">핵심 3 바로 가기 →</a></p></div></section>
+    <section id="tab-pitch"><div id="pitchMount"></div></section>
+  </main>
+  </div>
+</div>
+<script src="/pitch.js"></script>
+<script>
+// [검증] index.html switchTab의 축약판 + S-B가 넣을 발표자료 연결 (presentation-plan.md 6.4)
+(function () {
+  var $ = function (id) { return document.getElementById(id); };
+  var TABS = ['home', 'upload', 'ask', 'obs', 'about', 'pitch'];
+  window.__log = [];
+  function switchTab(name, fromHash) {
+    name = String(name || '');
+    var slash = name.indexOf('/');
+    var sub = slash >= 0 ? name.slice(slash + 1) : '';
+    name = slash >= 0 ? name.slice(0, slash) : name;
+    if (TABS.indexOf(name) < 0) { name = 'home'; sub = ''; }
+    if (name !== 'obs' && name !== 'pitch') sub = '';           // S-B: pitch도 하위 경로 유지
+    else if (name === 'obs' && !sub) sub = 'traces';
+    var full = sub ? name + '/' + sub : name;
+    if (!fromHash && location.hash !== '#' + full) {
+      location.hash = full;
+      if (name === 'obs' || name === 'pitch') return;            // hashchange가 다시 부른다
+    }
+    document.querySelectorAll('.tabs button').forEach(function (x) { x.classList.remove('nav-active'); });
+    document.querySelectorAll('section').forEach(function (x) { x.classList.remove('active'); });
+    document.querySelector('.tabs button[data-tab="' + name + '"]').classList.add('nav-active');
+    $('tab-' + name).classList.add('active');
+    if (name === 'obs') $('obsSub').textContent = 'sub=' + sub;
+    window.__log.push(full);
+    if (name === 'pitch') pitchOpen($('pitchMount'), sub); else if (window.pitchLeave) pitchLeave();
+  }
+  window.switchTab = switchTab;
+  document.querySelectorAll('.tabs button').forEach(function (b) {
+    b.addEventListener('click', function () { switchTab(b.getAttribute('data-tab')); });
+  });
+  document.querySelector('[data-go]').addEventListener('click', function () { switchTab('home'); });
+  window.addEventListener('hashchange', function () { switchTab(location.hash.slice(1), true); });
+  switchTab(location.hash.slice(1) || 'home', true);
+})();
+</script>
+</body>
+</html>

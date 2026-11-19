@@ -1,0 +1,47 @@
+/* 강의실 (2026-11-17) — 기존 디자인 토큰만 사용. */
+.lms-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:var(--space-4)}
+.lms-course{padding:0;overflow:hidden;cursor:pointer;margin:0}
+.lms-course:hover,.lms-course:focus-visible{border-color:var(--color-primary);outline:none}
+.lms-thumb{aspect-ratio:16/9;background:var(--color-primary-soft);overflow:hidden}
+.lms-thumb img{width:100%;height:100%;object-fit:cover;display:block}
+.lms-thumb-ph{display:flex;align-items:center;justify-content:center;color:var(--color-primary)}
+.lms-course-body{padding:var(--space-3)}
+.lms-course-body p{margin:4px 0 8px}
+.lms-bar{height:6px;border-radius:999px;background:var(--color-line);overflow:hidden}
+.lms-bar i{display:block;height:100%;background:var(--color-primary)}
+.lms-head{display:flex;flex-wrap:wrap;align-items:center;gap:var(--space-3);margin-bottom:var(--space-3)}
+.lms-head h2{margin:0;flex:1;min-width:200px}
+.lms-head #lmsCourseProg{min-width:160px}
+.lms-body{display:grid;grid-template-columns:minmax(0,1fr) 300px;gap:var(--space-4);align-items:start}
+#lmsPlayer{aspect-ratio:16/9;background:#000;border-radius:8px;overflow:hidden}
+#lmsPlayer:empty{background:var(--color-surface-soft)}
+#lmsPlayer video,#lmsPlayer iframe,.lms-frame{width:100%;height:100%;border:0;display:block;background:#000}
+#lmsTitle{font-weight:700;margin-top:var(--space-3)}
+#lmsTitle .small{font-weight:400}
+#lmsActions{display:flex;gap:var(--space-2);margin-top:var(--space-3)}
+#lmsActions button{margin-top:0}
+.lms-lessons{border:1px solid var(--color-line);border-radius:8px;overflow:auto;max-height:560px;background:#fff}
+.lms-lesson{display:grid;grid-template-columns:20px 1fr auto;gap:var(--space-2);align-items:center;width:100%;text-align:left;border:0;border-bottom:1px solid var(--color-line);border-radius:0;background:#fff;color:inherit;padding:10px 12px;margin:0;font:inherit;cursor:pointer}
+.lms-lesson:last-child{border-bottom:0}
+.lms-lesson:hover{background:var(--color-surface-soft)}
+.lms-lesson.cur{background:var(--color-primary-soft);font-weight:700}
+.lms-lesson.done .lms-mark{color:var(--color-ok)}
+.lms-mark{text-align:center}
+.lms-lt{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.lms-ld{color:var(--color-muted);font-size:12px;white-space:nowrap}
+.lms-player-msg{padding:var(--space-4);color:#fff}
+/* 설정 (HR Admin) */
+.lms-setbtn{margin:0 0 var(--space-3)}
+.lms-help{background:var(--color-surface-soft);border:1px solid var(--color-line);border-radius:8px;padding:var(--space-3);margin-bottom:var(--space-3);font-size:13px}
+.lms-help ul{margin:6px 0 0;padding-left:18px}
+.lms-help code{background:#fff;border:1px solid var(--color-line);border-radius:4px;padding:0 4px;word-break:break-all}
+.lms-tablewrap{overflow-x:auto}
+.lms-table{width:100%;border-collapse:collapse}
+.lms-table th,.lms-table td{text-align:left;padding:8px;border-bottom:1px solid var(--color-line);vertical-align:middle}
+.lms-set-act{white-space:nowrap}
+.lms-set-act button{margin:0 4px 0 0}
+.lms-form{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:var(--space-3);border:1px solid var(--color-line);border-radius:8px;padding:var(--space-3);margin-bottom:var(--space-3)}
+.lms-form h3,.lms-form .btnrow,.lms-form #lmsFormMsg,.lms-form p{grid-column:1/-1;margin:0}
+.lms-form label{display:flex;flex-direction:column;gap:4px;font-size:13px;font-weight:500}
+.lms-form input,.lms-form select,.lms-form textarea{font:inherit;padding:6px 8px;border:1px solid var(--color-line-strong,#d4d4d8);border-radius:6px}
+@media (max-width:720px){.lms-body{grid-template-columns:1fr}.lms-lessons{max-height:none}}

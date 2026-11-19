@@ -1,0 +1,79 @@
+/* S4 M5 — 평가·개선 루프 화면 스타일 (public/obs/evals.css). obs.css 다음에 링크한다 (M6-β: evals.js·gaps.js 둘 다 이 파일을 쓴다).
+   obs.css는 수정하지 않는다. 토큰은 obs.css의 --obs-* 만 참조한다. */
+
+/* 추이 차트: 선 4개 구분 (색 + 선 모양 — 색만으로 구분하지 않는다) */
+.obs-chart .obs-chart-line.obs-s1{stroke:var(--obs-chart-line)}
+.obs-chart .obs-chart-line.obs-s2{stroke:var(--obs-prod-do);stroke-dasharray:6 3}
+.obs-chart .obs-chart-line.obs-s3{stroke:var(--obs-ok)}
+.obs-chart .obs-chart-line.obs-s4{stroke:var(--obs-warn);stroke-dasharray:2 3}
+.obs-legend{display:flex;flex-wrap:wrap;gap:6px 16px;font-size:var(--obs-text-xs);color:var(--obs-muted);margin:0 0 6px}
+.obs-legend-item{display:inline-flex;align-items:center;gap:6px}
+.obs-legend-item i{display:inline-block;width:18px;height:0;border-top:2px solid var(--obs-chart-line)}
+.obs-legend-item i.obs-s2{border-top-color:var(--obs-prod-do);border-top-style:dashed}
+.obs-legend-item i.obs-s3{border-top-color:var(--obs-ok)}
+.obs-legend-item i.obs-s4{border-top-color:var(--obs-warn);border-top-style:dotted}
+.obs-trend-changes{margin:6px 0 0;padding-left:18px;color:var(--obs-muted)}
+
+/* 진행률 */
+.obs-progress{display:flex;align-items:center;gap:8px;white-space:nowrap}
+.obs-progress progress{width:72px;height:8px}
+.obs-progress-big{display:flex;align-items:center;gap:12px;margin:0 0 var(--obs-gap)}
+.obs-progress-big progress{width:240px}
+.obs-h2{font-size:var(--text-lg,16px);font-weight:var(--weight-bold,600);margin:0 0 var(--space-2,8px)}
+.obs-fixed-notice{border-left:3px solid var(--obs-warn-line)}
+
+/* 실행 상세 항목 */
+.obs-item-row.obs-regress td{background:var(--obs-err-bg)}
+.obs-item-detail td{background:var(--obs-surface-soft)}
+.obs-detail-grid{display:grid;grid-template-columns:1fr 1fr;gap:var(--obs-gap)}
+.obs-detail-h{font-size:var(--obs-text-xs);color:var(--obs-muted);margin:6px 0 4px}
+.obs-improve{margin-top:6px;font-size:var(--obs-text-xs);line-height:1.5}
+.obs-dims{margin:6px 0}
+.obs-sort{margin-left:auto;display:inline-flex;align-items:center;gap:6px;font-weight:normal;color:var(--obs-muted)}
+.obs-sort select{height:var(--control-h,32px)}
+button:focus-visible,a:focus-visible,select:focus-visible,input:focus-visible,textarea:focus-visible,summary:focus-visible{outline:2px solid var(--color-accent,#2d7dde);outline-offset:2px}
+
+/* 공백 화면 */
+.obs-regress-bar{display:flex;flex-wrap:wrap;justify-content:space-between;align-items:center;gap:8px;border:1px solid var(--obs-line);border-radius:var(--obs-radius);background:var(--obs-surface);padding:8px 12px;margin:0 0 var(--obs-gap)}
+.obs-regress-bar.emph{border-color:var(--obs-info-line);background:var(--obs-info-bg)}
+.obs-flash{margin:0 0 var(--obs-gap)}
+.obs-flash-box{border:1px solid var(--obs-line);border-radius:var(--obs-radius);padding:8px 12px;background:var(--obs-surface)}
+.obs-flash-box.ok{background:var(--obs-ok-bg);border-color:var(--obs-ok-line);color:var(--obs-ok)}
+.obs-flash-box.warn{background:var(--obs-warn-bg);border-color:var(--obs-warn-line);color:var(--obs-warn)}
+.obs-flash-box.err{background:var(--obs-err-bg);border-color:var(--obs-err-line);color:var(--obs-err)}
+.obs-actions{display:grid;grid-template-columns:repeat(2,max-content);gap:4px;justify-content:start}
+.obs-actions button{white-space:nowrap}
+.obs-gap-row .obs-q{white-space:normal;overflow:visible;text-overflow:clip;min-width:220px;max-width:300px;word-break:keep-all;overflow-wrap:break-word}
+.obs-gap-row td.obs-num{white-space:normal}
+/* 최근 발생: 날짜·시각은 한 줄, 헤더도 잘리지 않게 */
+.obs-gaps-table th.obs-th-date{white-space:nowrap;min-width:140px}
+.obs-gap-row td.obs-date{white-space:nowrap;min-width:140px}
+/* 관련 문서: 긴 id는 말줄임 (전체는 title) */
+.obs-gap-row td.obs-docs{max-width:150px}
+.obs-gap-row .obs-ellip{display:inline-block;max-width:140px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;vertical-align:bottom}
+/* 골든 항목 id: 토큰 중간에서 줄바꿈하지 않고 말줄임 (전체는 title) */
+.obs-gap-row td.obs-mono.obs-gid{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;overflow-wrap:normal;word-break:keep-all;max-width:150px}
+.obs-judge-cell{min-width:160px;max-width:240px;word-break:keep-all;overflow-wrap:break-word}
+.obs-clamp{display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden}
+.obs-history{margin-top:4px}
+.obs-history ul{margin:4px 0 0;padding-left:18px;color:var(--obs-muted)}
+
+/* 트레이스 목록: 엔진·판정 병합 셀, 질문 폭 축소, 좁은 화면에서 출처 열 숨김 (상세 화면에는 모두 표시) */
+.obs-traces-table td.obs-q{max-width:240px}
+.obs-traces-table td.obs-engv{white-space:normal;min-width:160px}
+.obs-traces-table .obs-engv-eng{white-space:nowrap;word-break:keep-all;overflow-wrap:normal;margin-bottom:2px}
+@media (max-width:1599px){ .obs-traces-table .obs-col-origin{display:none} }
+
+/* 대화상자 */
+dialog.obs-dialog{border:1px solid var(--obs-line);border-radius:var(--obs-radius);background:var(--obs-surface);color:var(--obs-text);padding:0;width:min(560px,92vw)}
+dialog.obs-dialog::backdrop{background:rgba(20,35,58,.45)}
+.obs-dialog-form{display:grid;gap:var(--space-2,8px);padding:16px}
+.obs-dialog-form h3{margin:0;font-size:var(--text-md,16px)}
+.obs-field{display:flex;flex-direction:column;gap:2px;font-size:var(--obs-text-xs);color:var(--obs-muted)}
+.obs-field input,.obs-field select,.obs-field textarea{font:inherit;font-size:var(--obs-text-sm);color:var(--obs-text);border:1px solid var(--obs-neutral-line);border-radius:var(--radius-sm,6px);padding:6px 8px;background:var(--obs-surface)}
+.obs-check{display:flex;align-items:center;gap:6px;font-size:var(--obs-text-sm)}
+.obs-fieldset{border:1px solid var(--obs-line);border-radius:var(--radius-sm,6px);padding:8px;display:grid;gap:var(--space-2,8px)}
+.obs-fieldset legend{font-size:var(--obs-text-xs);color:var(--obs-muted);padding:0 4px}
+.obs-dialog-actions{display:flex;justify-content:flex-end;gap:8px}
+
+@media (max-width:1100px){ .obs-detail-grid{grid-template-columns:1fr} }

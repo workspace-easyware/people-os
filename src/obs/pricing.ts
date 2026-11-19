@@ -30,6 +30,18 @@ export const MODEL_PRICES: Record<string, ModelPrice> = {
   "@cf/meta/llama-3.3-70b-instruct-fp8-fast": { inPerM: 0.29, outPerM: 2.25, checked: null, note: "debug-ai 후보" },
 };
 
+// Whisper는 토큰이 아니라 오디오 분당 과금이다 — 위 토큰 단가표와 별개.
+// 출처: PRICING_SOURCE (Workers AI Pricing 표), 2026-11-19 직접 확인:
+//   @cf/openai/whisper-large-v3-turbo | $0.0005 per audio minute | 46.63 neurons per audio minute
+//   뉴런 단가: $0.011 / 1,000 뉴런 (Workers Paid는 하루 10,000 뉴런 무료분 초과분만 과금)
+export const WHISPER_PRICE = { model: "@cf/openai/whisper-large-v3-turbo", neuronsPerMin: 46.63, usdPerMin: 0.0005, checked: "2026-11-19" } as const;
+
+/** 길이(ms) → 예상 뉴런. 길이를 모르면 null (0으로 채우지 않는다). */
+export function estimateWhisperNeurons(durationMs: number | null | undefined): number | null {
+  if (typeof durationMs !== "number" || !Number.isFinite(durationMs) || durationMs <= 0) return null;
+  return Math.round((durationMs / 60_000) * WHISPER_PRICE.neuronsPerMin);
+}
+
 /** 게이트웨이 로그의 model 값은 `@cf/` 접두어가 빠져 올 수 있다 — 둘 다 받는다. */
 export function priceFor(model: string | null | undefined): ModelPrice | null {
   if (!model) return null;

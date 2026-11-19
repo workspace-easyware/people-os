@@ -4,7 +4,8 @@
 // 붙여 넣으면 복호화가 실패한다. 저장 형식: 'v1.<base64url IV>.<base64url 암호문(태그 포함)>'.
 // 이 파일은 평문·키를 로그에 찍지 않는다. 실패는 전부 CryptoError(메시지에 비밀 없음).
 
-export type TokenPurpose = "refresh" | "access" | "pkce";
+// plaud-* 용도는 Plaud 연동(2026-11-19)이 같은 키(GCAL_TOKEN_KEY)로 쓴다. 용도가 AAD에 들어가므로 구글 칸과 서로 바꿔 넣을 수 없다.
+export type TokenPurpose = "refresh" | "access" | "pkce" | "plaud-refresh" | "plaud-access" | "plaud-pkce";
 
 const VERSION = "v1";
 const enc = new TextEncoder();

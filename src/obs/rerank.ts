@@ -76,6 +76,9 @@ export type RerankOutcome = {
   sources: Source[];
   reranked: boolean;
   winnerId?: string;
+  // XAI 보완 (2026-11-19): 재순위 모델이 실제로 고른 근거 id (원래 1위를 그대로 고른 경우 포함).
+  // 판정 실패·호출 실패면 없다 — 그때는 "결정적 근거" 표시를 하지 않는다.
+  decidedId?: string;
   reason: string;
 };
 
@@ -91,10 +94,11 @@ export async function rerankSources(env: { AI: unknown }, question: string, sour
   try {
     const out = await ai.run(RERANK_MODEL_CLEF_OMNI, buildRerankInput(question, candidates), aiGatewayOptions({ tag: "evidence-rerank" }));
     const idx = parseRerankAnswer(out, candidates.length);
-    if (idx === null || idx === 0) return { sources, reranked: false, reason: idx === 0 ? "rerank kept top candidate" : "rerank parse failed, fail-open" };
+    if (idx === null) return { sources, reranked: false, reason: "rerank parse failed, fail-open" };
+    if (idx === 0) return { sources, reranked: false, decidedId: candidates[0].id, reason: "rerank kept top candidate" };
     const winner = candidates[idx];
     const rest = sources.filter((s) => s.id !== winner.id);
-    return { sources: [winner, ...rest], reranked: true, winnerId: winner.id, reason: `clef-omni picked rank ${idx + 1} as top` };
+    return { sources: [winner, ...rest], reranked: true, winnerId: winner.id, decidedId: winner.id, reason: `clef-omni picked rank ${idx + 1} as top` };
   } catch (e) {
     return { sources, reranked: false, reason: `rerank failed, fail-open: ${e instanceof Error ? e.message : String(e)}` };
   }
