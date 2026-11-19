@@ -1,0 +1,4 @@
+# 화상회의 V0 로컬 검증 전용 목 Worker 설정 (배포하지 않는다).
+name = "mock-rtk-v0"
+main = "mock-rtk-worker.js"
+compatibility_date = "2025-07-18"

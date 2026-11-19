@@ -1,0 +1,9 @@
+# MIME 파서 테스트 전용 로컬 워커 (배포하지 않음). run-mime-tests.mjs 참고.
+name = "people-os-mime-tests"
+main = "run-mime-tests.mjs"
+compatibility_date = "2025-01-01"
+
+[[rules]]
+type = "Text"
+globs = ["**/*.eml"]
+fallthrough = true

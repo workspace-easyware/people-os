@@ -4,3 +4,8 @@ node_modules/
 dist/
 *.log
 .ref/
+# local miniflare state from verification harnesses
+files/**/state/v3/
+files/**/state-*/v3/
+__pycache__/
+*.pyc

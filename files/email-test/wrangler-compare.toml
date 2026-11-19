@@ -1,0 +1,9 @@
+# mime.ts vs postal-mime 비교 전용 로컬 워커 (배포하지 않음). compare-postal.mjs 참고.
+name = "people-os-mime-compare"
+main = "compare-postal.mjs"
+compatibility_date = "2025-01-01"
+
+[[rules]]
+type = "Text"
+globs = ["**/*.eml"]
+fallthrough = true
