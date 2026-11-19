@@ -1,0 +1,42 @@
+# 캘린더 C2 로컬 검증 전용 설정 (배포에 쓰지 않는다). 원본 wrangler.toml에서 경로만 바꾼 사본:
+# assets = 검증용 site/ (index.html 사본에 캘린더 배선), main·migrations는 상위 프로젝트를 가리킨다.
+name = "people-os-c2-verify"
+main = "../../src/index.ts"
+compatibility_date = "2025-07-18"
+compatibility_flags = ["nodejs_compat"]
+
+[assets]
+directory = "./site"
+binding = "ASSETS"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "people-os-db"
+database_id = "5dff997a-fe7b-4f27-9624-1c88e40857c1"
+migrations_dir = "../../migrations"
+
+[[kv_namespaces]]
+binding = "CACHE"
+id = "de4c7ddf4c76495381ba82c56fb23dbb"
+
+[[r2_buckets]]
+binding = "FILES"
+bucket_name = "people-os-files"
+
+[ai]
+binding = "AI"
+
+[[durable_objects.bindings]]
+name = "AGENT_SESSION"
+class_name = "AgentSession"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["AgentSession"]
+
+[[queues.producers]]
+binding = "PIPELINE"
+queue = "people-os-pipeline"
+
+[vars]
+CF_ACCOUNT_ID = "44501085a1a83d8c0f838a44c1800144"

@@ -1,0 +1,33 @@
+From: =?UTF-8?B?7ZmN6ri464+Z?= <hong@example.com>
+To: hr.jhkang@peopleos.site
+Cc: other@example.com
+Subject: =?UTF-8?B?7Jew7LCoIOyLoOyyrSDrrLjsnZg=?=
+Date: Tue, 17 Nov 2026 10:00:00 +0900
+Message-ID: <t1-abc@example.com>
+MIME-Version: 1.0
+Content-Type: multipart/mixed; boundary="MIX"
+
+preamble
+--MIX
+Content-Type: multipart/alternative; boundary="ALT"
+
+--ALT
+Content-Type: text/plain; charset=euc-kr
+Content-Transfer-Encoding: quoted-printable
+
+=BE=C8=B3=E7=C7=CF=BC=BC=BF=E4. =BF=AC=C2=F7 3=C0=CF =BD=C5=C3=BB=C7=D5=B4=CF=
+=B4=D9.
+--ALT
+Content-Type: text/html; charset=utf-8
+Content-Transfer-Encoding: base64
+
+PHA+7JWI64WV7ZWY7IS47JqULiA8Yj7sl7DssKggM+ydvDwvYj4g7Iug7LKt7ZWp64uI64ukLjwv
+cD48c2NyaXB0PmFsZXJ0KDEpPC9zY3JpcHQ+
+--ALT--
+--MIX
+Content-Type: application/pdf; name="x.pdf"
+Content-Disposition: attachment; filename*=UTF-8''%ED%9C%B4%EA%B0%80%EC%8B%A0%EC%B2%AD%EC%84%9C.pdf
+Content-Transfer-Encoding: base64
+
+JVBERi0xLjQKJcOkw7zDtsOfCg==
+--MIX--

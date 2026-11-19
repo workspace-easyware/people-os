@@ -1,0 +1,15 @@
+# [검증 전용] O-A 발표자료 틀 로컬 확인. 배포 금지 (로컬 dev만).
+# 실행: (people-os 디렉터리에서) npx wrangler dev --local -c files/pitch-verify/wrangler.toml --port 8791
+name = "pitch-verify-local"
+main = "worker.mjs"
+compatibility_date = "2025-07-18"
+
+[assets]
+directory = "../../public"
+binding = "ASSETS"
+run_worker_first = true
+
+[[rules]]
+type = "Text"
+globs = ["**/*.html"]
+fallthrough = false

@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>영상 통화 · People OS</title>
+  <!-- 화상회의 V0 (2026-11-19): RealtimeKit SDK는 이 페이지에서만 불러온다 (index.html에는 넣지 않는다). -->
+  <link rel="stylesheet" href="/meet.css" />
+</head>
+<body>
+  <header class="meet-top">
+    <a href="/" class="meet-home">← People OS</a>
+    <h1 id="meet-title">영상 통화</h1>
+  </header>
+  <main id="meet-main">
+    <section id="meet-panel" class="meet-panel">
+      <p id="meet-status" class="meet-status">불러오는 중…</p>
+      <div id="meet-body"></div>
+    </section>
+    <!-- mode="fill": 부모(#meet-main) 크기를 채운다 (문서 React 예시와 같은 값). 기본 모드에 맡기지 않는다. -->
+    <rtk-meeting id="rtk" mode="fill" show-setup-screen="true" hidden></rtk-meeting>
+  </main>
+  <script src="/meet.js" type="module"></script>
+</body>
+</html>

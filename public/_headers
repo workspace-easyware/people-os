@@ -1,5 +1,10 @@
-# 정적 프론트 캐시 정책 (public/에는 index.html 단일 파일만 있음).
+# 정적 프론트 캐시·보안 헤더 (Workers Assets가 public/의 모든 정적 파일에 붙인다).
 # 배포 직후 검증에서 구 HTML이 캐시돼 새 코드가 안 보이는 일이 반복돼서,
 # 브라우저가 매번 재확인하도록 한다 (304 재확인이라 비용은 거의 없음).
+# 전체 점검(2026-11-18): 기본 보안 헤더 3개 추가 — MIME 스니핑 차단, 다른 사이트의 iframe 삽입 차단(클릭재킹),
+# 외부로 나가는 Referer 축소. script-src CSP는 인라인 스크립트·onclick이 많아 지금은 넣지 않는다.
 /*
   Cache-Control: no-cache
+  X-Content-Type-Options: nosniff
+  X-Frame-Options: SAMEORIGIN
+  Referrer-Policy: strict-origin-when-cross-origin

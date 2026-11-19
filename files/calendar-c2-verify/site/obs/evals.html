@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>평가 · 관측 (S4)</title>
+<link rel="stylesheet" href="/styles.css">
+<link rel="stylesheet" href="/obs/obs.css">
+<link rel="stylesheet" href="/obs/evals.css">
+<style>
+  body{margin:0;background:var(--color-bg,#f6f6f7);font-family:var(--font-sans,sans-serif)}
+  .obs-page{max-width:1440px;margin:0 auto;padding:16px}
+  .obs-page nav{display:flex;gap:16px;font-size:13px;margin-bottom:8px}
+  .obs-page nav a{color:var(--color-accent,#2d7dde)}
+</style>
+</head>
+<body>
+<!-- 단독 평가 화면 (실제 /api/obs/* 호출). 사이드바 통합 전(M6-β)에는 라우터가 마운트되지 않아 오류 문구가 보이는 게 정상이다.
+     픽스처로 렌더하려면 dev-evals.html. 라우트: #obs/evals (기본) · #obs/run/<runId> -->
+<div class="obs-page">
+  <nav aria-label="관측 · 평가">
+    <a href="/obs/evals.html">평가</a>
+    <a href="/obs/gaps.html" data-gaps-link>개선 루프</a>
+  </nav>
+  <section class="card" id="obs-mount"></section>
+</div>
+<script src="/obs/common.js"></script>
+<script src="/obs/evals.js"></script>
+<script src="/obs/gaps.js"></script>
+<script>
+(function () {
+  var el = document.getElementById('obs-mount');
+  var current = null;
+  function route() {
+    var h = location.hash.replace(/^#/, '');
+    if (h.indexOf('obs/') !== 0) h = 'obs/evals';
+    if (current) current.unmount();
+    current = window.PeopleOSObs.evals.mount(el, { route: h.slice(4) });
+  }
+  window.addEventListener('hashchange', route);
+  route();
+  window.PeopleOSObs.gaps.openCount().then(function (n) {
+    document.querySelector('[data-gaps-link]').textContent = '개선 루프 (열린 공백 ' + n + ')';
+  });
+})();
+</script>
+</body>
+</html>

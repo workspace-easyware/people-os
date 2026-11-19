@@ -1,0 +1,31 @@
+/* 메일함 (2026-11-17) — 기존 디자인 토큰(남색 #123863, 테두리 #E4E4E7) 그대로. */
+.email-head{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:var(--space-3)}
+.email-search{display:flex;gap:var(--space-2);align-items:center;flex:1;min-width:280px;max-width:560px}
+.email-search input{flex:1;margin:0}
+.email-search button{margin-top:0}
+#emailScope{margin-left:auto;height:32px;border:1px solid var(--color-line-strong);border-radius:6px;padding:0 8px;background:#fff}
+.email-list{border:1px solid var(--color-line);border-radius:8px;overflow:hidden}
+.email-row{display:grid;grid-template-columns:32px minmax(120px,200px) 1fr auto;gap:var(--space-3);align-items:center;padding:10px 12px;border-bottom:1px solid var(--color-line);cursor:pointer;background:#fff}
+.email-row:last-child{border-bottom:0}
+.email-row:hover{background:var(--color-surface-soft)}
+.email-row.unread{background:var(--color-primary-soft)}
+.email-row.unread .email-from{font-weight:700;color:var(--color-primary)}
+.email-from{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;display:flex;align-items:center;gap:6px}
+.email-subj{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}
+.email-subj .small{margin-left:6px}
+.email-meta{white-space:nowrap;color:var(--color-muted);font-size:12px}
+.email-dot{width:8px;height:8px;border-radius:50%;background:var(--color-primary);flex:none}
+.email-star{border:0;background:none;font-size:18px;line-height:1;color:var(--color-text-3);padding:0;margin:0}
+.email-star.on{color:var(--cat-amber)}
+.email-hdr{display:grid;grid-template-columns:80px 1fr;gap:4px 12px;margin:8px 0 16px;font-size:13px}
+.email-hdr dt{color:var(--color-muted)}
+.email-hdr dd{margin:0;word-break:break-all}
+.email-text{white-space:pre-wrap;word-break:break-word;font:inherit;background:var(--color-surface-soft);border:1px solid var(--color-line);border-radius:8px;padding:12px;margin:0}
+.email-html{width:100%;min-height:200px;border:1px solid var(--color-line);border-radius:8px;background:#fff}
+.email-thread{list-style:none;padding-left:0}
+.email-thread li.cur a{font-weight:700;color:var(--color-primary)}
+.email-draft{margin-top:var(--space-4);border-top:1px dashed var(--color-line-strong);padding-top:var(--space-3)}
+#emailComposeCard input[type=text]{margin:0 0 8px}
+#emailComposeCard textarea{min-height:220px}
+.nav-count{margin-left:auto;background:var(--color-primary);color:#fff;border-radius:999px;font-size:11px;line-height:16px;padding:0 6px}
+@media (max-width:720px){.email-row{grid-template-columns:28px 1fr;}.email-subj,.email-meta{grid-column:2}}
