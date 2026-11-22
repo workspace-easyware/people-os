@@ -1,0 +1,15 @@
+{
+  "instruction": "신규 코치를 위한 온보딩 안내 문서를 써 줘. 개요 문단, 첫 주 일정 표(요일·할 일 두 열, 5행), 준비물 글머리 목록, 첫 세션 진행 순서 번호 목록 순서로.",
+  "title": "신규 코치 온보딩 안내",
+  "model": "@cf/qwen/qwen3.8-27b (LLM_MODEL), reasoning_effort low",
+  "attempts": [
+    { "version": "5ebf2536", "http": 502, "wall_s": 12.0, "result": "AI가 문서 구조(JSON)를 돌려주지 않았습니다.", "note": "진단 로그 전 버전이라 원문 없음. 아래 관찰로 보아 마지막 } 빠짐일 가능성이 크다 (미확정)", "file": "live-instruction.json" },
+    { "version": "5ebf2536 또는 e33736ed", "http": 201, "wall_s": 10.6, "result": "섹션 1개(개요)만 — 지시의 표·목록이 빠짐 (형식은 맞아 검증 통과)", "doc": "doc_mwpyknrl_rjui01", "file": "live-instruction-2.json, docx-create-pilot/out/created-live-ai-1.docx" },
+    { "version": "53c87008", "http": 422, "wall_s": 13.1, "log": { "parsed": true, "finish": "stop", "completionTokens": 446, "sections": 4 }, "result": "sections[1].table.rows[0] 칸 수(10)가 헤더(2)보다 많습니다 — 5행 표를 행 1개로 폄", "file": "live-instruction-3.json" },
+    { "version": "a2363da3 (표 보정 + 1회 재시도)", "http": 201, "wall_s": 49.0, "log": [
+        { "attempt": 1, "parsed": false, "problem": "JSON 객체가 아니다", "finish": "stop", "completionTokens": 478, "tail_end": "…\"]}]  ← 마지막 } 빠짐" },
+        { "attempt": 2, "parsed": true, "ok": true, "completionTokens": 488, "sections": 4 }
+      ], "result": "섹션 4 (개요 문단 / 표 5행 / 글머리 5 / 번호 6), planAttempts 2", "doc": "doc_mwpysn16_e7a7no", "file": "live-instruction-4.json, live-ai-reread.json, docx-create-pilot/out/created-live-ai.docx" }
+  ],
+  "fix_after": "2a237a1f: 닫는 괄호 보정(closeTruncatedJson) — 위 attempt 1 모양을 첫 시도에서 살린다. 시험: evidence/repair-test.json"
+}

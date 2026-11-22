@@ -1,0 +1,140 @@
+{
+  "bytes": 16476,
+  "parts": [
+    "[Content_Types].xml",
+    "_rels/.rels",
+    "docProps/app.xml",
+    "docProps/core.xml",
+    "docProps/custom.xml",
+    "word/_rels/document.xml.rels",
+    "word/_rels/endnotes.xml.rels",
+    "word/_rels/fontTable.xml.rels",
+    "word/_rels/footer1.xml.rels",
+    "word/_rels/footnotes.xml.rels",
+    "word/_rels/header1.xml.rels",
+    "word/document.xml",
+    "word/endnotes.xml",
+    "word/fontTable.xml",
+    "word/footer1.xml",
+    "word/footnotes.xml",
+    "word/header1.xml",
+    "word/media/image1.jpg",
+    "word/media/image1.png",
+    "word/numbering.xml",
+    "word/settings.xml",
+    "word/styles.xml",
+    "word/theme/theme1.xml"
+  ],
+  "media": [
+    {
+      "name": "word/media/image1.jpg",
+      "bytes": 408,
+      "sniff": {
+        "type": "jpg",
+        "width": 320,
+        "height": 200
+      }
+    },
+    {
+      "name": "word/media/image1.png",
+      "bytes": 8897,
+      "sniff": {
+        "type": "png",
+        "width": 800,
+        "height": 450
+      }
+    }
+  ],
+  "drawings": [
+    {
+      "inline": true,
+      "widthPx": 601,
+      "heightPx": 338,
+      "target": "media/image1.png",
+      "targetExists": true,
+      "align": "center",
+      "paragraphText": ""
+    },
+    {
+      "inline": true,
+      "widthPx": 320,
+      "heightPx": 200,
+      "target": "media/image1.jpg",
+      "targetExists": true,
+      "align": "center",
+      "paragraphText": ""
+    }
+  ],
+  "toc": {
+    "present": true,
+    "field": "TOC \\h \\o \"1-2\"",
+    "dirty": true,
+    "docPartGallery": "Table of Contents",
+    "entries": [
+      {
+        "style": "TOC1",
+        "text": "개요",
+        "anchor": "_Toc1"
+      },
+      {
+        "style": "TOC1",
+        "text": "진행 방식",
+        "anchor": "_Toc2"
+      }
+    ],
+    "anchorsResolve": true,
+    "bookmarks": 2
+  },
+  "headings": [
+    {
+      "style": "Heading1",
+      "text": "개요"
+    },
+    {
+      "style": "Heading1",
+      "text": "진행 방식"
+    }
+  ],
+  "headers": [
+    {
+      "type": "default",
+      "target": "header1.xml",
+      "exists": true,
+      "text": "4분기 코칭 프로그램",
+      "align": "right",
+      "fields": []
+    }
+  ],
+  "footers": [
+    {
+      "type": "default",
+      "target": "footer1.xml",
+      "exists": true,
+      "text": " / ",
+      "align": "center",
+      "fields": [
+        "PAGE",
+        "NUMPAGES"
+      ]
+    }
+  ],
+  "titlePg": false,
+  "settings": {
+    "updateFields": false
+  },
+  "contentTypes": [
+    "png",
+    "jpeg",
+    "jpg",
+    "bmp",
+    "gif",
+    "svg",
+    "rels",
+    "xml",
+    "odttf"
+  ],
+  "xml": {
+    "checked": 21,
+    "errors": []
+  }
+}

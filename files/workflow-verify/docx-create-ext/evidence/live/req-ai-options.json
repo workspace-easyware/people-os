@@ -1,0 +1,8 @@
+{
+  "title": "신규 코치 온보딩 안내 (화면 옵션)",
+  "instruction": "신규 코치 온보딩 안내 문서를 써 줘. 개요, 첫 주 일정(표: 요일·할 일), 준비물 목록 순서로 짧게.",
+  "images": [{ "doc": "doc_mwqs42hp_nqub6v", "widthPct": 50 }],
+  "toc": true,
+  "header": "신규 코치 온보딩",
+  "footer": { "text": "People OS", "pageNumber": true }
+}

@@ -1,0 +1,103 @@
+{
+  "tables": [],
+  "placeholders": {
+    "tableHeaderCells": 0,
+    "tableBodyCells": 0,
+    "paragraphsOrItems": []
+  },
+  "xml": {
+    "checked": 17,
+    "errors": []
+  },
+  "blocks": [
+    {
+      "type": "p",
+      "style": "Title",
+      "text": "분기 코칭 운영 보고서"
+    },
+    {
+      "type": "p",
+      "style": "Heading1",
+      "text": "요약"
+    },
+    {
+      "type": "p",
+      "style": null,
+      "text": "본 보고서는 해당 분기 동안 수행된 코칭 프로그램의 운영 현황과 성과를 정리한 내용이다. 코치 배정, 세션 진행, 피드백 수집, 후속 조치 등 코칭 전 주기의 운영 결과를 포함하며, 다음 분기 개선 방향을 제시한다."
+    },
+    {
+      "type": "p",
+      "style": "Heading1",
+      "text": "주요 성과"
+    },
+    {
+      "type": "p",
+      "style": "ListParagraph",
+      "text": "코칭 대상자의 세션 완주율이 전 분기 대비 향상되었다.",
+      "numId": 2
+    },
+    {
+      "type": "p",
+      "style": "ListParagraph",
+      "text": "코칭 세션 종료 후 피드백 응답률이 높아져 참여 만족도가 개선되었다.",
+      "numId": 2
+    },
+    {
+      "type": "p",
+      "style": "ListParagraph",
+      "text": "코치 간 사례 공유 회의를 정례화하여 품질 일관성을 높였다.",
+      "numId": 2
+    },
+    {
+      "type": "p",
+      "style": "ListParagraph",
+      "text": "개인별 코칭 계획을 세션마다 점검하여 목표 달성률을 추적하는 체계를 운영하였다.",
+      "numId": 2
+    },
+    {
+      "type": "p",
+      "style": "Heading1",
+      "text": "코치별 세션 현황"
+    },
+    {
+      "type": "p",
+      "style": null,
+      "text": "코치별 세션 현황(코치명, 주제, 세션 수)은 작성 지시에 구체적인 값이 없어 표에 넣지 않았습니다."
+    },
+    {
+      "type": "p",
+      "style": "Heading1",
+      "text": "다음 분기 실행 계획"
+    },
+    {
+      "type": "p",
+      "style": "ListParagraph",
+      "text": "코치별 워크로드를 점검하여 과다 집중된 세션을 균등하게 재배정한다.",
+      "numId": 3
+    },
+    {
+      "type": "p",
+      "style": "ListParagraph",
+      "text": "신규 코치 대상 온보딩 세션을 신설하여 운영 기준을 공유한다.",
+      "numId": 3
+    },
+    {
+      "type": "p",
+      "style": "ListParagraph",
+      "text": "코칭 대상자별 분기 목표 달성도를 재평가하고 미달성자에게 추가 세션을 배정한다.",
+      "numId": 3
+    },
+    {
+      "type": "p",
+      "style": "ListParagraph",
+      "text": "피드백 결과를 바탕으로 코칭 질문 스크립트를 업데이트한다.",
+      "numId": 3
+    },
+    {
+      "type": "p",
+      "style": "ListParagraph",
+      "text": "다음 분기 운영 일정과 코치 배정안을 분기 시작 전 2주까지 확정한다.",
+      "numId": 3
+    }
+  ]
+}

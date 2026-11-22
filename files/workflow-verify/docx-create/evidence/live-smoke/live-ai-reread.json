@@ -1,0 +1,149 @@
+{
+  "parts": [
+    "[Content_Types].xml",
+    "_rels/.rels",
+    "docProps/app.xml",
+    "docProps/core.xml",
+    "docProps/custom.xml",
+    "word/_rels/document.xml.rels",
+    "word/_rels/endnotes.xml.rels",
+    "word/_rels/fontTable.xml.rels",
+    "word/_rels/footnotes.xml.rels",
+    "word/document.xml",
+    "word/endnotes.xml",
+    "word/fontTable.xml",
+    "word/footnotes.xml",
+    "word/numbering.xml",
+    "word/settings.xml",
+    "word/styles.xml",
+    "word/theme/theme1.xml"
+  ],
+  "blocks": [
+    {
+      "type": "p",
+      "style": "Title",
+      "text": "신규 코치 온보딩 안내"
+    },
+    {
+      "type": "p",
+      "style": "Heading1",
+      "text": "개요"
+    },
+    {
+      "type": "p",
+      "style": null,
+      "text": "본 문서는 신규 코치가 팀에 합류한 후 첫 주 동안의 일정, 준비물, 그리고 첫 세션 진행 순서를 안내하기 위해 작성되었습니다. 온보딩 과정을 통해 코치로서의 역할을 빠르게 파악하고 팀과의 원활한 협업을 시작할 수 있도록 돕습니다."
+    },
+    {
+      "type": "p",
+      "style": "Heading1",
+      "text": "첫 주 일정"
+    },
+    {
+      "type": "table",
+      "rows": [
+        [
+          "요일",
+          "할 일"
+        ],
+        [
+          "월",
+          "팀 오리엔테이션 및 동료 소개"
+        ],
+        [
+          "화",
+          "시스템 및 도구 교육"
+        ],
+        [
+          "수",
+          "기존 세션 참관 및 관찰"
+        ],
+        [
+          "목",
+          "멘토와 1:1 미팅, 피드백"
+        ],
+        [
+          "금",
+          "첫 세션 준비 및 최종 점검"
+        ]
+      ],
+      "headerRow": true
+    },
+    {
+      "type": "p",
+      "style": "Heading1",
+      "text": "준비물"
+    },
+    {
+      "type": "p",
+      "style": "ListParagraph",
+      "text": "업무용 노트북 및 외부 모니터",
+      "numId": 2
+    },
+    {
+      "type": "p",
+      "style": "ListParagraph",
+      "text": "회사 이메일 계정 및 메신저 가입",
+      "numId": 2
+    },
+    {
+      "type": "p",
+      "style": "ListParagraph",
+      "text": "코치 매뉴얼 및 가이드북 (최신 버전)",
+      "numId": 2
+    },
+    {
+      "type": "p",
+      "style": "ListParagraph",
+      "text": "본인의 프로필 사진 및 간단한 자기소개서",
+      "numId": 2
+    },
+    {
+      "type": "p",
+      "style": "ListParagraph",
+      "text": "개인용 수첩 또는 메모 앱 (세션 기록용)",
+      "numId": 2
+    },
+    {
+      "type": "p",
+      "style": "Heading1",
+      "text": "첫 세션 진행 순서"
+    },
+    {
+      "type": "p",
+      "style": "ListParagraph",
+      "text": "셀프 소개 및 참여자들과의 인사를 나누기",
+      "numId": 3
+    },
+    {
+      "type": "p",
+      "style": "ListParagraph",
+      "text": "세션 목표와 진행 방식을 간단히 설명하기",
+      "numId": 3
+    },
+    {
+      "type": "p",
+      "style": "ListParagraph",
+      "text": "참여자 사전 설문지 또는 인터뷰 내용을 공유하기",
+      "numId": 3
+    },
+    {
+      "type": "p",
+      "style": "ListParagraph",
+      "text": "핵심 주제에 대한 탐색 및 대화 진행하기",
+      "numId": 3
+    },
+    {
+      "type": "p",
+      "style": "ListParagraph",
+      "text": "세션 정리 및 후속 일정 안내하기",
+      "numId": 3
+    },
+    {
+      "type": "p",
+      "style": "ListParagraph",
+      "text": "참여자에게 피드백 요청 및 마무리 인사",
+      "numId": 3
+    }
+  ]
+}

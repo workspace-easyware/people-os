@@ -1,0 +1,189 @@
+{
+ "doc": "lib",
+ "ok": true,
+ "passed": 18,
+ "total": 18,
+ "failed": [],
+ "checks": {
+  "맨 앞 insert (after 0)": true,
+  "replace 처음 1곳만 (3번 문단)": true,
+  "표의 김코치는 그대로": true,
+  "대조군의 김코치는 그대로": true,
+  "24회 → 30회 (굵게 run)": true,
+  "cell op 15": true,
+  "글머리 문단 교체": true,
+  "글머리 뒤 insert": true,
+  "새 문단이 글머리(numPr)를 물려받음": true,
+  "delete: 코치 추가 선발 없어짐": true,
+  "머리글 교체": true,
+  "대조군 문단 XML 바이트 동일": true,
+  "sectPr(구역 설정) 바이트 동일": true,
+  "바뀐 부품은 document.xml과 머리글뿐": true,
+  "모든 부품 XML well-formed": true,
+  "원본 입력 bytes 그대로": true,
+  "저장본 다시 열림": true,
+  "같은 입력·ops면 같은 바이트 (결정적)": true
+ },
+ "sizes": {
+  "before": 11817,
+  "after": 11858
+ },
+ "parts": {
+  "identicalCount": 19,
+  "changed": [
+   "word/document.xml",
+   "word/header1.xml"
+  ],
+  "removed": [],
+  "added": []
+ },
+ "xml": {
+  "checked": 21,
+  "errors": []
+ },
+ "log": [
+  {
+   "i": 0,
+   "op": "replace",
+   "count": 1
+  },
+  {
+   "i": 1,
+   "op": "replace",
+   "count": 1
+  },
+  {
+   "i": 2,
+   "op": "cell",
+   "table": 1,
+   "r": 1,
+   "c": 2,
+   "paragraphs": 1
+  },
+  {
+   "i": 3,
+   "op": "paragraph",
+   "index": 18
+  },
+  {
+   "i": 4,
+   "op": "insert",
+   "after": 18
+  },
+  {
+   "i": 5,
+   "op": "delete",
+   "index": 19
+  },
+  {
+   "i": 6,
+   "op": "replace",
+   "count": 1
+  },
+  {
+   "i": 7,
+   "op": "insert",
+   "after": 0
+  }
+ ],
+ "diff": [
+  {
+   "index": 3,
+   "where": "body",
+   "kind": "changed",
+   "before": "담당 코치: 김코치",
+   "after": "담당 코치: 최코치"
+  },
+  {
+   "index": 2,
+   "where": "body",
+   "kind": "changed",
+   "before": "2026년 상반기 코칭 세션은 총 24회 진행되었습니다.",
+   "after": "2026년 상반기 코칭 세션은 총 30회 진행되었습니다."
+  },
+  {
+   "index": 10,
+   "where": "table",
+   "table": 1,
+   "r": 1,
+   "c": 2,
+   "kind": "changed",
+   "before": "12",
+   "after": "15"
+  },
+  {
+   "index": 18,
+   "where": "body",
+   "kind": "changed",
+   "before": "하반기 일정 확정",
+   "after": "하반기 일정 확정 (7월 첫 주)"
+  },
+  {
+   "index": null,
+   "where": "body",
+   "kind": "added",
+   "afterIndex": 18,
+   "before": null,
+   "after": "외부 코치 풀 검토"
+  },
+  {
+   "index": 19,
+   "where": "body",
+   "kind": "removed",
+   "before": "코치 추가 선발",
+   "after": null
+  },
+  {
+   "index": null,
+   "where": "header",
+   "kind": "changed",
+   "before": "일잇 People OS — 머리글",
+   "after": "일잇 People OS — 머리글(편집)"
+  },
+  {
+   "index": null,
+   "where": "body",
+   "kind": "added",
+   "afterIndex": 0,
+   "before": null,
+   "after": "[편집본] 맨 앞에 넣은 문단"
+  }
+ ],
+ "warnings": {
+  "signatureRemoved": false,
+  "trackedChanges": false,
+  "fixedRunsKept": false,
+  "fixedRunsRemoved": false
+ },
+ "documentXml": {
+  "before": 6407,
+  "after": 6362
+ },
+ "texts": [
+  "[편집본] 맨 앞에 넣은 문단",
+  "코칭 프로그램 운영 보고서",
+  "2026년 상반기 코칭 세션은 총 30회 진행되었습니다.",
+  "담당 코치: 최코치",
+  "세션 현황",
+  "코치",
+  "주제",
+  "세션 수",
+  "김코치",
+  "리더십",
+  "15",
+  "이코치",
+  "커리어",
+  "8",
+  "박코치",
+  "팀빌딩",
+  "4",
+  "다음 단계",
+  "하반기 일정 확정 (7월 첫 주)",
+  "외부 코치 풀 검토",
+  "대조군 문단 — 이 문단은 편집하지 않는다. 김코치라는 이름이 여기에도 나온다."
+ ],
+ "stories": [
+  "header: 일잇 People OS — 머리글(편집)",
+  "footer: 대외비 — 바닥글"
+ ]
+}

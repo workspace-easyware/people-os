@@ -1,0 +1,130 @@
+{
+  "bytes": 16719,
+  "parts": [
+    "[Content_Types].xml",
+    "_rels/.rels",
+    "docProps/app.xml",
+    "docProps/core.xml",
+    "docProps/custom.xml",
+    "word/_rels/document.xml.rels",
+    "word/_rels/endnotes.xml.rels",
+    "word/_rels/fontTable.xml.rels",
+    "word/_rels/footer1.xml.rels",
+    "word/_rels/footnotes.xml.rels",
+    "word/_rels/header1.xml.rels",
+    "word/document.xml",
+    "word/endnotes.xml",
+    "word/fontTable.xml",
+    "word/footer1.xml",
+    "word/footnotes.xml",
+    "word/header1.xml",
+    "word/media/image1.png",
+    "word/numbering.xml",
+    "word/settings.xml",
+    "word/styles.xml",
+    "word/theme/theme1.xml"
+  ],
+  "media": [
+    {
+      "name": "word/media/image1.png",
+      "bytes": 8897,
+      "sniff": {
+        "type": "png",
+        "width": 800,
+        "height": 450
+      }
+    }
+  ],
+  "drawings": [
+    {
+      "inline": true,
+      "widthPx": 301,
+      "heightPx": 169,
+      "target": "media/image1.png",
+      "targetExists": true,
+      "align": "center",
+      "paragraphText": ""
+    }
+  ],
+  "toc": {
+    "present": true,
+    "field": "TOC \\h \\o \"1-2\"",
+    "dirty": true,
+    "docPartGallery": "Table of Contents",
+    "entries": [
+      {
+        "style": "TOC1",
+        "text": "개요",
+        "anchor": "_Toc1"
+      },
+      {
+        "style": "TOC1",
+        "text": "첫 주 일정",
+        "anchor": "_Toc2"
+      },
+      {
+        "style": "TOC1",
+        "text": "준비물 목록",
+        "anchor": "_Toc3"
+      }
+    ],
+    "anchorsResolve": true,
+    "bookmarks": 3
+  },
+  "headings": [
+    {
+      "style": "Heading1",
+      "text": "개요"
+    },
+    {
+      "style": "Heading1",
+      "text": "첫 주 일정"
+    },
+    {
+      "style": "Heading1",
+      "text": "준비물 목록"
+    }
+  ],
+  "headers": [
+    {
+      "type": "default",
+      "target": "header1.xml",
+      "exists": true,
+      "text": "신규 코치 온보딩",
+      "align": "right",
+      "fields": []
+    }
+  ],
+  "footers": [
+    {
+      "type": "default",
+      "target": "footer1.xml",
+      "exists": true,
+      "text": "People OS  ·   / ",
+      "align": "center",
+      "fields": [
+        "PAGE",
+        "NUMPAGES"
+      ]
+    }
+  ],
+  "titlePg": false,
+  "settings": {
+    "updateFields": false
+  },
+  "contentTypes": [
+    "png",
+    "jpeg",
+    "jpg",
+    "bmp",
+    "gif",
+    "svg",
+    "rels",
+    "xml",
+    "odttf"
+  ],
+  "xml": {
+    "checked": 21,
+    "errors": []
+  }
+}

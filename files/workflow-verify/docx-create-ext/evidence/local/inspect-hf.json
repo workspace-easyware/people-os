@@ -1,0 +1,109 @@
+{
+  "bytes": 13208,
+  "parts": [
+    "[Content_Types].xml",
+    "_rels/.rels",
+    "docProps/app.xml",
+    "docProps/core.xml",
+    "docProps/custom.xml",
+    "word/_rels/document.xml.rels",
+    "word/_rels/endnotes.xml.rels",
+    "word/_rels/fontTable.xml.rels",
+    "word/_rels/footer1.xml.rels",
+    "word/_rels/footer2.xml.rels",
+    "word/_rels/footnotes.xml.rels",
+    "word/_rels/header1.xml.rels",
+    "word/_rels/header2.xml.rels",
+    "word/document.xml",
+    "word/endnotes.xml",
+    "word/fontTable.xml",
+    "word/footer1.xml",
+    "word/footer2.xml",
+    "word/footnotes.xml",
+    "word/header1.xml",
+    "word/header2.xml",
+    "word/numbering.xml",
+    "word/settings.xml",
+    "word/styles.xml",
+    "word/theme/theme1.xml"
+  ],
+  "media": [],
+  "drawings": [],
+  "toc": {
+    "present": false,
+    "field": null,
+    "dirty": false,
+    "docPartGallery": null,
+    "entries": [],
+    "anchorsResolve": true,
+    "bookmarks": 0
+  },
+  "headings": [
+    {
+      "style": "Heading1",
+      "text": "1. 첫 장"
+    },
+    {
+      "style": "Heading1",
+      "text": "2. 둘째 장"
+    }
+  ],
+  "headers": [
+    {
+      "type": "default",
+      "target": "header1.xml",
+      "exists": true,
+      "text": "2026 4분기 코칭 운영 보고서",
+      "align": "right",
+      "fields": []
+    },
+    {
+      "type": "first",
+      "target": "header2.xml",
+      "exists": true,
+      "text": "",
+      "align": null,
+      "fields": []
+    }
+  ],
+  "footers": [
+    {
+      "type": "default",
+      "target": "footer1.xml",
+      "exists": true,
+      "text": "사내 한정  ·   / ",
+      "align": "center",
+      "fields": [
+        "PAGE",
+        "NUMPAGES"
+      ]
+    },
+    {
+      "type": "first",
+      "target": "footer2.xml",
+      "exists": true,
+      "text": "",
+      "align": null,
+      "fields": []
+    }
+  ],
+  "titlePg": true,
+  "settings": {
+    "updateFields": false
+  },
+  "contentTypes": [
+    "png",
+    "jpeg",
+    "jpg",
+    "bmp",
+    "gif",
+    "svg",
+    "rels",
+    "xml",
+    "odttf"
+  ],
+  "xml": {
+    "checked": 25,
+    "errors": []
+  }
+}

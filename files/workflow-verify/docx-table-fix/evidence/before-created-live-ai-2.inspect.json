@@ -1,0 +1,171 @@
+{
+  "tables": [
+    {
+      "tblW": "pct 250000",
+      "tblWPercent": 5000,
+      "layout": "autofit(기본)",
+      "gridCol": [
+        7518658,
+        7518658,
+        7518658
+      ],
+      "gridSum": 22555974,
+      "gridShare": [
+        33.3,
+        33.3,
+        33.3
+      ],
+      "firstRowTcW": [
+        "pct 83300",
+        "pct 83300",
+        "pct 83300"
+      ],
+      "maxDisplayWidth": [
+        11,
+        11,
+        11
+      ],
+      "rows": 5,
+      "placeholderCells": {
+        "header": 0,
+        "body": 12,
+        "bodyCells": 12
+      },
+      "header": [
+        "코치",
+        "주제",
+        "세션 수"
+      ]
+    }
+  ],
+  "placeholders": {
+    "tableHeaderCells": 0,
+    "tableBodyCells": 12,
+    "paragraphsOrItems": [
+      "2026년 4분기 코칭 운영 결과를 보고합니다. 본 분기는 (작성 필요)명이 참여하였으며, 총 (작성 필요)회 세션이 진행되었습니다. 전체적으로 코칭 만족도는 (작성 필요)로 집계되었습니다.",
+      "(작성 필요) 코치 신규 채용 및 배치 완료",
+      "(작성 필요)명 대상 1:1 코칭 세션 제공",
+      "(작성 필요) 프로그램 개발 및 시범 운영",
+      "(작성 필요)",
+      "(작성 필요)",
+      "(작성 필요)",
+      "(작성 필요)",
+      "(작성 필요)"
+    ]
+  },
+  "xml": {
+    "checked": 17,
+    "errors": []
+  },
+  "blocks": [
+    {
+      "type": "p",
+      "style": "Title",
+      "text": "분기 코칭 운영 보고서"
+    },
+    {
+      "type": "p",
+      "style": "Heading1",
+      "text": "요약"
+    },
+    {
+      "type": "p",
+      "style": null,
+      "text": "2026년 4분기 코칭 운영 결과를 보고합니다. 본 분기는 (작성 필요)명이 참여하였으며, 총 (작성 필요)회 세션이 진행되었습니다. 전체적으로 코칭 만족도는 (작성 필요)로 집계되었습니다."
+    },
+    {
+      "type": "p",
+      "style": "Heading1",
+      "text": "주요 성과"
+    },
+    {
+      "type": "p",
+      "style": "ListParagraph",
+      "text": "(작성 필요) 코치 신규 채용 및 배치 완료",
+      "numId": 2
+    },
+    {
+      "type": "p",
+      "style": "ListParagraph",
+      "text": "(작성 필요)명 대상 1:1 코칭 세션 제공",
+      "numId": 2
+    },
+    {
+      "type": "p",
+      "style": "ListParagraph",
+      "text": "(작성 필요) 프로그램 개발 및 시범 운영",
+      "numId": 2
+    },
+    {
+      "type": "p",
+      "style": "ListParagraph",
+      "text": "(작성 필요)",
+      "numId": 2
+    },
+    {
+      "type": "p",
+      "style": "Heading1",
+      "text": "코치별 세션 현황"
+    },
+    {
+      "type": "table",
+      "rows": [
+        [
+          "코치",
+          "주제",
+          "세션 수"
+        ],
+        [
+          "(작성 필요)",
+          "(작성 필요)",
+          "(작성 필요)"
+        ],
+        [
+          "(작성 필요)",
+          "(작성 필요)",
+          "(작성 필요)"
+        ],
+        [
+          "(작성 필요)",
+          "(작성 필요)",
+          "(작성 필요)"
+        ],
+        [
+          "(작성 필요)",
+          "(작성 필요)",
+          "(작성 필요)"
+        ]
+      ],
+      "headerRow": true
+    },
+    {
+      "type": "p",
+      "style": "Heading1",
+      "text": "다음 분기 실행 계획"
+    },
+    {
+      "type": "p",
+      "style": "ListParagraph",
+      "text": "(작성 필요)",
+      "numId": 3
+    },
+    {
+      "type": "p",
+      "style": "ListParagraph",
+      "text": "(작성 필요)",
+      "numId": 3
+    },
+    {
+      "type": "p",
+      "style": "ListParagraph",
+      "text": "(작성 필요)",
+      "numId": 3
+    },
+    {
+      "type": "p",
+      "style": "ListParagraph",
+      "text": "(작성 필요)",
+      "numId": 3
+    }
+  ]
+}

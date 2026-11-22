@@ -1,0 +1,13 @@
+{
+  "title": "확장 라이브 시험 1 — 이미지",
+  "subtitle": "PNG·JPEG·BMP, 너비 지정, 정렬, 캡션",
+  "sections": [
+    { "heading": "1. 가운데 60%", "level": 1, "paragraphs": ["문단 뒤에 색 막대 그림이 본문 폭의 60%로 들어갑니다."],
+      "images": [{ "doc": "doc_mwqs42hp_nqub6v", "widthPct": 60, "caption": "그림 1. 색 막대 도표 (PNG, 본문 폭 60%)" }] },
+    { "heading": "2. 제목 아래 오른쪽 40%", "level": 1, "paragraphs": ["이 문단 위(제목 바로 아래)에 회색 사진이 오른쪽 정렬로 있습니다."],
+      "images": [{ "doc": "doc_mwqs4btu_w42l8r", "widthPct": 40, "align": "right", "position": "start", "caption": "그림 2. 회색 사진 (JPEG, 40%, 오른쪽)" }] },
+    { "heading": "3. 표 뒤 원래 크기", "level": 1, "pageBreakBefore": true, "paragraphs": ["표 뒤(섹션 끝)에 줄무늬 그림이 원래 크기(96×64)로, 왼쪽 정렬로 들어갑니다. 색 막대 그림도 원래 크기로 한 번 더 넣습니다."],
+      "table": { "header": ["항목", "값"], "rows": [["세션 수", "54"], ["만족도", "4.6"]] },
+      "images": [{ "doc": "doc_mwqs4i82_emnn6u", "align": "left", "position": "end", "caption": "그림 3. 줄무늬 (BMP, 원래 크기, 왼쪽)" }, { "doc": "doc_mwqs42hp_nqub6v", "position": "end", "caption": "그림 4. 색 막대 원래 크기 (800 px → 본문 폭으로 줄임)" }] }
+  ]
+}

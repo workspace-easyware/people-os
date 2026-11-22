@@ -1,0 +1,8 @@
+{
+  "title": "확장 통합 시험 — 이미지만",
+  "images": [{ "doc": "doc_mwqrxmrx_bvmw3f", "widthPct": 25 }, "doc_mwqrxmho_5d3kjn"],
+  "sections": [
+    { "heading": "그림이 있는 섹션", "level": 1, "paragraphs": ["문단 뒤에 그림."], "images": ["doc_mwqrxmho_5d3kjn"] },
+    { "heading": "마지막 섹션", "level": 1, "paragraphs": ["최상위 images에만 있는 회색 사진은 이 섹션 끝에 25% 너비로 붙어야 합니다."] }
+  ]
+}

@@ -1,0 +1,14 @@
+# Pilot-only test Worker. NOT the People OS Worker. Deploy as people-os-docx-edit-pilot, delete after the pilot.
+# ooxml-core는 따로 설치하지 않고 편집 Worker(pptx-editor/)에 이미 고정 설치된 2.0.0을 alias로 가리킨다 (통합 때 쓸 바로 그 사본).
+name = "people-os-docx-edit-pilot"
+main = "src/lab.js"
+compatibility_date = "2025-07-18"
+compatibility_flags = ["nodejs_compat"]
+workers_dev = true
+
+[alias]
+"ooxml-core/docx" = "../../../pptx-editor/node_modules/ooxml-core/dist/docx/index.mjs"
+
+[observability]
+enabled = true
+head_sampling_rate = 1

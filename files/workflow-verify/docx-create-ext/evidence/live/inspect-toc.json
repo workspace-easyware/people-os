@@ -1,0 +1,102 @@
+{
+  "bytes": 10659,
+  "parts": [
+    "[Content_Types].xml",
+    "_rels/.rels",
+    "docProps/app.xml",
+    "docProps/core.xml",
+    "docProps/custom.xml",
+    "word/_rels/document.xml.rels",
+    "word/_rels/endnotes.xml.rels",
+    "word/_rels/fontTable.xml.rels",
+    "word/_rels/footnotes.xml.rels",
+    "word/document.xml",
+    "word/endnotes.xml",
+    "word/fontTable.xml",
+    "word/footnotes.xml",
+    "word/numbering.xml",
+    "word/settings.xml",
+    "word/styles.xml",
+    "word/theme/theme1.xml"
+  ],
+  "media": [],
+  "drawings": [],
+  "toc": {
+    "present": true,
+    "field": "TOC \\h \\o \"1-2\"",
+    "dirty": true,
+    "docPartGallery": "Table of Contents",
+    "entries": [
+      {
+        "style": "TOC1",
+        "text": "1. 개요",
+        "anchor": "_Toc1"
+      },
+      {
+        "style": "TOC2",
+        "text": "1.1 배경",
+        "anchor": "_Toc2"
+      },
+      {
+        "style": "TOC1",
+        "text": "2. 진행 <현황> & \"결과\"",
+        "anchor": "_Toc3"
+      },
+      {
+        "style": "TOC2",
+        "text": "2.1 세부",
+        "anchor": "_Toc4"
+      },
+      {
+        "style": "TOC1",
+        "text": "3. 마무리",
+        "anchor": "_Toc5"
+      }
+    ],
+    "anchorsResolve": true,
+    "bookmarks": 5
+  },
+  "headings": [
+    {
+      "style": "Heading1",
+      "text": "1. 개요"
+    },
+    {
+      "style": "Heading2",
+      "text": "1.1 배경"
+    },
+    {
+      "style": "Heading1",
+      "text": "2. 진행 <현황> & \"결과\""
+    },
+    {
+      "style": "Heading2",
+      "text": "2.1 세부"
+    },
+    {
+      "style": "Heading1",
+      "text": "3. 마무리"
+    }
+  ],
+  "headers": [],
+  "footers": [],
+  "titlePg": false,
+  "settings": {
+    "updateFields": false
+  },
+  "contentTypes": [
+    "png",
+    "jpeg",
+    "jpg",
+    "bmp",
+    "gif",
+    "svg",
+    "rels",
+    "xml",
+    "odttf"
+  ],
+  "xml": {
+    "checked": 17,
+    "errors": []
+  }
+}

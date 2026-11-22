@@ -1,0 +1,1 @@
+{"ok":true,"job":{"id":"docjob_mwqubowp_rzm9on","kind":"pptx_edit","status":"failed","attempts":1,"heavy":true,"estMs":4294,"createdAt":"2026-11-21T20:08:19.417Z","startedAt":"2026-11-21T20:08:19.507Z","finishedAt":"2026-11-21T20:08:20.613Z","elapsedMs":1196,"error":"ops[0]: 1번 슬라이드에 요소 no-such-element가 없습니다.","errorStatus":422}}

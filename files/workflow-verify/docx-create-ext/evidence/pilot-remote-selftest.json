@@ -1,0 +1,69 @@
+{
+  "pass": true,
+  "sizes": {
+    "image": 21911,
+    "toc": 10562,
+    "hf": 11929,
+    "all": 24211,
+    "first": 13375
+  },
+  "checks": {
+    "image": {
+      "XML well-formed (전 부품)": true,
+      "그림 7개 (블록 6 + 문단 안 1), 모두 inline": true,
+      "그림 관계 대상이 모두 word/media/에 있음": true,
+      "미디어 부품 형식 png·jpg·gif·bmp": true,
+      "원래 크기 640 → 본문 폭 601 px": true,
+      "50% → 301 px (왼쪽)": true,
+      "JPEG 40% → 240 px (오른쪽)": true,
+      "넓은 그림 100% → 601×150": true,
+      "긴 그림 높이 880에서 줄임 (147×880)": true,
+      "문단 안 이미지 (같은 문단에 글자)": true,
+      "[Content_Types]에 그림 확장자": true
+    },
+    "toc": {
+      "XML well-formed (전 부품)": true,
+      "TOC 필드 (\\o \"1-2\" \\h)": true,
+      "필드 dirty (Word가 열 때 갱신을 묻는다)": true,
+      "목차 항목 5개가 미리 채워짐 (제목 순서대로)": true,
+      "항목 링크가 제목 책갈피를 가리킴": true,
+      "문서 제목(Title)은 목차에 없음": true
+    },
+    "hf": {
+      "XML well-formed (전 부품)": true,
+      "머리말 부품 + 문구": true,
+      "바닥글 PAGE·NUMPAGES 필드": true,
+      "바닥글 문구": true,
+      "titlePg 없음 (모든 쪽 같은 머리말)": true
+    },
+    "all": {
+      "XML well-formed (전 부품)": true,
+      "그림 7개 (블록 6 + 문단 안 1), 모두 inline": true,
+      "그림 관계 대상이 모두 word/media/에 있음": true,
+      "미디어 부품 형식 png·jpg·gif·bmp": true,
+      "원래 크기 640 → 본문 폭 601 px": true,
+      "50% → 301 px (왼쪽)": true,
+      "JPEG 40% → 240 px (오른쪽)": true,
+      "넓은 그림 100% → 601×150": true,
+      "긴 그림 높이 880에서 줄임 (147×880)": true,
+      "문단 안 이미지 (같은 문단에 글자)": true,
+      "[Content_Types]에 그림 확장자": true,
+      "TOC 필드 (\\o \"1-2\" \\h)": true,
+      "필드 dirty (Word가 열 때 갱신을 묻는다)": true,
+      "목차 항목 5개가 미리 채워짐 (제목 순서대로)": true,
+      "항목 링크가 제목 책갈피를 가리킴": true,
+      "문서 제목(Title)은 목차에 없음": true,
+      "머리말 부품 + 문구": true,
+      "바닥글 PAGE·NUMPAGES 필드": true,
+      "바닥글 문구": true,
+      "titlePg 없음 (모든 쪽 같은 머리말)": true
+    },
+    "first": {
+      "XML well-formed (전 부품)": true,
+      "머리말 부품 + 문구": true,
+      "바닥글 PAGE·NUMPAGES 필드": true,
+      "바닥글 문구": true,
+      "titlePg + first 머리말·바닥글": true
+    }
+  }
+}

@@ -1,0 +1,10 @@
+{
+  "title": "확장 통합 시험 — 머리말·바닥글만",
+  "header": "2026 4분기 코칭 운영 보고서",
+  "footer": "사내 한정",
+  "differentFirstPage": true,
+  "sections": [
+    { "heading": "1. 첫 장", "level": 1, "paragraphs": ["첫 쪽에는 머리말·바닥글이 없어야 합니다 (differentFirstPage)."] },
+    { "heading": "2. 둘째 장", "level": 1, "pageBreakBefore": true, "paragraphs": ["둘째 쪽부터 머리말과 '사내 한정 · 2 / 2'가 보여야 합니다."] }
+  ]
+}

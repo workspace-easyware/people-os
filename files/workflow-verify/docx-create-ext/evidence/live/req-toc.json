@@ -1,0 +1,13 @@
+{
+  "definition": {
+    "title": "확장 라이브 시험 2 — 목차",
+    "toc": { "title": "목차", "pageBreakAfter": true },
+    "sections": [
+      { "heading": "1. 개요", "level": 1, "paragraphs": ["목차는 제목 아래 첫 쪽에 있고, 본문은 둘째 쪽에서 시작합니다."] },
+      { "heading": "1.1 배경", "level": 2, "paragraphs": ["작은 제목도 목차에 들여쓰기로 들어갑니다."] },
+      { "heading": "2. 진행 <현황> & \"결과\"", "level": 1, "pageBreakBefore": true, "numbered": ["첫째", "둘째"] },
+      { "heading": "2.1 세부", "level": 2, "paragraphs": ["특수문자가 든 제목도 목차에서 깨지지 않아야 합니다."] },
+      { "heading": "3. 마무리", "level": 1, "pageBreakBefore": true, "paragraphs": ["Word에서 열 때 필드를 업데이트하면 목차에 쪽 번호(2·2·3·3·4)가 채워져야 합니다."] }
+    ]
+  }
+}

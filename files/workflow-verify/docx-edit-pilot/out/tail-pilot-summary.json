@@ -1,0 +1,17 @@
+{
+  "worker": "people-os-docx-edit-pilot",
+  "version": "03c7605d-1f51-429b-a24e-8b05b8e2e002",
+  "source": "wrangler tail --format json (out/tail-pilot.jsonl), 2026-11-22",
+  "note": "applyDocxOps 1회 = 읽기 + 고치기 + 저장 + 저장본 다시 읽기(검증) + 부품 비교 + 바뀐 부품 XML 검사",
+  "requests": [
+    { "route": "/selftest?doc=wordlike", "what": "ops 8개 + 검사 26개 (편집 2회 + 다시 읽기)", "cpuMs": 283, "wallMs": 301, "outcome": "ok" },
+    { "route": "/selftest?doc=lib", "what": "ops 8개 + 검사 18개 (첫 요청, docx 라이브러리로 시험 문서 생성 포함)", "cpuMs": 913, "wallMs": 955, "outcome": "ok" },
+    { "route": "/selftest-out?doc=wordlike", "what": "ops 8개 편집 2회", "cpuMs": 258, "wallMs": 271, "outcome": "ok" },
+    { "route": "/edit (test-wordlike.docx, replace 1개)", "what": "편집 1회 — 문단 17개 문서", "cpuMs": 133, "wallMs": 147, "outcome": "ok" },
+    { "route": "/inspect (test-wordlike.docx)", "what": "읽기 + 요약", "cpuMs": 33, "wallMs": 36, "outcome": "ok" },
+    { "route": "/edit (big-1000.docx, replace all)", "what": "문단 1,040개, 1,000곳 교체", "cpuMs": 1235, "wallMs": 1331, "outcome": "ok" },
+    { "route": "/edit (big-5000.docx, replace all, 상한 6000으로 올려 시험)", "what": "문단 5,200개, 5,000곳 교체", "cpuMs": 4758, "wallMs": 5279, "outcome": "ok" },
+    { "route": "/edit (big-5000.docx, paragraph 1개)", "what": "문단 5,200개, 1곳 수정 — 비용 대부분이 읽기", "cpuMs": 4385, "wallMs": 4940, "outcome": "ok" },
+    { "route": "/limits", "what": "오류·상한 경로 23종", "cpuMs": 461, "wallMs": 490, "outcome": "ok" }
+  ]
+}

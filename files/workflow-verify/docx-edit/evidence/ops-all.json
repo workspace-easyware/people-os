@@ -1,0 +1,14 @@
+{
+  "source": "doc:doc_mwqpgtb5_44j4gj",
+  "title": "DOCX 시험 문서 (편집본)",
+  "ops": [
+    { "op": "replace", "find": "홍길동", "to": "김철수", "all": true },
+    { "op": "paragraph", "index": 1, "text": "분기 코칭 리뷰 (수정본)" },
+    { "op": "cell", "table": 1, "r": 1, "c": 2, "text": "26" },
+    { "op": "cell", "table": 1, "r": 1, "c": 1, "text": "32" },
+    { "op": "insert", "after": 6, "text": "새로 넣은 문단입니다.\t탭 & <특수> \"문자\" 'x'" },
+    { "op": "replace", "find": "500만 원", "to": "650만 원" },
+    { "op": "replace", "find": "4분기", "to": "4분기(10~12월)" },
+    { "op": "replace", "find": "사내 위키", "to": "사내 위키(코칭)" }
+  ]
+}

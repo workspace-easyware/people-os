@@ -1,0 +1,187 @@
+{
+  "pass": true,
+  "checks": {
+    "ZIP 부품 (document·styles·numbering·[Content_Types]·rels)": true,
+    "제목 (Title 스타일)": true,
+    "Heading1 3개": true,
+    "Heading2 2개": true,
+    "문단 굵게·기울임 런": true,
+    "특수문자 이스케이프 후 그대로": true,
+    "글머리 목록 3개 (bullet 형식)": true,
+    "번호 목록 3개 (decimal 형식)": true,
+    "두 번째 번호 목록은 다른 numId (1부터 다시)": true,
+    "표 1개 (헤더 + 3행)": true,
+    "표 헤더 행 값": true,
+    "표 셀 값": true,
+    "표 헤더 반복 (tblHeader)": true,
+    "페이지 나누기 (2장 앞)": true,
+    "XML well-formed (전 부품)": true
+  },
+  "bytes": 10694,
+  "parts": [
+    "[Content_Types].xml",
+    "_rels/.rels",
+    "docProps/app.xml",
+    "docProps/core.xml",
+    "docProps/custom.xml",
+    "word/_rels/document.xml.rels",
+    "word/_rels/endnotes.xml.rels",
+    "word/_rels/fontTable.xml.rels",
+    "word/_rels/footnotes.xml.rels",
+    "word/document.xml",
+    "word/endnotes.xml",
+    "word/fontTable.xml",
+    "word/footnotes.xml",
+    "word/numbering.xml",
+    "word/settings.xml",
+    "word/styles.xml",
+    "word/theme/theme1.xml"
+  ],
+  "xml": {
+    "checked": 17,
+    "errors": []
+  },
+  "numFormats": {
+    "1": "bullet",
+    "2": "bullet",
+    "3": "decimal",
+    "4": "decimal"
+  },
+  "blocks": [
+    {
+      "type": "p",
+      "style": "Title",
+      "text": "2026 코칭 프로그램 운영 보고서"
+    },
+    {
+      "type": "p",
+      "style": null,
+      "text": "People OS 통합 시험 문서",
+      "italic": true
+    },
+    {
+      "type": "p",
+      "style": "Heading1",
+      "text": "1. 개요"
+    },
+    {
+      "type": "p",
+      "style": null,
+      "text": "이 문서는 docx 라이브러리로 People OS Worker 안에서 새로 만든 시험 문서입니다.",
+      "bold": true,
+      "italic": true
+    },
+    {
+      "type": "p",
+      "style": null,
+      "text": "특수문자 <태그> & \"따옴표\"도 들어 있습니다."
+    },
+    {
+      "type": "p",
+      "style": "Heading2",
+      "text": "1.1 주요 성과"
+    },
+    {
+      "type": "p",
+      "style": "ListParagraph",
+      "text": "코칭 세션 54회 진행",
+      "numId": 2
+    },
+    {
+      "type": "p",
+      "style": "ListParagraph",
+      "text": "만족도 4.6/5",
+      "numId": 2,
+      "bold": true
+    },
+    {
+      "type": "p",
+      "style": "ListParagraph",
+      "text": "신규 코치 3명 합류",
+      "numId": 2,
+      "italic": true
+    },
+    {
+      "type": "p",
+      "style": "Heading2",
+      "text": "1.2 다음 단계"
+    },
+    {
+      "type": "p",
+      "style": "ListParagraph",
+      "text": "코치 교육 일정 확정",
+      "numId": 3
+    },
+    {
+      "type": "p",
+      "style": "ListParagraph",
+      "text": "세션 기록 템플릿 배포",
+      "numId": 3
+    },
+    {
+      "type": "p",
+      "style": "ListParagraph",
+      "text": "분기 리뷰 준비",
+      "numId": 3
+    },
+    {
+      "type": "p",
+      "style": null,
+      "text": "",
+      "pageBreak": true
+    },
+    {
+      "type": "p",
+      "style": "Heading1",
+      "text": "2. 코치별 현황"
+    },
+    {
+      "type": "p",
+      "style": null,
+      "text": "아래 표는 코치별 세션 수입니다."
+    },
+    {
+      "type": "table",
+      "rows": [
+        [
+          "코치",
+          "주제",
+          "세션 수"
+        ],
+        [
+          "김코치",
+          "리더십",
+          "12"
+        ],
+        [
+          "이코치",
+          "커리어",
+          "8"
+        ],
+        [
+          "박코치",
+          "팀빌딩",
+          "6"
+        ]
+      ],
+      "headerRow": true
+    },
+    {
+      "type": "p",
+      "style": "Heading1",
+      "text": "3. 두 번째 번호 목록 (1부터 다시)"
+    },
+    {
+      "type": "p",
+      "style": "ListParagraph",
+      "text": "첫째",
+      "numId": 4
+    },
+    {
+      "type": "p",
+      "style": "ListParagraph",
+      "text": "둘째",
+      "numId": 4
+    }
+  ]
+}

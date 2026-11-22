@@ -1,0 +1,18 @@
+{
+  "title": "확장 통합 시험 — 이미지 + 목차 + 머리말·바닥글",
+  "subtitle": "로컬 통합 시험",
+  "toc": { "title": "목차", "pageBreakAfter": true },
+  "header": { "text": "People OS 확장 통합 시험 <머리말> & 확인" },
+  "footer": { "text": "사내 한정", "pageNumber": true },
+  "sections": [
+    { "heading": "1. 개요", "level": 1, "paragraphs": ["이 문서는 **이미지·목차·머리말/바닥글**을 한 번에 넣은 시험 문서입니다."],
+      "images": [{ "doc": "doc_mwqrxmho_5d3kjn", "widthPct": 60, "caption": "그림 1. 색 막대 (본문 폭 60%)" }] },
+    { "heading": "1.1 사진", "level": 2, "paragraphs": ["제목 바로 아래에 오른쪽 정렬 JPEG가 있습니다."],
+      "images": [{ "doc": "doc_mwqrxmrx_bvmw3f", "widthPct": 40, "align": "right", "position": "start", "caption": "그림 2. 회색 사진 (40%, 오른쪽)" }] },
+    { "heading": "2. 표와 그림", "level": 1, "pageBreakBefore": true, "paragraphs": ["표 뒤(섹션 끝)에 같은 그림을 원래 크기로 다시 넣습니다."],
+      "bullets": ["글머리 하나", "글머리 둘"],
+      "table": { "header": ["항목", "값"], "rows": [["세션 수", "54"], ["만족도", "4.6"]] },
+      "images": [{ "doc": "doc:doc_mwqrxmho_5d3kjn", "position": "end" }] },
+    { "heading": "3. 마무리", "level": 1, "paragraphs": ["끝."] }
+  ]
+}

@@ -1,0 +1,136 @@
+{
+  "bytes": 14916,
+  "parts": [
+    "[Content_Types].xml",
+    "_rels/.rels",
+    "docProps/app.xml",
+    "docProps/core.xml",
+    "docProps/custom.xml",
+    "word/_rels/document.xml.rels",
+    "word/_rels/endnotes.xml.rels",
+    "word/_rels/fontTable.xml.rels",
+    "word/_rels/footnotes.xml.rels",
+    "word/document.xml",
+    "word/endnotes.xml",
+    "word/fontTable.xml",
+    "word/footnotes.xml",
+    "word/media/image1.bmp",
+    "word/media/image1.jpg",
+    "word/media/image1.png",
+    "word/numbering.xml",
+    "word/settings.xml",
+    "word/styles.xml",
+    "word/theme/theme1.xml"
+  ],
+  "media": [
+    {
+      "name": "word/media/image1.bmp",
+      "bytes": 18486,
+      "sniff": {
+        "type": "bmp",
+        "width": 96,
+        "height": 64
+      }
+    },
+    {
+      "name": "word/media/image1.jpg",
+      "bytes": 408,
+      "sniff": {
+        "type": "jpg",
+        "width": 320,
+        "height": 200
+      }
+    },
+    {
+      "name": "word/media/image1.png",
+      "bytes": 8897,
+      "sniff": {
+        "type": "png",
+        "width": 800,
+        "height": 450
+      }
+    }
+  ],
+  "drawings": [
+    {
+      "inline": true,
+      "widthPx": 361,
+      "heightPx": 203,
+      "target": "media/image1.png",
+      "targetExists": true,
+      "align": "center",
+      "paragraphText": ""
+    },
+    {
+      "inline": true,
+      "widthPx": 240,
+      "heightPx": 150,
+      "target": "media/image1.jpg",
+      "targetExists": true,
+      "align": "right",
+      "paragraphText": ""
+    },
+    {
+      "inline": true,
+      "widthPx": 96,
+      "heightPx": 64,
+      "target": "media/image1.bmp",
+      "targetExists": true,
+      "align": "left",
+      "paragraphText": ""
+    },
+    {
+      "inline": true,
+      "widthPx": 601,
+      "heightPx": 338,
+      "target": "media/image1.png",
+      "targetExists": true,
+      "align": "center",
+      "paragraphText": ""
+    }
+  ],
+  "toc": {
+    "present": false,
+    "field": null,
+    "dirty": false,
+    "docPartGallery": null,
+    "entries": [],
+    "anchorsResolve": true,
+    "bookmarks": 0
+  },
+  "headings": [
+    {
+      "style": "Heading1",
+      "text": "1. 가운데 60%"
+    },
+    {
+      "style": "Heading1",
+      "text": "2. 제목 아래 오른쪽 40%"
+    },
+    {
+      "style": "Heading1",
+      "text": "3. 표 뒤 원래 크기"
+    }
+  ],
+  "headers": [],
+  "footers": [],
+  "titlePg": false,
+  "settings": {
+    "updateFields": false
+  },
+  "contentTypes": [
+    "png",
+    "jpeg",
+    "jpg",
+    "bmp",
+    "gif",
+    "svg",
+    "rels",
+    "xml",
+    "odttf"
+  ],
+  "xml": {
+    "checked": 17,
+    "errors": []
+  }
+}

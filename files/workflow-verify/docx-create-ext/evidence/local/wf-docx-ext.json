@@ -1,0 +1,25 @@
+{
+  "name": "DOCX 만들기 확장 노드 시험",
+  "description": "docx_create 노드 + 이미지·목차·머리말/바닥글 + 승인 게이트",
+  "definition": {
+    "version": 1,
+    "steps": [
+      {
+        "id": "s1", "type": "docx_create", "name": "Word 만들기 (승인 뒤)", "requiresApproval": true,
+        "config": {
+          "title": "{{input.coach}} 코치 보고서 (워크플로)",
+          "definition": { "title": "x", "sections": [
+            { "heading": "1. 개요", "level": 1, "paragraphs": ["{{input.coach}} 코치의 분기 요약입니다."] },
+            { "heading": "2. 자료", "level": 1, "paragraphs": ["아래 그림은 워크플로 폼의 images 칸에서 왔습니다."] }
+          ] },
+          "images": ["{{input.imageId}}", "doc_mwqrxmrx_bvmw3f"],
+          "toc": true,
+          "header": "{{input.coach}} 코치 보고서",
+          "footer": "워크플로 생성",
+          "pageNumber": true
+        }
+      },
+      { "id": "s2", "type": "create_task", "name": "확인 할 일", "config": { "title": "Word 문서 확인: {{steps.s1.output.title}} ({{steps.s1.output.docId}}) 그림 {{steps.s1.output.images}}장" } }
+    ]
+  }
+}

@@ -1,0 +1,93 @@
+{
+  "bytes": 11806,
+  "parts": [
+    "[Content_Types].xml",
+    "_rels/.rels",
+    "docProps/app.xml",
+    "docProps/core.xml",
+    "docProps/custom.xml",
+    "word/_rels/document.xml.rels",
+    "word/_rels/endnotes.xml.rels",
+    "word/_rels/fontTable.xml.rels",
+    "word/_rels/footer1.xml.rels",
+    "word/_rels/footnotes.xml.rels",
+    "word/_rels/header1.xml.rels",
+    "word/document.xml",
+    "word/endnotes.xml",
+    "word/fontTable.xml",
+    "word/footer1.xml",
+    "word/footnotes.xml",
+    "word/header1.xml",
+    "word/numbering.xml",
+    "word/settings.xml",
+    "word/styles.xml",
+    "word/theme/theme1.xml"
+  ],
+  "media": [],
+  "drawings": [],
+  "toc": {
+    "present": false,
+    "field": null,
+    "dirty": false,
+    "docPartGallery": null,
+    "entries": [],
+    "anchorsResolve": true,
+    "bookmarks": 0
+  },
+  "headings": [
+    {
+      "style": "Heading1",
+      "text": "1. 첫 쪽"
+    },
+    {
+      "style": "Heading1",
+      "text": "2. 둘째 쪽"
+    },
+    {
+      "style": "Heading1",
+      "text": "3. 셋째 쪽"
+    }
+  ],
+  "headers": [
+    {
+      "type": "default",
+      "target": "header1.xml",
+      "exists": true,
+      "text": "2026 4분기 코칭 운영 보고서 <초안> & 검토용",
+      "align": "right",
+      "fields": []
+    }
+  ],
+  "footers": [
+    {
+      "type": "default",
+      "target": "footer1.xml",
+      "exists": true,
+      "text": "사내 한정  ·   / ",
+      "align": "center",
+      "fields": [
+        "PAGE",
+        "NUMPAGES"
+      ]
+    }
+  ],
+  "titlePg": false,
+  "settings": {
+    "updateFields": false
+  },
+  "contentTypes": [
+    "png",
+    "jpeg",
+    "jpg",
+    "bmp",
+    "gif",
+    "svg",
+    "rels",
+    "xml",
+    "odttf"
+  ],
+  "xml": {
+    "checked": 21,
+    "errors": []
+  }
+}

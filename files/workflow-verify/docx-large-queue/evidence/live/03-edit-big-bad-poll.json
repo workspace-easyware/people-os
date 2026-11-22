@@ -1,0 +1,1 @@
+{"ok":true,"job":{"id":"docjob_mwqugswm_48olk5","kind":"docx_edit","status":"failed","attempts":1,"heavy":true,"estMs":2363,"createdAt":"2026-11-21T20:12:17.878Z","startedAt":"2026-11-21T20:12:19.445Z","finishedAt":"2026-11-21T20:12:19.802Z","elapsedMs":1924,"error":"ops[0]: 글자를 찾지 못했습니다: 이 문서에 없는 글자 XYZ (필드·삭제 추적 안의 글자는 찾지 않습니다)","errorStatus":422}}

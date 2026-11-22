@@ -1,0 +1,14 @@
+HTTP/1.1 200 Connection Established
+
+HTTP/1.1 200 OK
+Date: Sat, 21 Nov 2026 06:49:37 GMT
+Content-Type: application/vnd.openxmlformats-officedocument.wordprocessingml.document
+alt-svc: h3=":443"; ma=86400
+CF-RAY: a5ddc16548c2d0f9-MIA
+Cache-Control: private, no-store
+Content-Disposition: attachment; filename="2026_.docx"; filename*=UTF-8''2026%20%EC%BD%94%EC%B9%AD%20%ED%94%84%EB%A1%9C%EA%B7%B8%EB%9E%A8%20%EC%9A%B4%EC%98%81%20%EB%B3%B4%EA%B3%A0%EC%84%9C.docx
+Report-To: {"group":"cf-nel","max_age":604800,"endpoints":[{"url":"https://a.nel.cloudflare.com/report/v4?s=YxJXfoHiPAIuNr8zZdjdFPCVQIpBNZXT6Uuh1d3vbrahr6QbRtK068uemwhOcIaUMSUK2mNCumFsOg3NwQ6%2FAaZTAW03JDuiBJgOoGuCHE25oqZnuan7%2FDujs794WKxnEzeSnBC8xA1Ks08UGbTB1c0LDoIeyrGcHUth2kZyuQE42BgY3Fvd"}]}
+Nel: {"report_to":"cf-nel","success_fraction":0.0,"max_age":604800}
+Server: cloudflare
+Content-Length: 10692
+

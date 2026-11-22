@@ -1,0 +1,18 @@
+{
+  "title": "확장 라이브 시험 4 — 이미지 + 목차 + 머리말·바닥글",
+  "subtitle": "세 기능을 한 문서에",
+  "toc": { "title": "목차", "pageBreakAfter": true },
+  "header": "People OS 확장 라이브 시험",
+  "footer": { "text": "사내 한정", "pageNumber": true },
+  "differentFirstPage": true,
+  "images": [{ "doc": "doc_mwqs4i82_emnn6u", "widthPct": 25, "caption": "그림 3. 자리를 정하지 않은 줄무늬 (문서 끝에 붙음, 25%)" }],
+  "sections": [
+    { "heading": "1. 개요", "level": 1, "paragraphs": ["첫 쪽(제목·목차)에는 머리말·바닥글이 없고, 둘째 쪽부터 보여야 합니다 (differentFirstPage)."],
+      "images": [{ "doc": "doc_mwqs42hp_nqub6v", "widthPct": 70, "caption": "그림 1. 색 막대 도표 (70%)" }] },
+    { "heading": "1.1 사진", "level": 2, "paragraphs": ["오른쪽 정렬 JPEG."],
+      "images": [{ "doc": "doc_mwqs4btu_w42l8r", "widthPct": 35, "align": "right", "caption": "그림 2. 회색 사진 (35%, 오른쪽)" }] },
+    { "heading": "2. 표", "level": 1, "pageBreakBefore": true, "bullets": ["글머리 하나", "글머리 둘"],
+      "table": { "header": ["코치", "주제", "세션 수"], "rows": [["김코치", "리더십", "12"], ["이코치", "커리어", "8"]] } },
+    { "heading": "3. 마무리", "level": 1, "paragraphs": ["이 섹션 끝에 최상위 images의 줄무늬 그림이 붙어야 합니다."] }
+  ]
+}

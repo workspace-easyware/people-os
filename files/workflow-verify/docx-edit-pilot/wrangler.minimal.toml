@@ -1,0 +1,7 @@
+# Bundle-size baseline only (dry-run). ooxml-core/docx loadDocx + save, no nodejs_compat.
+name = "people-os-docx-edit-pilot-minimal"
+main = "src/minimal.js"
+compatibility_date = "2025-07-18"
+
+[alias]
+"ooxml-core/docx" = "../../../pptx-editor/node_modules/ooxml-core/dist/docx/index.mjs"

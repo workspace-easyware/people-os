@@ -1,0 +1,23 @@
+{
+  "name": "Word 새 문서 노드 시험",
+  "description": "docx_create 노드 + 승인 게이트 (로컬)",
+  "definition": {
+    "version": 1,
+    "steps": [
+      {
+        "id": "s1", "type": "docx_create", "name": "Word 문서 만들기 (승인 뒤)", "requiresApproval": true,
+        "config": {
+          "definition": {
+            "title": "{{input.coach}} 코치 온보딩 안내",
+            "sections": [
+              { "heading": "환영합니다", "level": 1, "paragraphs": ["{{input.coach}} 코치님, People OS 코칭 프로그램에 오신 것을 환영합니다."] },
+              { "heading": "첫 주 할 일", "level": 2, "numbered": ["계정 만들기", "코칭 가이드 읽기", "첫 세션 예약"] },
+              { "heading": "담당자", "level": 2, "table": { "header": ["역할", "이름"], "rows": [["HR", "인사팀"], ["멘토", "{{input.mentor}}"]] } }
+            ]
+          }
+        }
+      },
+      { "id": "s2", "type": "create_task", "name": "확인 할 일", "config": { "title": "Word 문서 확인: {{steps.s1.output.title}} ({{steps.s1.output.docId}})" } }
+    ]
+  }
+}

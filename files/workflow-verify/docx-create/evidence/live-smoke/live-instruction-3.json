@@ -1,0 +1,1 @@
+{"ok":false,"error":"AI가 만든 문서 구조가 올바르지 않습니다: sections[1].table.rows[0] 칸 수(10)가 헤더(2)보다 많습니다","code":"bad_input"}

@@ -1,0 +1,11 @@
+{
+  "definition": {
+    "title": "확장 통합 시험 — 목차만",
+    "toc": true,
+    "sections": [
+      { "heading": "1. 첫 장", "level": 1, "paragraphs": ["본문."] },
+      { "heading": "1.1 작은 제목", "level": 2, "paragraphs": ["본문."] },
+      { "heading": "2. 둘째 장", "level": 1, "pageBreakBefore": true, "numbered": ["하나", "둘"] }
+    ]
+  }
+}

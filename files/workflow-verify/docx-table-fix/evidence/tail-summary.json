@@ -1,0 +1,21 @@
+{
+  "source": "cf-wrangler.py tail people-os --format json (버전 483b32b8-7317-42e8-b380-624f5b55b481), 모두 outcome ok",
+  "requests": [
+    { "what": "POST /api/docx/create 익명 (after 스모크)", "status": 401, "cpuTime_ms": 10, "wallTime_ms": 285 },
+    { "what": "POST /api/docx/create 구조화 (def-live.json, 섹션 5·블록 20·표 3열)", "status": 201, "cpuTime_ms": 114, "wallTime_ms": 457, "doc": "doc_mwq1sc74_p8fcqa" },
+    { "what": "GET 다운로드 (구조화)", "status": 200, "cpuTime_ms": 8, "wallTime_ms": 576 },
+    { "what": "AI 온보딩 (2회 시도)", "status": 201, "cpuTime_ms": 166, "wallTime_ms": 111657, "doc": "doc_mwq1uzy7_k4c8gd",
+      "plan": [
+        { "attempt": 1, "parsed": false, "problem": "JSON 객체가 아니다", "parseError": "Expected ',' or ']' after array element at position 243", "around": "…안내합니다…\"]}},{\"heading\":\"첫 주 일정\"… (본문 중간 남는 }, 기존 Qwen 괄호 문제)", "completionTokens": 853 },
+        { "attempt": 2, "ok": true, "phCells": 0, "phItems": 0, "phParagraphs": 0, "completionTokens": 1152, "sections": 4 }
+      ] },
+    { "what": "AI 분기 보고서 1차", "status": 502, "cpuTime_ms": 14, "wallTime_ms": 1207, "error": "AI 호출 실패: 3040: Capacity temporarily exceeded" },
+    { "what": "AI 분기 보고서 2차 (1회 시도)", "status": 201, "cpuTime_ms": 87, "wallTime_ms": 84925, "doc": "doc_mwq1xrm2_peaoew",
+      "plan": [ { "attempt": 1, "ok": true, "phCells": 0, "phItems": 0, "phParagraphs": 0, "completionTokens": 954 } ],
+      "note": "표 대신 문단 '코치별 세션 현황(코치명, 주제, 세션 수)은 작성 지시에 구체적인 값이 없어 표에 넣지 않았습니다.'" },
+    { "what": "AI 자리표시자 강요 지시 1차", "status": 502, "cpuTime_ms": 15, "wallTime_ms": 1286, "error": "3040 Capacity temporarily exceeded" },
+    { "what": "AI 자리표시자 강요 지시 2차", "status": 201, "cpuTime_ms": 96, "wallTime_ms": 11927, "doc": "doc_mwq1z5eq_s6bl41",
+      "plan": [ { "attempt": 1, "ok": true, "phCells": 0, "phItems": 0, "phParagraphs": 0, "completionTokens": 409 } ],
+      "note": "Qwen이 자리표시자 지시를 따르지 않고 표를 뺐다 (tableCells 0) → 422 경로는 라이브에서 발생하지 않음" }
+  ]
+}

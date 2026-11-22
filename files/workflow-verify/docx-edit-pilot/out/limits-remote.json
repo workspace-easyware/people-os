@@ -1,0 +1,95 @@
+{
+ "ops 없음": {
+  "code": "bad_input",
+  "error": "ops는 1개 이상인 배열이어야 합니다."
+ },
+ "ops 상한 초과": {
+  "code": "limit",
+  "error": "ops는 100개까지입니다 (101개)."
+ },
+ "모르는 op": {
+  "code": "bad_input",
+  "error": "ops[0].op를 알 수 없습니다: nope (replace·paragraph·cell·insert·delete)"
+ },
+ "없는 문단": {
+  "code": "not_found",
+  "error": "ops[0]: 999번 문단이 없습니다 (문단 17개)."
+ },
+ "없는 표": {
+  "code": "not_found",
+  "error": "ops[0]: 5번 표가 없습니다 (표 1개)."
+ },
+ "없는 셀": {
+  "code": "not_found",
+  "error": "ops[0]: 1번 표에 셀 (9, 0)이 없습니다 (행 3개)."
+ },
+ "못 찾는 글자": {
+  "code": "not_found",
+  "error": "ops[0]: 글자를 찾지 못했습니다: 없는글자XYZ (필드·삭제 추적 안의 글자는 찾지 않습니다)"
+ },
+ "삭제 추적 안 글자는 못 찾음 (3분기)": {
+  "code": "not_found",
+  "error": "ops[0]: 글자를 찾지 못했습니다: 3분기 (필드·삭제 추적 안의 글자는 찾지 않습니다)"
+ },
+ "필드 결과는 못 찾음 (2026-11-22)": {
+  "code": "not_found",
+  "error": "ops[0]: 글자를 찾지 못했습니다: 2026-11-22 (필드·삭제 추적 안의 글자는 찾지 않습니다)"
+ },
+ "표 안 문단 delete 거부": {
+  "code": "bad_input",
+  "error": "ops[0]: 표 안의 문단은 지울 수 없습니다 (cell op로 셀 글을 비우세요)."
+ },
+ "표 안 문단 뒤 insert 거부": {
+  "code": "bad_input",
+  "error": "ops[0]: 표 안의 문단 뒤에는 넣을 수 없습니다 (본문 문단 번호를 쓰세요)."
+ },
+ "마지막 문단 delete 거부": {
+  "code": "bad_input",
+  "error": "ops[0]: 문서의 마지막 문단은 지울 수 없습니다 (구역 설정이 붙어 있습니다). paragraph op로 글을 비우세요."
+ },
+ "text가 문자열 아님": {
+  "code": "bad_input",
+  "error": "ops[0].text는 문자열이어야 합니다."
+ },
+ "글자 수 상한": {
+  "code": "limit",
+  "error": "ops[0].text는 10,000자까지입니다."
+ },
+ "ZIP 아님": {
+  "code": "bad_input",
+  "error": "DOCX 파일이 아닙니다 (ZIP 형식이 아님)."
+ },
+ "빈 파일": {
+  "code": "bad_input",
+  "error": "빈 파일입니다."
+ },
+ "문단 수 상한 (상한 10으로 낮춤)": {
+  "code": "limit",
+  "error": "문서가 편집 상한을 넘습니다 — 문단 수 상한 10 (17). 이 문서는 여기서 편집할 수 없습니다."
+ },
+ "본문 크기 상한 (1000 B로 낮춤)": {
+  "code": "limit",
+  "error": "문서가 편집 상한을 넘습니다 — 본문(document.xml) 크기 상한 1,000 B (6,371 B). 이 문서는 여기서 편집할 수 없습니다."
+ },
+ "파일 크기 상한 (1000 B로 낮춤)": {
+  "code": "limit",
+  "error": "파일이 너무 큽니다 (7,742 B > 상한 1,000 B)."
+ },
+ "제어문자 정리": {
+  "ok": true,
+  "text": "제어문자와 😀 이모지, 짝 없는  서로게이트",
+  "xml": []
+ },
+ "docx가 아닌 ZIP": {
+  "code": "bad_input",
+  "error": "Word 문서가 아닙니다 (word/document.xml이 없음). .docx 파일만 편집할 수 있습니다."
+ },
+ "replace 경로 (all)": {
+  "ok": true,
+  "count": 2
+ },
+ "replace 경로 (처음 1곳)": {
+  "ok": true,
+  "count": 1
+ }
+}

@@ -1,0 +1,1 @@
+<h1>People OS</h1><p>Frontend asset not found. Run wrangler dev with public/ present.</p>

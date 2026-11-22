@@ -1,0 +1,18 @@
+{
+  "worker": "people-os-docx-pilot",
+  "versions": ["75cbe680-8db6-44e5-97ed-28be7d20b82e", "b67c44c9-fce2-46c2-8244-fb68bf1ded30"],
+  "source": "cf-wrangler.py tail people-os-docx-pilot --format json (fields copied from the tail records, in request order)",
+  "records": [
+    { "url": "/selftest", "version": "75cbe680", "cpuTime": 94, "wallTime": 99, "outcome": "ok", "note": "시험 문서 생성 + 다시 읽기 + XML 검사 (첫 요청, 콜드)" },
+    { "url": "/make", "cpuTime": 44, "wallTime": 47, "outcome": "ok", "note": "시험 문서 생성만 (10,741 B)" },
+    { "url": "/limits", "cpuTime": 197, "wallTime": 205, "outcome": "ok", "note": "오류·상한 경로 16종" },
+    { "url": "/make-big?sections=50&out=json", "cpuTime": 265, "wallTime": 310, "outcome": "ok", "note": "50섹션 510블록, 표 셀 630 + XML 검사" },
+    { "url": "/make-big?sections=50", "cpuTime": 190, "wallTime": 233, "outcome": "ok", "note": "같은 문서 bytes만 (16,719 B)" },
+    { "url": "/make-big?sections=50&paras=30&out=json", "version": "b67c44c9", "cpuTime": 281, "wallTime": 327, "outcome": "ok", "note": "상한 가까운 문서: 1,910블록(상한 2,000), 표 셀 630, 26,144 B + XML 검사" },
+    { "url": "/make", "cpuTime": 58, "wallTime": 64, "outcome": "ok" },
+    { "url": "/selftest", "cpuTime": 146, "wallTime": 152, "outcome": "ok" },
+    { "url": "/limits", "cpuTime": 100, "wallTime": 107, "outcome": "ok" },
+    { "url": "/make-big?sections=50", "cpuTime": 193, "wallTime": 251, "outcome": "ok" }
+  ],
+  "exceptions": 0
+}

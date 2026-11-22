@@ -1,0 +1,84 @@
+{
+  "parts": [
+    "[Content_Types].xml",
+    "_rels/.rels",
+    "docProps/app.xml",
+    "docProps/core.xml",
+    "docProps/custom.xml",
+    "word/_rels/document.xml.rels",
+    "word/_rels/endnotes.xml.rels",
+    "word/_rels/fontTable.xml.rels",
+    "word/_rels/footnotes.xml.rels",
+    "word/document.xml",
+    "word/endnotes.xml",
+    "word/fontTable.xml",
+    "word/footnotes.xml",
+    "word/numbering.xml",
+    "word/settings.xml",
+    "word/styles.xml",
+    "word/theme/theme1.xml"
+  ],
+  "blocks": [
+    {
+      "type": "p",
+      "style": "Title",
+      "text": "정코치 코치 온보딩 안내"
+    },
+    {
+      "type": "p",
+      "style": "Heading1",
+      "text": "환영합니다"
+    },
+    {
+      "type": "p",
+      "style": null,
+      "text": "정코치 코치님, People OS 코칭 프로그램에 오신 것을 환영합니다."
+    },
+    {
+      "type": "p",
+      "style": "Heading2",
+      "text": "첫 주 할 일"
+    },
+    {
+      "type": "p",
+      "style": "ListParagraph",
+      "text": "계정 만들기",
+      "numId": 2
+    },
+    {
+      "type": "p",
+      "style": "ListParagraph",
+      "text": "코칭 가이드 읽기",
+      "numId": 2
+    },
+    {
+      "type": "p",
+      "style": "ListParagraph",
+      "text": "첫 세션 예약",
+      "numId": 2
+    },
+    {
+      "type": "p",
+      "style": "Heading2",
+      "text": "담당자"
+    },
+    {
+      "type": "table",
+      "rows": [
+        [
+          "역할",
+          "이름"
+        ],
+        [
+          "HR",
+          "인사팀"
+        ],
+        [
+          "멘토",
+          "김멘토"
+        ]
+      ],
+      "headerRow": true
+    }
+  ]
+}

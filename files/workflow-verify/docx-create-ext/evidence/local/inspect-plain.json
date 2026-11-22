@@ -1,0 +1,68 @@
+{
+  "bytes": 10426,
+  "parts": [
+    "[Content_Types].xml",
+    "_rels/.rels",
+    "docProps/app.xml",
+    "docProps/core.xml",
+    "docProps/custom.xml",
+    "word/_rels/document.xml.rels",
+    "word/_rels/endnotes.xml.rels",
+    "word/_rels/fontTable.xml.rels",
+    "word/_rels/footnotes.xml.rels",
+    "word/document.xml",
+    "word/endnotes.xml",
+    "word/fontTable.xml",
+    "word/footnotes.xml",
+    "word/numbering.xml",
+    "word/settings.xml",
+    "word/styles.xml",
+    "word/theme/theme1.xml"
+  ],
+  "media": [],
+  "drawings": [],
+  "toc": {
+    "present": false,
+    "field": null,
+    "dirty": false,
+    "docPartGallery": null,
+    "entries": [],
+    "anchorsResolve": true,
+    "bookmarks": 0
+  },
+  "headings": [
+    {
+      "style": "Heading1",
+      "text": "1. 개요"
+    },
+    {
+      "style": "Heading2",
+      "text": "1.1 목록"
+    },
+    {
+      "style": "Heading1",
+      "text": "2. 표"
+    }
+  ],
+  "headers": [],
+  "footers": [],
+  "titlePg": false,
+  "settings": {
+    "updateFields": false
+  },
+  "contentTypes": [
+    "png",
+    "jpeg",
+    "jpg",
+    "bmp",
+    "gif",
+    "svg",
+    "rels",
+    "xml",
+    "odttf"
+  ],
+  "xml": {
+    "checked": 17,
+    "errors": []
+  }
+}

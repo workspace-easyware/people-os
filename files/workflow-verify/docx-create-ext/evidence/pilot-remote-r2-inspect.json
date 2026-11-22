@@ -1,0 +1,168 @@
+{
+  "bytes": 3163779,
+  "parts": [
+    "[Content_Types].xml",
+    "_rels/.rels",
+    "docProps/app.xml",
+    "docProps/core.xml",
+    "docProps/custom.xml",
+    "word/_rels/document.xml.rels",
+    "word/_rels/endnotes.xml.rels",
+    "word/_rels/fontTable.xml.rels",
+    "word/_rels/footer1.xml.rels",
+    "word/_rels/footnotes.xml.rels",
+    "word/_rels/header1.xml.rels",
+    "word/document.xml",
+    "word/endnotes.xml",
+    "word/fontTable.xml",
+    "word/footer1.xml",
+    "word/footnotes.xml",
+    "word/header1.xml",
+    "word/media/image1.jpg",
+    "word/media/image1.png",
+    "word/media/image2.png",
+    "word/numbering.xml",
+    "word/settings.xml",
+    "word/styles.xml",
+    "word/theme/theme1.xml"
+  ],
+  "media": [
+    {
+      "name": "word/media/image1.jpg",
+      "bytes": 408,
+      "sniff": {
+        "type": "jpg",
+        "width": 320,
+        "height": 200
+      }
+    },
+    {
+      "name": "word/media/image1.png",
+      "bytes": 8897,
+      "sniff": {
+        "type": "png",
+        "width": 800,
+        "height": 450
+      }
+    },
+    {
+      "name": "word/media/image2.png",
+      "bytes": 3147060,
+      "sniff": {
+        "type": "png",
+        "width": 1024,
+        "height": 1024
+      }
+    }
+  ],
+  "drawings": [
+    {
+      "inline": true,
+      "widthPx": 361,
+      "heightPx": 203,
+      "target": "media/image1.png",
+      "targetExists": true,
+      "align": "center",
+      "paragraphText": ""
+    },
+    {
+      "inline": true,
+      "widthPx": 361,
+      "heightPx": 225,
+      "target": "media/image1.jpg",
+      "targetExists": true,
+      "align": "center",
+      "paragraphText": ""
+    },
+    {
+      "inline": true,
+      "widthPx": 361,
+      "heightPx": 361,
+      "target": "media/image2.png",
+      "targetExists": true,
+      "align": "center",
+      "paragraphText": ""
+    }
+  ],
+  "toc": {
+    "present": true,
+    "field": "TOC \\h \\o \"1-2\"",
+    "dirty": true,
+    "docPartGallery": "Table of Contents",
+    "entries": [
+      {
+        "style": "TOC1",
+        "text": "1. bars.png",
+        "anchor": "_Toc6"
+      },
+      {
+        "style": "TOC1",
+        "text": "2. gray.jpg",
+        "anchor": "_Toc7"
+      },
+      {
+        "style": "TOC1",
+        "text": "3. noise.png",
+        "anchor": "_Toc8"
+      }
+    ],
+    "anchorsResolve": true,
+    "bookmarks": 3
+  },
+  "headings": [
+    {
+      "style": "Heading1",
+      "text": "1. bars.png"
+    },
+    {
+      "style": "Heading1",
+      "text": "2. gray.jpg"
+    },
+    {
+      "style": "Heading1",
+      "text": "3. noise.png"
+    }
+  ],
+  "headers": [
+    {
+      "type": "default",
+      "target": "header1.xml",
+      "exists": true,
+      "text": "R2에서 읽은 이미지",
+      "align": "right",
+      "fields": []
+    }
+  ],
+  "footers": [
+    {
+      "type": "default",
+      "target": "footer1.xml",
+      "exists": true,
+      "text": " / ",
+      "align": "center",
+      "fields": [
+        "PAGE",
+        "NUMPAGES"
+      ]
+    }
+  ],
+  "titlePg": false,
+  "settings": {
+    "updateFields": false
+  },
+  "contentTypes": [
+    "png",
+    "jpeg",
+    "jpg",
+    "bmp",
+    "gif",
+    "svg",
+    "rels",
+    "xml",
+    "odttf"
+  ],
+  "xml": {
+    "checked": 21,
+    "errors": []
+  }
+}

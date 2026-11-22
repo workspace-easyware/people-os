@@ -1,0 +1,53 @@
+{
+ "noPlaceholder": {
+  "ran": true,
+  "note": "자리표시자가 없는 문서: 바뀌는 글자 없음 (일반 글자 치환 API가 없다)",
+  "textChanged": false,
+  "identicalParts": [
+   "[Content_Types].xml",
+   "_rels/.rels",
+   "word/_rels/document.xml.rels",
+   "word/styles.xml",
+   "word/settings.xml",
+   "word/fontTable.xml",
+   "docProps/core.xml"
+  ],
+  "changedParts": [
+   "word/document.xml",
+   "word/comments.xml",
+   "word/header1.xml",
+   "word/footer1.xml",
+   "docProps/app.xml"
+  ],
+  "documentXmlBytes": {
+   "before": 6371,
+   "after": 6681
+  }
+ },
+ "withPlaceholder": {
+  "ran": true,
+  "replaced": true,
+  "identicalParts": [
+   "[Content_Types].xml",
+   "_rels/.rels",
+   "word/_rels/document.xml.rels",
+   "word/styles.xml",
+   "word/settings.xml",
+   "word/fontTable.xml",
+   "docProps/core.xml"
+  ],
+  "changedParts": [
+   "word/document.xml",
+   "word/comments.xml",
+   "word/header1.xml",
+   "word/footer1.xml",
+   "docProps/app.xml"
+  ],
+  "documentXmlBytes": {
+   "before": 6388,
+   "after": 7065
+  },
+  "controlParagraphKept": true,
+  "wellFormed": null
+ }
+}

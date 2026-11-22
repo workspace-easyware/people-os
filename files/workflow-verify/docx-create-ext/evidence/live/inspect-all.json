@@ -1,0 +1,197 @@
+{
+  "bytes": 18648,
+  "parts": [
+    "[Content_Types].xml",
+    "_rels/.rels",
+    "docProps/app.xml",
+    "docProps/core.xml",
+    "docProps/custom.xml",
+    "word/_rels/document.xml.rels",
+    "word/_rels/endnotes.xml.rels",
+    "word/_rels/fontTable.xml.rels",
+    "word/_rels/footer1.xml.rels",
+    "word/_rels/footer2.xml.rels",
+    "word/_rels/footnotes.xml.rels",
+    "word/_rels/header1.xml.rels",
+    "word/_rels/header2.xml.rels",
+    "word/document.xml",
+    "word/endnotes.xml",
+    "word/fontTable.xml",
+    "word/footer1.xml",
+    "word/footer2.xml",
+    "word/footnotes.xml",
+    "word/header1.xml",
+    "word/header2.xml",
+    "word/media/image1.bmp",
+    "word/media/image1.jpg",
+    "word/media/image1.png",
+    "word/numbering.xml",
+    "word/settings.xml",
+    "word/styles.xml",
+    "word/theme/theme1.xml"
+  ],
+  "media": [
+    {
+      "name": "word/media/image1.bmp",
+      "bytes": 18486,
+      "sniff": {
+        "type": "bmp",
+        "width": 96,
+        "height": 64
+      }
+    },
+    {
+      "name": "word/media/image1.jpg",
+      "bytes": 408,
+      "sniff": {
+        "type": "jpg",
+        "width": 320,
+        "height": 200
+      }
+    },
+    {
+      "name": "word/media/image1.png",
+      "bytes": 8897,
+      "sniff": {
+        "type": "png",
+        "width": 800,
+        "height": 450
+      }
+    }
+  ],
+  "drawings": [
+    {
+      "inline": true,
+      "widthPx": 421,
+      "heightPx": 237,
+      "target": "media/image1.png",
+      "targetExists": true,
+      "align": "center",
+      "paragraphText": ""
+    },
+    {
+      "inline": true,
+      "widthPx": 210,
+      "heightPx": 131,
+      "target": "media/image1.jpg",
+      "targetExists": true,
+      "align": "right",
+      "paragraphText": ""
+    },
+    {
+      "inline": true,
+      "widthPx": 150,
+      "heightPx": 100,
+      "target": "media/image1.bmp",
+      "targetExists": true,
+      "align": "center",
+      "paragraphText": ""
+    }
+  ],
+  "toc": {
+    "present": true,
+    "field": "TOC \\h \\o \"1-2\"",
+    "dirty": true,
+    "docPartGallery": "Table of Contents",
+    "entries": [
+      {
+        "style": "TOC1",
+        "text": "1. 개요",
+        "anchor": "_Toc1"
+      },
+      {
+        "style": "TOC2",
+        "text": "1.1 사진",
+        "anchor": "_Toc2"
+      },
+      {
+        "style": "TOC1",
+        "text": "2. 표",
+        "anchor": "_Toc3"
+      },
+      {
+        "style": "TOC1",
+        "text": "3. 마무리",
+        "anchor": "_Toc4"
+      }
+    ],
+    "anchorsResolve": true,
+    "bookmarks": 4
+  },
+  "headings": [
+    {
+      "style": "Heading1",
+      "text": "1. 개요"
+    },
+    {
+      "style": "Heading2",
+      "text": "1.1 사진"
+    },
+    {
+      "style": "Heading1",
+      "text": "2. 표"
+    },
+    {
+      "style": "Heading1",
+      "text": "3. 마무리"
+    }
+  ],
+  "headers": [
+    {
+      "type": "default",
+      "target": "header1.xml",
+      "exists": true,
+      "text": "People OS 확장 라이브 시험",
+      "align": "right",
+      "fields": []
+    },
+    {
+      "type": "first",
+      "target": "header2.xml",
+      "exists": true,
+      "text": "",
+      "align": null,
+      "fields": []
+    }
+  ],
+  "footers": [
+    {
+      "type": "default",
+      "target": "footer1.xml",
+      "exists": true,
+      "text": "사내 한정  ·   / ",
+      "align": "center",
+      "fields": [
+        "PAGE",
+        "NUMPAGES"
+      ]
+    },
+    {
+      "type": "first",
+      "target": "footer2.xml",
+      "exists": true,
+      "text": "",
+      "align": null,
+      "fields": []
+    }
+  ],
+  "titlePg": true,
+  "settings": {
+    "updateFields": false
+  },
+  "contentTypes": [
+    "png",
+    "jpeg",
+    "jpg",
+    "bmp",
+    "gif",
+    "svg",
+    "rels",
+    "xml",
+    "odttf"
+  ],
+  "xml": {
+    "checked": 25,
+    "errors": []
+  }
+}
