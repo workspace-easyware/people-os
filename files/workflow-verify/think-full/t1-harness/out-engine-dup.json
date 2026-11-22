@@ -1,0 +1,67 @@
+{
+ "run": {
+  "status": "succeeded",
+  "current_step": 1,
+  "error": null,
+  "output_json": "{\"taskId\":\"task_mwnr0vke_wt7ikg\",\"title\":\"후속: 할 일을 만들었습니다.\",\"dueDate\":null}"
+ },
+ "steps": [
+  {
+   "step_index": 0,
+   "node_type": "agent",
+   "status": "succeeded",
+   "input_json": null,
+   "out": "{\"final\":\"할 일을 만들었습니다.\",\"turns\":[{\"turn\":0,\"thinking\":\"\",\"action\":\"tool\",\"tool\":\"create_task\",\"args\":{\"title\":\"엔진 시험 #0\"},\"observation\":\"{\\\"taskId\\\":\\\"task_mwnr0uxw_53da42\\\",\\\"title\\\":\\\"엔진 시험 #0\\\",\\\"dueDate\\\":null}\",\"at\":\"2026-11-19T16:12:36.701Z\"},{\"turn\":1,\"thinking\":\"\",\"action\":\"finish\",\"final\":\"할 일을 만들었습니다.\",\"at\":\"2026-11-19T16:12:36.977Z\"}],\"stoppedReason\":null,\"runtime\":\"think\",\"submissionId",
+   "error": null
+  },
+  {
+   "step_index": 1,
+   "node_type": "create_task",
+   "status": "succeeded",
+   "input_json": null,
+   "out": "{\"taskId\":\"task_mwnr0vke_wt7ikg\",\"title\":\"후속: 할 일을 만들었습니다.\",\"dueDate\":null}",
+   "error": null
+  }
+ ],
+ "agentRow": {
+  "runtime": "think",
+  "submission_id": "wr_t1h_think_e2:0",
+  "status": "completed",
+  "consumed_submission": "wr_t1h_think_e2:0",
+  "steps": 2,
+  "llm_calls": 2
+ },
+ "notifications": [],
+ "tasks": [
+  {
+   "id": "task_mwnr0uxw_53da42",
+   "title": "엔진 시험 #0"
+  },
+  {
+   "id": "task_mwnr0vke_wt7ikg",
+   "title": "후속: 할 일을 만들었습니다."
+  }
+ ],
+ "think": {
+  "ms": 0,
+  "outcome": "completed",
+  "stoppedReason": null,
+  "final": "할 일을 만들었습니다.",
+  "steps": 2,
+  "modelCalls": 2,
+  "llmCalls": 2,
+  "stop": null,
+  "turns": [
+   "0:tool:create_task obs={\"taskId\":\"task_mwnr0uxw_53da42\",\"title\":\"엔진 시험 #0\",\"dueDate",
+   "1:finish"
+  ],
+  "exec": [
+   "create_task"
+  ],
+  "sent": 0,
+  "submissions": [
+   "wr_t1h_think_e2:0=completed"
+  ],
+  "recovery": []
+ }
+}

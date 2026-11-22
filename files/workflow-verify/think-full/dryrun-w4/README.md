@@ -1,0 +1,1 @@
+This folder contains the built output assets for the worker "people-os" generated at 2026-11-19T12:42:32.726Z.

@@ -1,0 +1,57 @@
+{
+ "sub": {
+  "submissionId": "h-block-send_email-b1:0",
+  "accepted": true,
+  "status": "pending"
+ },
+ "beforeApproval": {
+  "ms": 1007,
+  "outcome": "approval",
+  "stoppedReason": null,
+  "pendingTool": "send_email",
+  "steps": 1,
+  "modelCalls": 1,
+  "llmCalls": 1,
+  "stop": "approval_required",
+  "turns": [
+   "0:tool:send_email obs=(차단) 승인이 필요한 동작입니다. 승인 요청을 남겼고 실행하지 않았습니다. 다시 부르지 말고 멈추세요."
+  ],
+  "exec": [],
+  "sent": 0,
+  "submissions": [
+   "h-block-send_email-b1:0=completed"
+  ],
+  "recovery": []
+ },
+ "resume1": {
+  "status": "submitted",
+  "submissionId": "h-block-send_email-b1:0:a1",
+  "observation": "{\"mock\":true,\"tool\":\"send_email\",\"args\":{\"to\":\"jy.park@example.com\",\"subject\":\"면담 확정\",\"body\":\"내일 10시로 확정합니다.\"}}"
+ },
+ "resume2": {
+  "status": "noop"
+ },
+ "afterApproval": {
+  "ms": 1006,
+  "outcome": "approval",
+  "stoppedReason": null,
+  "pendingTool": "send_email",
+  "steps": 2,
+  "modelCalls": 2,
+  "llmCalls": 2,
+  "stop": "approval_required",
+  "turns": [
+   "0:tool:send_email obs={\"mock\":true,\"tool\":\"send_email\",\"args\":{\"to\":\"jy.park@examp",
+   "1:tool:send_email obs=(차단) 승인이 필요한 동작입니다. 승인 요청을 남겼고 실행하지 않았습니다. 다시 부르지 말고 멈추세요."
+  ],
+  "exec": [
+   "send_email(approved)"
+  ],
+  "sent": 1,
+  "submissions": [
+   "h-block-send_email-b1:0:a1=completed",
+   "h-block-send_email-b1:0=completed"
+  ],
+  "recovery": []
+ }
+}

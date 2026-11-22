@@ -1,0 +1,21 @@
+{
+  "name": "PPTX 편집 노드 시험",
+  "description": "pptx_edit 노드 + 승인 게이트 (로컬)",
+  "definition": {
+    "version": 1,
+    "steps": [
+      {
+        "id": "s1", "type": "pptx_edit", "name": "덱 편집 (승인 뒤)", "requiresApproval": true,
+        "config": {
+          "docId": "{{input.docId}}",
+          "title": "워크플로 편집본",
+          "ops": [
+            { "op": "text", "slide": 1, "elementId": "ppt/slides/slide1.xml-shape-1", "text": "{{input.newTitle}}" },
+            { "op": "cell", "slide": 3, "elementId": "ppt/slides/slide3.xml-frame-0", "r": 3, "c": 0, "text": "정매니저" }
+          ]
+        }
+      },
+      { "id": "s2", "type": "create_task", "name": "확인 할 일", "config": { "title": "편집본 확인: {{steps.s1.output.title}} ({{steps.s1.output.deckId}})" } }
+    ]
+  }
+}

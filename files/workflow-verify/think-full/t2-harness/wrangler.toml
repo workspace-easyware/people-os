@@ -1,0 +1,33 @@
+# Think T2 로컬 하네스 (2026-11-20). 운영 코드(src/assistant/*)를 그대로 import해 wrangler dev(로컬)에서 시험한다. 배포하지 않는다.
+# 실행: cf-wrangler.py dev --config files/workflow-verify/think-full/t2-harness/wrangler.toml --port 8798 --persist-to files/workflow-verify/think-full/t2-harness/state
+# 실제 모델·ask-pipeline 시험은 원격 시험 Worker(wrangler.remote.toml)에서 한다 (로컬 dev는 Workers AI를 못 부른다).
+name = "people-os-t2-harness-local"
+main = "harness.ts"
+compatibility_date = "2025-07-18"
+compatibility_flags = ["nodejs_compat"]
+
+[[d1_databases]]
+binding = "DB"
+database_name = "people-os-db"
+database_id = "00000000-0000-0000-0000-0000000000t2"
+migrations_dir = "../../../../migrations"
+
+[[kv_namespaces]]
+binding = "CACHE"
+id = "t2harnesskv"
+
+[[r2_buckets]]
+binding = "FILES"
+bucket_name = "t2-harness-files"
+
+[[durable_objects.bindings]]
+name = "ASSISTANT_AGENT"
+class_name = "HarnessAssistantAgent"
+
+[[durable_objects.bindings]]
+name = "AGENT_SESSION"
+class_name = "AgentSession"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["HarnessAssistantAgent", "AgentSession"]

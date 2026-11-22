@@ -1,0 +1,49 @@
+# Think T1 로컬 하네스 (2026-11-20). 운영 코드(src/workflow/*)를 그대로 import해 wrangler dev(로컬)에서 시험한다.
+# 배포하지 않는다. 실행: cf-wrangler.py dev --config files/workflow-verify/think-full/t1-harness/wrangler.toml --port 8799 --persist-to files/workflow-verify/think-full/t1-harness/state
+# AI 바인딩만 원격(Workers AI)이고 D1·큐·KV·R2·DO는 전부 로컬이다. VECTOR는 로컬 미지원이라 뺐다 (ask_rag는 쓰지 않는다).
+name = "people-os-t1-harness"
+main = "harness.ts"
+compatibility_date = "2025-07-18"
+compatibility_flags = ["nodejs_compat"]
+
+[ai]
+binding = "AI"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "people-os-db"
+database_id = "00000000-0000-0000-0000-0000000000t1"
+migrations_dir = "../../../../migrations"
+
+[[kv_namespaces]]
+binding = "CACHE"
+id = "t1harnesskv"
+
+[[r2_buckets]]
+binding = "FILES"
+bucket_name = "t1-harness-files"
+
+[[durable_objects.bindings]]
+name = "ThinkAgent"
+class_name = "HarnessThinkAgent"
+
+[[durable_objects.bindings]]
+name = "WORKFLOW_AGENT"
+class_name = "WorkflowAgent"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["HarnessThinkAgent", "WorkflowAgent"]
+
+[[queues.producers]]
+binding = "PIPELINE"
+queue = "t1-harness-pipeline"
+
+[[queues.consumers]]
+queue = "t1-harness-pipeline"
+max_batch_size = 1
+max_batch_timeout = 1
+max_retries = 3
+
+[vars]
+AGENT_RUNTIME = "think"

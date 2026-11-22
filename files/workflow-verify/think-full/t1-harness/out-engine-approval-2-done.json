@@ -1,0 +1,71 @@
+{
+ "run": {
+  "status": "succeeded",
+  "current_step": 1,
+  "error": null,
+  "output_json": "{\"taskId\":\"task_mwnr0na7_ackm23\",\"title\":\"후속: 할 일을 만들고 메일을 보냈습니다.\",\"dueDate\":null}"
+ },
+ "steps": [
+  {
+   "step_index": 0,
+   "node_type": "agent",
+   "status": "succeeded",
+   "input_json": "{\"approval\":\"approved\",\"approvedAt\":\"2026-11-19T16:12:25.907Z\"}",
+   "out": "{\"final\":\"할 일을 만들고 메일을 보냈습니다.\",\"turns\":[{\"turn\":0,\"thinking\":\"\",\"action\":\"tool\",\"tool\":\"create_task\",\"args\":{\"title\":\"엔진 승인 시험 #0\"},\"observation\":\"{\\\"mock\\\":true,\\\"tool\\\":\\\"create_task\\\",\\\"args\\\":{\\\"title\\\":\\\"엔진 승인 시험 #0\\\"}}\",\"at\":\"2026-11-19T16:12:19.505Z\"},{\"turn\":1,\"thinking\":\"\",\"action\":\"tool\",\"tool\":\"send_email\",\"args\":{\"to\":\"jy.park@example.com\",\"subject\":\"확정\",\"body\":\"확정합니다.\"},\"observation\":",
+   "error": null
+  },
+  {
+   "step_index": 1,
+   "node_type": "create_task",
+   "status": "succeeded",
+   "input_json": null,
+   "out": "{\"taskId\":\"task_mwnr0na7_ackm23\",\"title\":\"후속: 할 일을 만들고 메일을 보냈습니다.\",\"dueDate\":null}",
+   "error": null
+  }
+ ],
+ "agentRow": {
+  "runtime": "think",
+  "submission_id": "wr_t1h_think-approval_e1:0:a1",
+  "status": "completed",
+  "consumed_submission": "wr_t1h_think-approval_e1:0:a1",
+  "steps": 3,
+  "llm_calls": 3
+ },
+ "notifications": [
+  {
+   "id": "wfapr_wr_t1h_think-approval_e1_0_t1",
+   "type": "WORKFLOW_APPROVAL"
+  }
+ ],
+ "tasks": [
+  {
+   "id": "task_mwnr0na7_ackm23",
+   "title": "후속: 할 일을 만들고 메일을 보냈습니다."
+  }
+ ],
+ "think": {
+  "ms": 0,
+  "outcome": "completed",
+  "stoppedReason": null,
+  "final": "할 일을 만들고 메일을 보냈습니다.",
+  "steps": 3,
+  "modelCalls": 3,
+  "llmCalls": 3,
+  "stop": null,
+  "turns": [
+   "0:tool:create_task obs={\"mock\":true,\"tool\":\"create_task\",\"args\":{\"title\":\"엔진 승인 시험 ",
+   "1:tool:send_email obs={\"mock\":true,\"tool\":\"send_email\",\"args\":{\"to\":\"jy.park@examp",
+   "2:finish"
+  ],
+  "exec": [
+   "create_task",
+   "send_email(approved)"
+  ],
+  "sent": 1,
+  "submissions": [
+   "wr_t1h_think-approval_e1:0:a1=completed",
+   "wr_t1h_think-approval_e1:0=completed"
+  ],
+  "recovery": []
+ }
+}

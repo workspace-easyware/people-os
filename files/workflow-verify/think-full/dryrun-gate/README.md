@@ -1,0 +1,1 @@
+This folder contains the built output assets for the worker "people-os-think-gate" generated at 2026-11-19T12:46:27.141Z.

@@ -1,0 +1,47 @@
+# 회귀 검증 로컬 하네스 (2026-11-21). 배포하지 않는다. harness.ts는 P3 하네스 사본 + 회귀 라우트.
+# 마이그레이션: npx wrangler d1 migrations apply people-os-db --config <이 파일 절대 경로> --persist-to <harness/state> --local
+# 실행: npx wrangler dev --local --config <이 파일 절대 경로> --port 8831 --persist-to <harness/state>
+name = "people-os-regression-harness-local"
+main = "harness.ts"
+compatibility_date = "2025-07-18"
+compatibility_flags = ["nodejs_compat", "enable_ctx_exports"]
+
+[[d1_databases]]
+binding = "DB"
+database_name = "people-os-db"
+database_id = "00000000-0000-0000-0000-0000000000rg"
+migrations_dir = "../../../../migrations"
+
+[[kv_namespaces]]
+binding = "CACHE"
+id = "rgharnesskv"
+
+[[r2_buckets]]
+binding = "FILES"
+bucket_name = "rg-harness-files"
+
+[[durable_objects.bindings]]
+name = "ThinkAgent"
+class_name = "HarnessThinkAgent"
+
+[[durable_objects.bindings]]
+name = "WORKFLOW_AGENT"
+class_name = "HarnessWorkflowAgent"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["HarnessThinkAgent", "HarnessWorkflowAgent"]
+
+[[queues.producers]]
+binding = "PIPELINE"
+queue = "rg-harness-pipeline"
+
+[[queues.consumers]]
+queue = "rg-harness-pipeline"
+max_batch_size = 1
+max_batch_timeout = 1
+max_retries = 3
+
+[vars]
+AGENT_RUNTIME = "think"
+RESEND_API_KEY = "re_test_fake_key"

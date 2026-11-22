@@ -1,0 +1,26 @@
+{
+ "kind": "time",
+ "ms": 7027,
+ "outcome": "completed",
+ "stoppedReason": "timeout",
+ "final": "목표에 도달하기 전에 멈췄습니다: 실행 시간 상한(30분)에 도달. 마지막 관찰: {\"mock\":true,\"tool\":\"create_task\",\"args\":{\"title\":\"교대 A #2\"}}",
+ "steps": 3,
+ "modelCalls": 3,
+ "llmCalls": 3,
+ "stop": "timeout",
+ "turns": [
+  "0:tool:create_task obs={\"mock\":true,\"tool\":\"create_task\",\"args\":{\"title\":\"교대 A #0\"}",
+  "1:tool:create_calendar_event obs={\"mock\":true,\"tool\":\"create_calendar_event\",\"args\":{\"title\":",
+  "2:tool:create_task obs={\"mock\":true,\"tool\":\"create_task\",\"args\":{\"title\":\"교대 A #2\"}"
+ ],
+ "exec": [
+  "create_task",
+  "create_calendar_event",
+  "create_task"
+ ],
+ "sent": 0,
+ "submissions": [
+  "h-lim-time-l1:0=completed"
+ ],
+ "recovery": []
+}

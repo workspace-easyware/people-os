@@ -1,0 +1,1 @@
+{"pendingActions":2,"workflowId":"wf_bf_1","ok":true,"runId":"wfrun_bf_1","stepIndex":0,"runtime":"legacy","status":"succeeded","runStatus":"succeeded","waitingApproval":false,"final":"메일을 승인 대기열에 넣었습니다.","stoppedReason":null,"error":null,"turns":[{"turn":0,"action":"finish","final":"메일을 승인 대기열에 넣었습니다."}],"live":null,"link":"#workflow/wf_bf_1?run=wfrun_bf_1"}

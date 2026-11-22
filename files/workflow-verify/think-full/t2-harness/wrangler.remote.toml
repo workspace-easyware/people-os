@@ -1,0 +1,45 @@
+# Think T2 원격 시험 Worker (2026-11-20). 실제 Qwen + 실제 ask-pipeline(ask_rag → runAsk)으로 어시스턴트 턴을 시험한다.
+# 로컬 dev는 Workers AI를 못 부르고(프록시 TLS) Vectorize도 로컬 미지원이라 원격이 필요하다.
+# 배포: cf-wrangler.py deploy --config files/workflow-verify/think-full/t2-harness/wrangler.remote.toml
+# 주의: ask_rag가 운영 D1·R2에 질문 트레이스를 남긴다 (sessionId 접두어 wf_asst_u_t2r). 시험 뒤 이 Worker는 지운다.
+# 시험 창 OPEN_UNTIL(ms) 이후에는 403.
+name = "people-os-t2-harness"
+main = "harness.ts"
+compatibility_date = "2025-07-18"
+compatibility_flags = ["nodejs_compat"]
+workers_dev = true
+
+[ai]
+binding = "AI"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "people-os-db"
+database_id = "5dff997a-fe7b-4f27-9624-1c88e40857c1"
+
+[[kv_namespaces]]
+binding = "CACHE"
+id = "de4c7ddf4c76495381ba82c56fb23dbb"
+
+[[r2_buckets]]
+binding = "FILES"
+bucket_name = "people-os-files"
+
+[[vectorize]]
+binding = "VECTOR"
+index_name = "people-os-index-m3"
+
+[[durable_objects.bindings]]
+name = "ASSISTANT_AGENT"
+class_name = "HarnessAssistantAgent"
+
+[[durable_objects.bindings]]
+name = "AGENT_SESSION"
+class_name = "AgentSession"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["HarnessAssistantAgent", "AgentSession"]
+
+[vars]
+OPEN_UNTIL = "1795143600000"

@@ -1,0 +1,27 @@
+{
+ "kind": "llm",
+ "ms": 1007,
+ "outcome": "completed",
+ "stoppedReason": "llm_cap",
+ "final": "목표에 도달하기 전에 멈췄습니다: LLM 호출 상한에 도달. 마지막 관찰: {\"mock\":true,\"tool\":\"create_calendar_event\",\"args\":{\"title\":\"교대 B\",\"start\":\"2026-11-21T09:00:00+09:00\"}}",
+ "steps": 4,
+ "modelCalls": 4,
+ "llmCalls": 4,
+ "stop": "llm_cap",
+ "turns": [
+  "0:tool:create_task obs={\"mock\":true,\"tool\":\"create_task\",\"args\":{\"title\":\"교대 A #0\"}",
+  "1:tool:create_calendar_event obs={\"mock\":true,\"tool\":\"create_calendar_event\",\"args\":{\"title\":",
+  "2:tool:create_task obs={\"mock\":true,\"tool\":\"create_task\",\"args\":{\"title\":\"교대 A #2\"}",
+  "3:tool:create_calendar_event obs={\"mock\":true,\"tool\":\"create_calendar_event\",\"args\":{\"title\":"
+ ],
+ "exec": [
+  "create_task",
+  "create_calendar_event",
+  "create_task"
+ ],
+ "sent": 0,
+ "submissions": [
+  "h-lim-llm-l1:0=completed"
+ ],
+ "recovery": []
+}

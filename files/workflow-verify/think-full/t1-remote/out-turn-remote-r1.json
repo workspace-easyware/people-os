@@ -1,0 +1,142 @@
+{
+ "sub": {
+  "submissionId": "r-turn-r1:0",
+  "accepted": true,
+  "status": "pending"
+ },
+ "ms": 10104,
+ "outcome": "completed",
+ "stoppedReason": null,
+ "final": "번역 결과: \"Good morning.\"",
+ "steps": 2,
+ "modelCalls": 2,
+ "llmCalls": 3,
+ "stop": null,
+ "turns": [
+  "0:tool:llm obs={\"text\":\"Good morning.\"}",
+  "1:finish"
+ ],
+ "exec": [
+  "llm"
+ ],
+ "sent": 0,
+ "submissions": [
+  "r-turn-r1:0=completed"
+ ],
+ "recovery": [],
+ "events": [
+  {
+   "ts": 1795104901364,
+   "ev": "submissionStatus",
+   "data": {
+    "id": "r-turn-r1:0",
+    "status": "pending",
+    "requestId": "r-turn-r1:0"
+   }
+  },
+  {
+   "ts": 1795104901364,
+   "ev": "submit",
+   "data": {
+    "submissionId": "r-turn-r1:0",
+    "accepted": true,
+    "status": "pending"
+   }
+  },
+  {
+   "ts": 1795104901401,
+   "ev": "submissionStatus",
+   "data": {
+    "id": "r-turn-r1:0",
+    "status": "running",
+    "requestId": "r-turn-r1:0"
+   }
+  },
+  {
+   "ts": 1795104901401,
+   "ev": "beforeTurn",
+   "data": {
+    "requestId": "r-turn-r1:0",
+    "trigger": "submission",
+    "continuation": false,
+    "steps": 0,
+    "offered": 21,
+    "active": [
+     "llm",
+     "create_task"
+    ]
+   }
+  },
+  {
+   "ts": 1795104901401,
+   "ev": "beforeStep",
+   "data": {
+    "step": 0,
+    "cum": 0
+   }
+  },
+  {
+   "ts": 1795104903908,
+   "ev": "toolCall",
+   "data": {
+    "tool": "llm",
+    "toolCallId": "chatcmpl-tool-b66aa3f5ae70982c::cf-wai-tool-call::Vw69iTmGjicNrCCv"
+   }
+  },
+  {
+   "ts": 1795104906616,
+   "ev": "toolDone",
+   "data": {
+    "tool": "llm",
+    "success": true
+   }
+  },
+  {
+   "ts": 1795104906616,
+   "ev": "stepFinish",
+   "data": {
+    "step": 0,
+    "turnNo": 0,
+    "tools": [
+     "llm"
+    ],
+    "finishReason": "tool-calls"
+   }
+  },
+  {
+   "ts": 1795104906616,
+   "ev": "beforeStep",
+   "data": {
+    "step": 1,
+    "cum": 1
+   }
+  },
+  {
+   "ts": 1795104911424,
+   "ev": "stepFinish",
+   "data": {
+    "step": 1,
+    "turnNo": 1,
+    "tools": [],
+    "finishReason": "stop"
+   }
+  },
+  {
+   "ts": 1795104911424,
+   "ev": "submissionStatus",
+   "data": {
+    "id": "r-turn-r1:0",
+    "status": "completed",
+    "requestId": "r-turn-r1:0"
+   }
+  },
+  {
+   "ts": 1795104911424,
+   "ev": "deliverSkipped",
+   "data": {
+    "submissionId": "r-turn-r1:0",
+    "reason": "no DB binding (remote harness)"
+   }
+  }
+ ]
+}

@@ -1,0 +1,58 @@
+{
+ "kind": "resume",
+ "first": {
+  "ms": 1007,
+  "outcome": "approval",
+  "stoppedReason": null,
+  "pendingTool": "send_email",
+  "steps": 2,
+  "modelCalls": 2,
+  "llmCalls": 2,
+  "stop": "approval_required",
+  "turns": [
+   "0:tool:create_task obs={\"mock\":true,\"tool\":\"create_task\",\"args\":{\"title\":\"교대 A #0\"}",
+   "1:tool:send_email obs=(차단) 승인이 필요한 동작입니다. 승인 요청을 남겼고 실행하지 않았습니다. 다시 부르지 말고 멈추세요."
+  ],
+  "exec": [
+   "create_task"
+  ],
+  "sent": 0,
+  "submissions": [
+   "h-lim-resume-l1:0=completed"
+  ],
+  "recovery": []
+ },
+ "resume": {
+  "status": "submitted",
+  "submissionId": "h-lim-resume-l1:0:a1",
+  "observation": "{\"mock\":true,\"tool\":\"send_email\",\"args\":{\"to\":\"a@example.com\",\"subject\":\"s\",\"body\":\"b\"}}"
+ },
+ "after": {
+  "ms": 1037,
+  "outcome": "completed",
+  "stoppedReason": "max_steps",
+  "final": "목표에 도달하기 전에 멈췄습니다: 최대 단계 수에 도달. 마지막 관찰: {\"mock\":true,\"tool\":\"create_task\",\"args\":{\"title\":\"교대 A #3\"}}",
+  "steps": 4,
+  "modelCalls": 4,
+  "llmCalls": 4,
+  "stop": "max_steps",
+  "turns": [
+   "0:tool:create_task obs={\"mock\":true,\"tool\":\"create_task\",\"args\":{\"title\":\"교대 A #0\"}",
+   "1:tool:send_email obs={\"mock\":true,\"tool\":\"send_email\",\"args\":{\"to\":\"a@example.com",
+   "2:tool:create_calendar_event obs={\"mock\":true,\"tool\":\"create_calendar_event\",\"args\":{\"title\":",
+   "3:tool:create_task obs={\"mock\":true,\"tool\":\"create_task\",\"args\":{\"title\":\"교대 A #3\"}"
+  ],
+  "exec": [
+   "create_task",
+   "send_email(approved)",
+   "create_calendar_event",
+   "create_task"
+  ],
+  "sent": 1,
+  "submissions": [
+   "h-lim-resume-l1:0:a1=completed",
+   "h-lim-resume-l1:0=completed"
+  ],
+  "recovery": []
+ }
+}

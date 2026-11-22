@@ -1,0 +1,54 @@
+# Think T3 고침 로컬 하네스 (2026-11-21). 운영 코드를 그대로 import해 wrangler dev(로컬)에서 시험한다. 배포하지 않는다.
+# 마이그레이션: npx wrangler d1 migrations apply people-os-db --config files/workflow-verify/think-full/t3-fixes-harness/wrangler.toml --persist-to files/workflow-verify/think-full/t3-fixes-harness/state --local
+# 실행: npx wrangler dev --local --config files/workflow-verify/think-full/t3-fixes-harness/wrangler.toml --port 8831 --persist-to files/workflow-verify/think-full/t3-fixes-harness/state
+name = "people-os-t3-fixes-harness-local"
+main = "harness.ts"
+compatibility_date = "2025-07-18"
+compatibility_flags = ["nodejs_compat", "enable_ctx_exports"]
+
+[[d1_databases]]
+binding = "DB"
+database_name = "people-os-db"
+database_id = "00000000-0000-0000-0000-00000000t3fx"
+migrations_dir = "../../../../migrations"
+
+[[kv_namespaces]]
+binding = "CACHE"
+id = "t3fixharnesskv"
+
+[[r2_buckets]]
+binding = "FILES"
+bucket_name = "t3-fixes-harness-files"
+
+[[durable_objects.bindings]]
+name = "ASSISTANT_AGENT"
+class_name = "FixAssistantAgent"
+
+[[durable_objects.bindings]]
+name = "AGENT_SESSION"
+class_name = "AgentSession"
+
+[[durable_objects.bindings]]
+name = "ThinkAgent"
+class_name = "FixThinkAgent"
+
+[[durable_objects.bindings]]
+name = "WORKFLOW_AGENT"
+class_name = "WorkflowAgent"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["FixAssistantAgent", "AgentSession", "FixThinkAgent", "WorkflowAgent"]
+
+[[queues.producers]]
+binding = "PIPELINE"
+queue = "t3-fixes-harness-pipeline"
+
+[[queues.consumers]]
+queue = "t3-fixes-harness-pipeline"
+max_batch_size = 1
+max_batch_timeout = 1
+max_retries = 3
+
+[vars]
+AGENT_RUNTIME = "think"

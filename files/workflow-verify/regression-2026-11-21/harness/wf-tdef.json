@@ -1,0 +1,4 @@
+{"name":"RG Think 지연","definition":{"version":1,"steps":[
+ {"id":"ag","type":"agent","name":"안내 에이전트","approvalMode":"deferred","config":{"goal":"[S:TDEF] 김 매니저에게 분기 리뷰 안내 메일을 보내라.","tools":["send_email","create_task"],"maxSteps":4}},
+ {"id":"t2","type":"create_task","name":"후속 할 일","config":{"title":"RG 후속 확인 (think)"}}
+]}}

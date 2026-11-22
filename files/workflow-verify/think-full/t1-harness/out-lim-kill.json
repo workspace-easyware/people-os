@@ -1,0 +1,41 @@
+{
+ "kind": "kill",
+ "killed": "threw: Error: t1 harness kill",
+ "ms": 9040,
+ "outcome": "completed",
+ "stoppedReason": "max_steps",
+ "final": "목표에 도달하기 전에 멈췄습니다: 최대 단계 수에 도달. 마지막 관찰: {\"mock\":true,\"tool\":\"create_task\",\"args\":{\"title\":\"교대 A #10\"}}",
+ "steps": 10,
+ "modelCalls": 10,
+ "llmCalls": 10,
+ "stop": "max_steps",
+ "turns": [
+  "0:tool:create_task obs={\"mock\":true,\"tool\":\"create_task\",\"args\":{\"title\":\"교대 A #0\"}",
+  "1:tool:create_calendar_event obs={\"mock\":true,\"tool\":\"create_calendar_event\",\"args\":{\"title\":",
+  "2:tool:create_task obs={\"mock\":true,\"tool\":\"create_task\",\"args\":{\"title\":\"교대 A #2\"}",
+  "3:tool:create_calendar_event obs={\"mock\":true,\"tool\":\"create_calendar_event\",\"args\":{\"title\":",
+  "4:tool:create_calendar_event obs={\"mock\":true,\"tool\":\"create_calendar_event\",\"args\":{\"title\":",
+  "5:tool:create_task obs={\"mock\":true,\"tool\":\"create_task\",\"args\":{\"title\":\"교대 A #6\"}",
+  "6:tool:create_calendar_event obs={\"mock\":true,\"tool\":\"create_calendar_event\",\"args\":{\"title\":",
+  "7:tool:create_task obs={\"mock\":true,\"tool\":\"create_task\",\"args\":{\"title\":\"교대 A #8\"}",
+  "8:tool:create_calendar_event obs={\"mock\":true,\"tool\":\"create_calendar_event\",\"args\":{\"title\":",
+  "9:tool:create_task obs={\"mock\":true,\"tool\":\"create_task\",\"args\":{\"title\":\"교대 A #10\""
+ ],
+ "exec": [
+  "create_task",
+  "create_calendar_event",
+  "create_task",
+  "create_task",
+  "create_task",
+  "create_task",
+  "create_task"
+ ],
+ "sent": 0,
+ "submissions": [
+  "h-lim-kill-k1:0=completed"
+ ],
+ "recovery": [
+  "chatRecovery:{\"attempt\":1,\"kind\":\"continue\",\"stopped\":null}",
+  "beforeTurn:{\"requestId\":\"1cfb6cb2-3f75-4390-af01-8dda1c8bce01\",\"trigger\":\"recovery-continue\",\"continuation\":true,\"steps\":4,\"offered\":21,\"active\":[\"create_task\",\"create_calendar_event\"]}"
+ ]
+}

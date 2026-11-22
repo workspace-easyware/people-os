@@ -1,0 +1,32 @@
+# Think T1 원격 시험 Worker (2026-11-20). 운영 Worker(people-os)와 완전히 분리 — T0 게이트(people-os-think-gate)와 같은 방식.
+# 로컬 dev는 샌드박스 프록시 때문에 Workers AI 원격 바인딩이 TLS 오류로 실패해, 실제 모델(Qwen) 시험만 여기서 한다.
+# D1·큐·KV·R2는 묶지 않는다 (운영 데이터에 닿지 않게). 시험 창이 지나면 모든 요청이 403.
+# 배포: cf-wrangler.py deploy --config files/workflow-verify/think-full/t1-remote/wrangler.toml
+name = "people-os-t1-harness"
+main = "../t1-harness/harness.ts"
+compatibility_date = "2025-07-18"
+compatibility_flags = ["nodejs_compat"]
+workers_dev = true
+
+[observability]
+enabled = true
+
+[ai]
+binding = "AI"
+
+[[durable_objects.bindings]]
+name = "ThinkAgent"
+class_name = "HarnessThinkAgent"
+
+[[durable_objects.bindings]]
+name = "WORKFLOW_AGENT"
+class_name = "WorkflowAgent"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["HarnessThinkAgent", "WorkflowAgent"]
+
+[vars]
+AGENT_RUNTIME = "think"
+# 시험 창 (UTC epoch ms): 2026-11-20 03:30 KST. 지나면 403.
+OPEN_UNTIL = "1795113000000"

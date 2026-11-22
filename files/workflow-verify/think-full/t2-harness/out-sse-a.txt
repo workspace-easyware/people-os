@@ -1,0 +1,33 @@
+retry: 2000
+
+id: 8
+event: turnQueued
+data: {"id":8,"ts":1795136130950,"turn":2,"ev":"turnQueued","data":{"submissionId":"turn-2","chars":24}}
+
+id: 9
+event: turnStart
+data: {"id":9,"ts":1795136131091,"turn":2,"ev":"turnStart","data":{"requestId":"turn-2","trigger":"submission","continuation":false,"steps":0,"offered":13,"active":["ask_rag","ask_personal","summarize","llm","email_draft","create_task"]}}
+
+id: 10
+event: toolStart
+data: {"id":10,"ts":1795136131175,"turn":2,"ev":"toolStart","data":{"tool":"email_draft","toolCallId":"call_0_1795136131096","args":"{\"to\":\"hr@example.com\",\"context\":\"연차 15일 확인 감사\"}"}}
+
+id: 11
+event: toolEnd
+data: {"id":11,"ts":1795136131176,"turn":2,"ev":"toolEnd","data":{"tool":"email_draft","toolCallId":"call_0_1795136131096","ok":true,"observation":"{\"mock\":true,\"tool\":\"email_draft\",\"args\":{\"to\":\"hr@example.com\",\"context\":\"연차 15일 확인 감사\"}}"}}
+
+id: 12
+event: step
+data: {"id":12,"ts":1795136131177,"turn":2,"ev":"step","data":{"step":1,"tools":["email_draft"],"finishReason":"tool-calls","thinking":"","llmCalls":2}}
+
+id: 13
+event: step
+data: {"id":13,"ts":1795136131236,"turn":2,"ev":"step","data":{"step":2,"tools":[],"finishReason":"stop","thinking":"","text":"초안을 만들었습니다. 발송은 직접 해 주세요.","llmCalls":3}}
+
+id: 14
+event: turnEnd
+data: {"id":14,"ts":1795136131241,"turn":2,"ev":"turnEnd","data":{"status":"completed","stoppedReason":null,"steps":2,"llmCalls":3,"toolCalls":1,"ms":150,"final":"초안을 만들었습니다. 발송은 직접 해 주세요.","thinkingEmptySteps":2,"recoveries":0}}
+
+event: end
+data: {"cursor":14}
+

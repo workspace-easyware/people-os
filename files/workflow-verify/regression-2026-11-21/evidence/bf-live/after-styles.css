@@ -1,0 +1,295 @@
+/* ==========================================================================
+   일잇 People OS — 디자인 시스템 (public/styles.css)
+   --------------------------------------------------------------------------
+   C10-4부터 <style> 인라인 대신 이 파일로 분리. Workers Static Assets가
+   public/을 그대로 서빙하므로 빌드 단계 없이 <link>로 연결한다.
+   (_headers의 no-cache가 이 파일에도 적용돼 배포 직후 바로 갱신된다.)
+
+   사용법: 색·간격·타이포·그림자는 :root 토큰만 건드린다. 컴포넌트는
+   토큰을 참조하고, 값을 직접 박지 않는다. 새 컴포넌트를 추가할 때도
+   토큰부터 정의한다.
+
+   이력: C8 토큰 정리 · C10 2차 다듬기 · C10-3 소개 히어로 · C10-4
+   타이포 스케일·남색 면 사용·컴포넌트 입체감·여백 강화 (본 파일로 통합) ·
+   DS-L1 Langfuse 토큰 참고 개정 (LANGFUSE-DESIGN-TOKENS.md): 타입 스케일
+   14/13/12/11, 반경 8/6, 컨트롤 높이 32, 카드 패딩 16, 아이콘 16px,
+   중립 회색 배경·테두리·muted, 상태·카테고리 색. 남색 정체성은 유지
+   (primary·활성 메뉴·히어로·배지는 남색/옅은 파랑 그대로).
+   ========================================================================== */
+
+/* §1 토큰 — 색 / 간격 / 타이포 / 모서리 / 그림자 */
+:root{
+  /* 색 — 남색 정체성 유지. primary는 얇은 선이 아니라 면(히어로·활성 메뉴·
+     배지·버튼)으로 쓴다. 따뜻한 차콜·캐러멜 팔레트는 가져오지 않는다.
+     Langfuse는 primary가 zinc-900(검정)이지만 People OS는 남색을 유지. */
+  --color-primary:#123863; --color-primary-700:#0d2c4f; --color-primary-800:#0a2540;
+  --color-primary-soft:#e8eef6; --color-primary-line:#c3d2e4;
+  --color-accent:#2d7dde; --color-accent-700:#1f6bc4; --color-accent-soft:#eaf2fd; --color-accent-line:#cfe3fa;
+  /* 중립 면 — Langfuse 회색 참고: 페이지(섹션 표면) #F6F6F7, 사이드바(sunken)
+     #FCFCFC, 헤더 #FAFAFA, 카드 #FFF. 남색 틴트 대신 중립 회색. */
+  --color-bg:#f6f6f7; --color-surface:#fff; --color-surface-soft:#fafafa; --color-surface-tint:#f8fbff;
+  --color-surface-sunken:#fcfcfc; --color-surface-code:#f4f4f5;
+  /* 텍스트 — 본문은 남색 계열 유지, 보조·muted·3차는 Langfuse zinc 참고 */
+  --color-text:#14233a; --color-text-2:#52525b; --color-muted:#71717a; --color-text-3:#a1a1aa;
+  /* 상태 — 아래 hex는 폴백, oklch 지원 브라우저는 §1b의 Langfuse 값 사용 */
+  --color-ok:#0e7a4d; --color-ok-bg:#e6f6ee; --color-ok-line:#bfe6cf;
+  --color-warn:#8a5a00; --color-warn-bg:#fff4d6; --color-warn-line:#f2dd9a;
+  --color-err:#b3261e; --color-err-bg:#fdecea; --color-err-line:#f5c6c2;
+  --color-info:#1d4ed8; --color-info-bg:#dbeafe; --color-info-line:#bfdbfe;
+  --color-danger:#ef4444; /* Langfuse destructive red-500 */
+  /* 카테고리 (Langfuse 카테고리 팔레트 중 People OS가 쓰는 것만) */
+  --cat-emerald:#059669; --cat-amber:#d97706; --cat-violet:#7c3aed; --cat-sky:#0284c7;
+  --color-digest-bg:#fffdf4; --color-digest-line:#f0e2b8; /* 아침 브리핑 따뜻한 면 (amber 계열) */
+  /* 테두리 — Langfuse zinc-200 / zinc-300(입력·강한 테두리) */
+  --color-line:#e4e4e7; --color-line-strong:#d4d4d8;
+  --line:var(--color-line); /* 구 토큰명 별칭 (C8 이전 코드가 var(--line)을 씀) */
+  /* 간격 — 4px 그리드 */
+  --space-1:4px; --space-2:8px; --space-3:12px; --space-4:16px; --space-5:24px; --space-6:32px;
+  /* 타입 스케일 — Langfuse text-* 참고
+     2xs 11/16 · xs 12/18 · sm 13/20(버튼·표·보조) · base 14/21(본문)
+     lg 16 · xl 20(카드 제목) · 2xl 22 · 3xl 24(통계 숫자) · display 30(히어로) */
+  --text-2xs:11px; --text-xs:12px; --text-sm:13px; --text-base:14px; --text-md:16px;
+  --text-lg:16px; --text-xl:20px; --text-2xl:22px; --text-3xl:24px; --text-display:30px;
+  --leading:1.5; --leading-tight:1.3; --leading-sm:1.54; /* 14/21 · 제목 · 13/20 */
+  --weight-regular:400; --weight-medium:500; --weight-bold:600; --weight-brand:700;
+  /* 모서리 — Langfuse radius 8 기본, 버튼·입력 6, 작은 요소 4 */
+  --radius-xs:4px; --radius-sm:6px; --radius:8px; --radius-lg:12px; --radius-pill:999px;
+  /* 컨트롤 — 버튼·입력·사이드바 항목 높이 h-8 = 32px, lg h-9 = 36px */
+  --control-h:32px; --control-h-lg:36px; --control-px:12px;
+  /* 아이콘 — Lucide size-4 = 16px, 기본 stroke 2 (24 viewBox 기준, 16px에서 약 1.3px) */
+  --icon-size:16px; --icon-stroke:2;
+  /* 사이드바 — Langfuse 12.75rem = 204px, 접힘 3rem = 48px */
+  --sidebar-w:204px; --sidebar-w-collapsed:48px;
+  /* 그림자 — 고밀도 UI에 맞게 얕게. 남색 틴트는 유지 */
+  --shadow:0 1px 2px rgba(18,56,99,.05),0 1px 3px rgba(18,56,99,.04);
+  --shadow-sm:0 1px 2px rgba(18,56,99,.05);
+  --shadow-lg:0 8px 24px rgba(18,56,99,.10);
+  --focus-ring:0 0 0 3px rgba(45,125,222,.18);
+  --transition:.15s ease;
+  /* 폰트 — 본문은 시스템/로컬 스택 유지 (웹폰트 추가 없음).
+     모노는 코드·숫자 전용, Langfuse 모노 스택 참고 (Plex Mono는 설치돼 있을 때만). */
+  --font-sans:Inter,Pretendard,"Noto Sans KR",Arial,sans-serif,"Apple Color Emoji","Segoe UI Emoji","Noto Color Emoji";
+  --font-mono:"IBM Plex Mono",ui-monospace,SFMono-Regular,"SF Mono",Menlo,Monaco,Consolas,"Liberation Mono","Courier New",monospace;
+}
+/* §1b 상태 색 — Langfuse oklch 값 (지원 브라우저만; 미지원은 위 hex 폴백) */
+@supports (color:oklch(50% 0.1 100)){
+  :root{
+    --color-ok:oklch(43.2% 0.095 166.913); --color-ok-bg:oklch(95% 0.052 163.051 / 0.7);
+    --color-warn:oklch(47.6% 0.114 61.907); --color-warn-bg:oklch(97.3% 0.071 103.193 / 0.7);
+    --color-err:oklch(57.7% 0.245 27.325); --color-err-bg:oklch(93.6% 0.032 17.717 / 0.7);
+  }
+}
+
+/* §2 기본 */
+*{box-sizing:border-box}
+::selection{background:var(--color-accent-line)}
+body{margin:0;background:var(--color-bg);color:var(--color-text);font-family:var(--font-sans);font-size:var(--text-base);line-height:var(--leading);-webkit-font-smoothing:antialiased}
+button,input,textarea,select{font:inherit}
+button{cursor:pointer}
+button:focus-visible,input:focus,textarea:focus,select:focus{outline:2px solid rgba(18,56,99,.35);outline-offset:2px}
+input[type=text]:focus,textarea:focus{outline:none;border-color:var(--color-accent);box-shadow:var(--focus-ring)}
+code{font-family:var(--font-mono);font-size:var(--text-xs);background:var(--color-surface-code);border:1px solid var(--line);border-radius:var(--radius-xs);padding:1px 5px}
+/* 아이콘 — 인라인 SVG를 16px·Lucide 스트로크로 통일 (HTML 속성보다 CSS가 우선) */
+.nav-ico svg,button svg,.btnrow svg{width:var(--icon-size);height:var(--icon-size);flex:none;stroke-width:var(--icon-stroke);stroke-linecap:round;stroke-linejoin:round}
+
+/* §3 레이아웃 — 접이식 왼쪽 사이드바 + 콘텐츠 */
+.shell{display:flex;min-height:100vh}
+.sidebar{width:var(--sidebar-w);flex:none;background:var(--color-surface-sunken);border-right:1px solid var(--line);position:sticky;top:0;height:100vh;display:flex;flex-direction:column;z-index:5}
+.sidebar .side-head{height:56px;display:flex;align-items:center;padding:0 12px;border-bottom:1px solid var(--line);flex:none}
+.logo{padding:0;border:0;background:transparent;display:flex;align-items:center;gap:8px;color:var(--color-primary);text-align:left;line-height:.9;font-size:var(--text-base);font-weight:var(--weight-brand);white-space:nowrap}
+.logo>b{background:var(--color-primary);color:#fff;border-radius:var(--radius-sm);width:28px;height:28px;display:grid;place-items:center;font-size:18px;flex:none;box-shadow:var(--shadow-sm)}
+.logo i{font-style:normal;color:var(--color-accent)}
+.sidebar nav{flex:1;display:flex;flex-direction:column;gap:2px;padding:8px;overflow-y:auto}
+.sidebar nav button{border:0;background:transparent;color:var(--color-text-2);font-size:var(--text-sm);font-weight:var(--weight-medium);height:var(--control-h);padding:0 8px;border-radius:var(--radius-sm);display:flex;align-items:center;gap:8px;text-align:left;width:100%;transition:background var(--transition),color var(--transition)}
+.sidebar nav button .nav-ico{color:var(--color-muted)}
+.sidebar nav button:hover{background:var(--color-primary-soft);color:var(--color-primary)}
+.sidebar nav button:hover .nav-ico{color:var(--color-primary)}
+.sidebar nav button.nav-active{background:var(--color-primary-soft);color:var(--color-primary);font-weight:var(--weight-bold);box-shadow:inset 3px 0 0 var(--color-primary)}
+.sidebar nav button.nav-active .nav-ico{color:var(--color-primary)}
+.nav-ico{width:var(--icon-size);height:var(--icon-size);flex:none;display:flex;align-items:center;justify-content:center}
+.nav-label{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.collapse-btn{flex:none;margin:8px;height:var(--control-h);border:1px solid var(--line);background:var(--color-surface);color:var(--color-muted);border-radius:var(--radius-sm);padding:0 8px;font-size:var(--text-sm);font-weight:var(--weight-medium);text-align:left;transition:border-color var(--transition),color var(--transition)}
+.collapse-btn:hover{color:var(--color-primary);border-color:var(--color-line-strong)}
+.sidebar.collapsed{width:var(--sidebar-w-collapsed)}
+.sidebar.collapsed .nav-label,.sidebar.collapsed .logo span{display:none}
+.sidebar.collapsed .side-head{padding:0;justify-content:center}
+.sidebar.collapsed nav{padding:8px 4px}
+.sidebar.collapsed nav button{justify-content:center;padding:0}
+.sidebar.collapsed .collapse-btn{text-align:center;padding:0;margin:8px 4px}
+.user-chip .who b{color:var(--color-text);font-weight:var(--weight-bold)}
+.user-chip .user-avatar{display:none;width:32px;height:32px;padding:0;border:0;border-radius:50%;background:var(--color-primary);color:#fff;font-size:var(--text-base);font-weight:var(--weight-bold);cursor:pointer;flex:none;place-items:center;line-height:1}
+.user-chip .user-avatar:hover{background:var(--color-primary-700)}
+.sidebar.collapsed .user-chip{justify-content:center;padding:10px 0;gap:0}
+.sidebar.collapsed .user-chip .who,.sidebar.collapsed .user-chip button:not(.user-avatar){display:none}
+.sidebar.collapsed .user-chip .user-avatar{display:grid;place-items:center}
+.content{flex:1;min-width:0}
+main{max-width:1080px;margin:0 auto;padding:var(--space-5) var(--space-5) var(--space-6)}
+
+/* §4 히어로 — 홈: 남색 면 패널(브랜드 모멘트). 소개: 같은 계열의 큰 히어로 */
+.hero{margin:0 0 var(--space-5);background:radial-gradient(420px 160px at 88% -20%,rgba(45,125,222,.45),transparent 70%),linear-gradient(120deg,var(--color-primary-800) 0%,var(--color-primary) 55%,#1d4e79 100%);border:1px solid var(--color-primary-800);border-radius:var(--radius-lg);padding:var(--space-5);box-shadow:var(--shadow-lg)}
+.hero h1{font-size:var(--text-display);line-height:var(--leading-tight);letter-spacing:-.02em;font-weight:var(--weight-brand);color:#fff;margin:0 0 var(--space-1)}
+.hero .sub{font-size:var(--text-base);color:rgba(255,255,255,.85)}
+.sub{color:var(--color-muted);margin:0}
+.small{color:var(--color-muted);font-size:var(--text-xs);line-height:18px}
+.about-hero{background:linear-gradient(135deg,var(--color-primary) 0%,#1d4e79 60%,var(--color-accent-700) 100%);color:#fff;border:1px solid var(--color-primary);border-radius:var(--radius-lg);padding:40px 32px;margin:0 0 var(--space-4);box-shadow:var(--shadow-lg)}
+.about-hero h2{font-size:var(--text-display);line-height:var(--leading-tight);letter-spacing:-.02em;font-weight:var(--weight-brand);margin:0 0 12px;color:#fff}
+.about-hero p{margin:0;color:rgba(255,255,255,.85);font-size:var(--text-lg);line-height:1.35;max-width:560px}
+.about-hero .small{color:rgba(255,255,255,.65);margin-top:16px;font-size:var(--text-xs)}
+
+/* §5 카드·섹션 */
+section{display:none}
+section.active{display:block}
+.card{background:var(--color-surface);border:1px solid var(--line);border-radius:var(--radius);padding:var(--space-4);margin:var(--space-4) 0;box-shadow:var(--shadow)}
+.card h2{font-size:var(--text-xl);line-height:var(--leading-tight);font-weight:var(--weight-bold);margin:0 0 var(--space-3);display:flex;align-items:center;gap:8px}
+.card h2::before{content:"";width:3px;height:18px;border-radius:2px;background:var(--color-primary);flex:none}
+.card h3{font-size:var(--text-base);font-weight:var(--weight-bold);color:var(--color-primary);margin:var(--space-4) 0 var(--space-2)}
+.card ul{margin:8px 0 12px;padding-left:20px;line-height:var(--leading)}
+.card li{margin:4px 0}
+.card p{margin:8px 0}
+/* 홈 대시보드 카드 (HC-1, Langfuse Home 참고): 외곽선만 있는 흰 카드.
+   색 면·그라데이션·틴트·색 막대 없음. 1px #E4E4E7 테두리, 반경 8, 그림자 없음.
+   공용 .card는 건드리지 않고 .home-card로만 범위를 좁힌다.
+   (이전: 아침 브리핑 카드에 amber 그라데이션 면 + amber 제목 막대,
+   모든 홈 카드에 남색 제목 막대 + 얕은 그림자) */
+#tab-home .home-card{background:var(--color-surface);border:1px solid var(--color-line);border-radius:var(--radius);box-shadow:none}
+#tab-home .home-card h2{color:var(--color-text)}
+#tab-home .home-card h2::before{content:none}
+#tab-home .home-card .empty{background:transparent}
+
+/* §6 폼·버튼 — 버튼·입력 높이 32px, 모서리 6px, 버튼 글자 13px */
+textarea{width:100%;min-height:140px;padding:8px 10px;border:1px solid var(--color-line-strong);border-radius:var(--radius-sm);background:#fff;color:var(--color-text);font-size:var(--text-base);line-height:var(--leading);transition:border-color var(--transition),box-shadow var(--transition)}
+input[type=text]{width:100%;height:var(--control-h);padding:0 10px;border:1px solid var(--color-line-strong);border-radius:var(--radius-sm);background:#fff;color:var(--color-text);font-size:var(--text-sm);transition:border-color var(--transition),box-shadow var(--transition)}
+input::placeholder,textarea::placeholder{color:var(--color-text-3)}
+button.primary{display:inline-flex;align-items:center;justify-content:center;gap:6px;height:var(--control-h);background:var(--color-primary);color:#fff;border:1px solid var(--color-primary);padding:0 var(--control-px);border-radius:var(--radius-sm);cursor:pointer;margin-top:8px;font-size:var(--text-sm);font-weight:var(--weight-medium);line-height:1;white-space:nowrap;box-shadow:var(--shadow-sm);transition:background var(--transition),box-shadow var(--transition),transform .05s ease}
+button.primary:hover{background:var(--color-primary-700);border-color:var(--color-primary-700)}
+button.primary:active{transform:translateY(1px)}
+button.secondary{display:inline-flex;align-items:center;justify-content:center;gap:6px;height:var(--control-h);background:#fff;color:var(--color-primary);border:1px solid var(--color-line-strong);padding:0 var(--control-px);border-radius:var(--radius-sm);cursor:pointer;margin-top:8px;font-size:var(--text-sm);font-weight:var(--weight-medium);line-height:1;white-space:nowrap;transition:border-color var(--transition),background var(--transition),color var(--transition),transform .05s ease}
+button.secondary:hover{border-color:var(--color-primary-line);background:var(--color-primary-soft);color:var(--color-primary)}
+button.secondary:active{transform:translateY(1px)}
+button:disabled{opacity:.45;cursor:not-allowed}
+a.btn{display:inline-flex;align-items:center;gap:6px;height:var(--control-h);background:var(--color-accent);color:#fff;text-decoration:none;padding:0 var(--control-px);border-radius:var(--radius-sm);margin-top:8px;font-size:var(--text-sm);font-weight:var(--weight-medium);white-space:nowrap;box-shadow:var(--shadow-sm);transition:background var(--transition),transform .05s ease}
+a.btn:hover{background:var(--color-accent-700)}
+a.btn:active{transform:translateY(1px)}
+pre{white-space:pre-wrap;background:var(--color-surface-code);border:1px solid var(--line);padding:var(--space-3);border-radius:var(--radius-sm);font-size:var(--text-sm);line-height:var(--leading-sm)}
+.badge{display:inline-block;background:var(--color-primary-soft);border:1px solid var(--color-primary-line);color:var(--color-primary);padding:1px 8px;border-radius:var(--radius-pill);font-size:var(--text-xs);line-height:18px;font-weight:var(--weight-medium);white-space:nowrap;vertical-align:middle}
+.badge.ok{background:var(--color-ok-bg);border-color:var(--color-ok-line);color:var(--color-ok)}
+.badge.warn{background:var(--color-warn-bg);border-color:var(--color-warn-line);color:var(--color-warn)}
+.btnrow{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+button.iconbtn{display:inline-flex;align-items:center;justify-content:center;min-width:24px;height:24px;background:transparent;border:0;color:var(--color-muted);font-size:var(--text-lg);padding:0 4px;line-height:1;border-radius:var(--radius-xs);transition:color var(--transition),background var(--transition)}
+button.iconbtn:hover{color:var(--color-danger);background:var(--color-err-bg)}
+
+/* §7 상태 — 빈 상태·로딩·에러 */
+.empty{border:1px dashed var(--color-line-strong);border-radius:var(--radius);padding:var(--space-5) var(--space-4);text-align:center;color:var(--color-muted);font-size:var(--text-sm);line-height:var(--leading-sm);background:var(--color-surface-soft);margin:8px 0}
+.loading{color:var(--color-muted);font-size:var(--text-sm);display:flex;align-items:center;gap:8px;margin:8px 0}
+.loading::before{content:"";width:14px;height:14px;flex:none;border-radius:50%;border:2px solid var(--line);border-top-color:var(--color-accent);animation:spin .8s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+.err{color:var(--color-err);background:var(--color-err-bg);border:1px solid var(--color-err-line);border-radius:var(--radius-sm);padding:8px 12px;font-size:var(--text-sm);line-height:var(--leading-sm);margin:8px 0}
+
+/* §8 홈 — 통계 숫자 카드·할 일 행 */
+.stats{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin:var(--space-4) 0}
+/* HC-1: 통계 카드도 외곽선만 — 상단 색 띠(남색/파랑/emerald/amber) 제거,
+   그림자 없음, hover는 테두리만 #D4D4D8로 진해짐 (떠오름·큰 그림자 없음) */
+.stat{position:relative;overflow:hidden;background:var(--color-surface);border:1px solid var(--color-line);border-radius:var(--radius);padding:var(--space-4);box-shadow:none;transition:border-color var(--transition)}
+.stat:hover{border-color:var(--color-line-strong)}
+.stat b{display:block;font-family:var(--font-mono);font-size:var(--text-3xl);font-weight:var(--weight-bold);color:var(--color-primary);line-height:30px;letter-spacing:-.01em;font-variant-numeric:tabular-nums}
+.stat span{color:var(--color-muted);font-size:var(--text-xs);line-height:18px}
+.stat::after{position:absolute;right:12px;top:12px;font-size:var(--icon-size);line-height:1;color:var(--color-muted);opacity:.7}
+.stat:nth-child(1)::after{content:"✉"}
+.stat:nth-child(2)::after{content:"☑"}
+.stat:nth-child(3)::after{content:"▤"}
+.stat:nth-child(4)::after{content:"◍"}
+.taskrow{display:flex;flex-wrap:wrap;gap:8px;align-items:center;min-height:36px;padding:6px 8px;margin:0 -8px;border-bottom:1px solid var(--line);border-radius:var(--radius-sm);font-size:var(--text-sm);line-height:var(--leading-sm);transition:background var(--transition)}
+.taskrow:hover{background:var(--color-surface-soft)}
+.taskrow:last-child{border-bottom:0}
+.taskrow input[type=checkbox]{width:16px;height:16px;accent-color:var(--color-primary);flex:none}
+.taskrow .t-title{flex:1;min-width:0;overflow-wrap:break-word}
+.taskrow.done .t-title{text-decoration:line-through;color:var(--color-muted)}
+.taskrow .t-src{color:var(--color-muted);font-size:var(--text-xs);white-space:nowrap}
+
+/* §9 라이브러리 카드 */
+.libgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:12px}
+.libcard{background:var(--color-surface);border:1px solid var(--line);border-radius:var(--radius);padding:var(--space-4);box-shadow:var(--shadow);transition:transform var(--transition),box-shadow var(--transition),border-color var(--transition)}
+.libcard:hover{transform:translateY(-1px);box-shadow:var(--shadow-lg);border-color:var(--color-line-strong)}
+.libcard h3{margin:0 0 4px;font-size:var(--text-base);font-weight:var(--weight-bold);color:var(--color-text)}
+.libcard:hover h3{color:var(--color-primary)}
+.libcard p{margin:0 0 6px;color:var(--color-muted);font-size:var(--text-sm);line-height:var(--leading-sm)}
+.libcard .meta{color:var(--color-muted);font-size:var(--text-xs);display:flex;align-items:center;gap:6px;flex-wrap:wrap}
+
+/* §10 질문 결과·스텝퍼·개요 편집기 */
+#askResult .card p{line-height:1.65}
+#askResult .card ul{list-style:none;margin:12px 0 0;padding:0;display:grid;gap:8px}
+#askResult .card ul li{background:var(--color-surface-tint);border:1px solid var(--line);border-left:3px solid var(--color-accent);border-radius:var(--radius-sm);padding:8px 12px;font-size:var(--text-sm);line-height:var(--leading-sm);margin:0}
+#askResult .card{border-top:3px solid var(--color-primary);box-shadow:var(--shadow-lg)}
+#askResult .card > p{font-size:var(--text-lg);line-height:1.6}
+#askResult .card > ul{counter-reset:src}
+#askResult .card > ul li{counter-increment:src;position:relative;padding:10px 12px 10px 40px;background:#fff;box-shadow:var(--shadow-sm);border-left-width:3px;border-left-color:var(--color-primary)}
+#askResult .card > ul li::before{content:counter(src);position:absolute;left:12px;top:10px;width:20px;height:20px;border-radius:50%;background:var(--color-primary);color:#fff;font-family:var(--font-mono);font-size:var(--text-2xs);font-weight:var(--weight-bold);display:grid;place-items:center}
+#askResult .card > ul li:hover{border-color:var(--color-primary)}
+details.timings{margin-top:12px;font-size:var(--text-sm);color:var(--color-muted);background:var(--color-surface-soft);border:1px solid var(--line);border-radius:var(--radius-sm);padding:8px 12px}
+details.timings summary{cursor:pointer;font-weight:var(--weight-bold);color:var(--color-primary)}
+details.timings ul{list-style:none;margin:8px 0 0;padding:0;display:grid;gap:4px}
+details.timings ul li{background:transparent;border:0;border-left:0;border-radius:0;padding:0;font-size:var(--text-xs);line-height:18px}
+details.timings ul li b{color:var(--color-text);font-family:var(--font-mono);font-weight:var(--weight-medium);font-variant-numeric:tabular-nums}
+#turnstileBox{margin:10px 0}
+#turnstileBox:empty{display:none}
+.sim{display:inline-block;background:var(--color-primary);border-color:var(--color-primary);color:#fff;border-radius:var(--radius-pill);padding:0 8px;font-family:var(--font-mono);font-size:var(--text-2xs);line-height:16px;font-weight:var(--weight-medium);white-space:nowrap;font-variant-numeric:tabular-nums;vertical-align:middle}
+/* XAI 보완 (2026-11-19): 결정적 근거 · 전환/차단 사유 · 이 답이 달라지려면 */
+.badge.decisive{background:var(--color-ok-bg);border-color:var(--color-ok-line);color:var(--color-ok);font-weight:var(--weight-bold)}
+li.decisive-src{border-left:3px solid var(--color-ok-line)}
+.xai-decision{margin:8px 0 0;padding:6px 10px;background:var(--color-warn-bg);border:1px solid var(--color-warn-line);color:var(--color-warn);border-radius:var(--radius-sm)}
+.xai-whatif{margin-top:12px;padding:8px 12px;background:var(--color-surface-soft);border:1px dashed var(--line);border-radius:var(--radius-sm);font-size:var(--text-sm)}
+.xai-whatif b{color:var(--color-primary)}
+.xai-whatif p{margin:4px 0 0}
+/* S1 파이프라인 단계 표시: 전사 → 요약 → 색인 → 완료 (알약 단계 + 진행 펄스 + 실패 상태) */
+.steps{font-size:var(--text-xs);color:var(--color-muted);margin:6px 0 0;display:flex;flex-wrap:wrap;align-items:center;gap:6px;background:var(--color-surface-soft);border:1px solid var(--line);border-radius:var(--radius);padding:var(--space-3)}
+.steps span{padding:1px 10px;line-height:20px;border-radius:var(--radius-pill);background:#fff;border:1px solid var(--line);font-weight:var(--weight-medium)}
+.steps .done{background:var(--color-ok-bg);border-color:var(--color-ok-line);color:var(--color-ok);font-weight:var(--weight-bold)}
+.steps .now{background:var(--color-primary);border-color:var(--color-primary);color:#fff;font-weight:var(--weight-bold)}
+.steps .now::before{content:"";display:inline-block;width:6px;height:6px;border-radius:50%;background:#fff;margin-right:6px;vertical-align:middle;animation:pulse 1.2s ease-in-out infinite}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.35}}
+.steps:has(button){background:var(--color-err-bg);border-color:var(--color-err-line);color:var(--color-err)}
+.steps .secondary{margin-top:0}
+/* S3 덱 개요 편집: 표지 제목·슬라이드 제목·불릿을 고치는 편집기 */
+.outline{border:1px solid var(--color-accent-line);border-radius:var(--radius);padding:var(--space-4);margin:12px 0;background:#fff;box-shadow:var(--shadow-sm)}
+.outline h4{margin:0 0 8px;color:var(--color-primary);font-size:var(--text-lg);font-weight:var(--weight-bold)}
+.outline label.small{display:block;margin:8px 0 4px}
+.ol-section{border:1px solid var(--line);border-left:3px solid var(--color-accent);border-radius:var(--radius-sm);padding:var(--space-3);margin:10px 0;background:#fff;box-shadow:var(--shadow-sm)}
+.ol-section .ol-heading{font-weight:var(--weight-bold);margin-bottom:8px;font-size:var(--text-base);background:var(--color-surface-tint)}
+.ol-row{display:flex;gap:8px;align-items:center;margin:6px 0}
+.ol-row input{flex:1;min-width:0}
+.ol-row .secondary{margin-top:0;padding:0 10px;flex:none}
+/* 덱 다운로드: 요약 카드의 PPTX 버튼을 주인공으로 (그라데이션 + 다운로드 표시) */
+#docResult .card .primary{background:linear-gradient(135deg,var(--color-primary),var(--color-accent-700));border-color:transparent;box-shadow:0 2px 8px rgba(18,56,99,.22)}
+#docResult .card .primary::before{content:"⬇";font-weight:var(--weight-bold)}
+#deckResult .btn{display:inline-flex;align-items:center;gap:8px;height:var(--control-h-lg);padding:0 20px;font-size:var(--text-base);background:linear-gradient(135deg,var(--color-accent),var(--color-accent-700));box-shadow:0 2px 8px rgba(45,125,222,.28)}
+#deckResult .btn::before{content:"⬇";font-weight:var(--weight-bold)}
+
+/* §11 반응형 */
+@media (min-width:1440px){main{max-width:1160px}}
+@media (max-width:1280px){.stats{gap:10px}.libgrid{grid-template-columns:repeat(auto-fill,minmax(240px,1fr))}}
+@media (max-width:1100px){.stats{grid-template-columns:repeat(2,1fr)}}
+@media (max-width:760px){
+  .sidebar{width:var(--sidebar-w-collapsed)}.sidebar .nav-label,.sidebar .logo span{display:none}.sidebar .side-head{padding:0;justify-content:center}.sidebar nav{padding:8px 4px}.sidebar nav button{justify-content:center;padding:0}.collapse-btn{display:none}.sidebar .user-chip{justify-content:center;padding:10px 0;gap:0}.sidebar .user-chip .who,.sidebar .user-chip button:not(.user-avatar){display:none}.sidebar .user-chip .user-avatar{display:grid;place-items:center}
+  main{padding:var(--space-4) 12px var(--space-6)}
+  .stats{grid-template-columns:repeat(2,1fr)}
+  .libgrid{grid-template-columns:1fr}
+  .hero{padding:20px 16px}.hero h1{font-size:var(--text-3xl)}
+  .about-hero{padding:28px 20px}.about-hero h2{font-size:var(--text-3xl)}
+  .card{padding:var(--space-4)}
+}
+
+/* 페이지 내 확인 대화상자·토스트 (public/ui-dialog.js, 2026-11-21 — 네이티브 confirm 대체) */
+.ui-dlg-back{position:fixed;inset:0;background:rgba(20,35,58,.45);display:flex;align-items:flex-start;justify-content:center;padding:var(--space-6) var(--space-3);overflow:auto;z-index:1000}
+.ui-dlg{background:var(--color-surface);border:1px solid var(--color-line);border-radius:var(--radius-lg);box-shadow:var(--shadow-lg);width:100%;max-width:480px;padding:var(--space-5)}
+.ui-dlg-title{margin:0 0 var(--space-2);font-size:var(--text-md)}
+.ui-dlg-msg{margin:0;white-space:pre-wrap;line-height:1.55;color:var(--color-text)}
+.ui-dlg-btns{display:flex;justify-content:flex-end;gap:var(--space-2);margin-top:var(--space-4)}
+.ui-dlg-btns button{margin-top:0}
+button.primary.ui-dlg-danger,button.primary.ui-dlg-danger:hover{background:var(--color-err);border-color:var(--color-err)}
+button.primary.ui-dlg-danger:hover{filter:brightness(.92)}
+.ui-toast-box{position:fixed;right:var(--space-4);bottom:var(--space-4);display:flex;flex-direction:column;gap:var(--space-2);z-index:1001;max-width:min(420px,calc(100vw - 32px))}
+.ui-toast{background:var(--color-ok-bg);color:var(--color-ok);border:1px solid var(--color-ok-line);border-radius:var(--radius);padding:var(--space-2) var(--space-3);box-shadow:var(--shadow-lg);font-size:var(--text-sm);white-space:pre-wrap}
+.ui-toast.err{background:var(--color-err-bg);color:var(--color-err);border-color:var(--color-err-line)}
+
+/* §12 움직임 줄이기 */
+@media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}

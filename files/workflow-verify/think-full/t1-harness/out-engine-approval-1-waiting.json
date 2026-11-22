@@ -1,0 +1,55 @@
+{
+ "run": {
+  "status": "waiting_approval",
+  "current_step": 0,
+  "error": null,
+  "output_json": null
+ },
+ "steps": [
+  {
+   "step_index": 0,
+   "node_type": "agent",
+   "status": "pending",
+   "input_json": "{\"approval\":\"requested\",\"requestedAt\":\"2026-11-19T16:12:19.813Z\",\"agentTurn\":1}",
+   "out": null,
+   "error": null
+  }
+ ],
+ "agentRow": {
+  "runtime": "think",
+  "submission_id": "wr_t1h_think-approval_e1:0",
+  "status": "approval",
+  "consumed_submission": "wr_t1h_think-approval_e1:0",
+  "steps": 2,
+  "llm_calls": 2
+ },
+ "notifications": [
+  {
+   "id": "wfapr_wr_t1h_think-approval_e1_0_t1",
+   "type": "WORKFLOW_APPROVAL"
+  }
+ ],
+ "tasks": [],
+ "think": {
+  "ms": 0,
+  "outcome": "approval",
+  "stoppedReason": null,
+  "pendingTool": "send_email",
+  "steps": 2,
+  "modelCalls": 2,
+  "llmCalls": 2,
+  "stop": "approval_required",
+  "turns": [
+   "0:tool:create_task obs={\"mock\":true,\"tool\":\"create_task\",\"args\":{\"title\":\"엔진 승인 시험 ",
+   "1:tool:send_email obs=(차단) 승인이 필요한 동작입니다. 승인 요청을 남겼고 실행하지 않았습니다. 다시 부르지 말고 멈추세요."
+  ],
+  "exec": [
+   "create_task"
+  ],
+  "sent": 0,
+  "submissions": [
+   "wr_t1h_think-approval_e1:0=completed"
+  ],
+  "recovery": []
+ }
+}

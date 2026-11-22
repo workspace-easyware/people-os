@@ -1,0 +1,16 @@
+{
+ "runId": "wr_t1r_legacy_r1",
+ "ms": 16792,
+ "result": "complete",
+ "stoppedReason": null,
+ "final": "Good morning.",
+ "turns": [
+  "0:tool:llm obs={\"text\":\"Good morning.\"}",
+  "1:finish"
+ ],
+ "events": [
+  "turn 0 @0ms",
+  "requeue 1",
+  "turn 1 @10458ms"
+ ]
+}

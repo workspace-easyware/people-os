@@ -1,0 +1,21 @@
+{
+ "sub": {
+  "submissionId": "h-turn-r1:0",
+  "accepted": true,
+  "status": "pending"
+ },
+ "ms": 1008,
+ "outcome": "failed",
+ "stoppedReason": null,
+ "steps": 0,
+ "modelCalls": 0,
+ "llmCalls": 0,
+ "stop": null,
+ "turns": [],
+ "exec": [],
+ "sent": 0,
+ "submissions": [
+  "h-turn-r1:0=error"
+ ],
+ "recovery": []
+}

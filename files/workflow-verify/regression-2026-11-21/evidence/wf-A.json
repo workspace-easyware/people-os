@@ -1,0 +1,1 @@
+{"name":"[RG-L] 비교 A 이번 주 할 일 (회귀용, 삭제 예정)","description":"회귀 라이브 후속 2026-11-21 legacy/think 비교 목표 A","definition":{"version":1,"steps":[{"id":"s0","type":"llm","name":"준비","config":{"prompt":"'확인'이라는 한 단어만 출력하세요."}},{"id":"s1","type":"agent","name":"에이전트 목표 A","config":{"goal":"T1 테스트용으로 이번 주 할 일을 한 문장으로 정리해 주세요.","tools":["ask_personal","ask_rag","summarize"]}}]}}

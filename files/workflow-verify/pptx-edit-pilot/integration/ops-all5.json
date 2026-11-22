@@ -1,0 +1,13 @@
+{
+  "source": "doc:doc_mwptf7gp_u9k7i8",
+  "title": "PPTX 편집 시험 덱 (로컬 편집본)",
+  "ops": [
+    { "op": "text", "slide": 1, "elementId": "ppt/slides/slide1.xml-shape-1", "runIndex": 0, "text": "2027 리더십 코칭 중간 보고" },
+    { "op": "text", "slide": 1, "elementId": "ppt/slides/slide1.xml-shape-2", "text": "People OS 편집 통합 (수정됨)" },
+    { "op": "shape", "slide": 2, "elementId": "ppt/slides/slide2.xml-shape-1", "x": 196, "y": 213, "w": 432, "h": 240, "fill": "#DC2626" },
+    { "op": "cell", "slide": 3, "elementId": "ppt/slides/slide3.xml-frame-0", "r": 1, "c": 0, "text": "최코치" },
+    { "op": "cell", "slide": 3, "elementId": "ppt/slides/slide3.xml-frame-0", "r": 2, "c": 2, "text": "99" },
+    { "op": "chart", "slide": 4, "elementId": "ppt/slides/slide4.xml-frame-0", "series": [[11, 22, 33, 44], [50, 60, 70, 80]], "title": "분기별 코칭 세션 수 (수정)" },
+    { "op": "duplicate", "slide": 3 }
+  ]
+}

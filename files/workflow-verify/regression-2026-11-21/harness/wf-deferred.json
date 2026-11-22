@@ -1,0 +1,5 @@
+{"name":"RG 지연 메일+웹훅+할 일","definition":{"version":1,"steps":[
+{"id":"mail","type":"send_email","name":"지연 메일","requiresApproval":true,"approvalMode":"deferred","config":{"to":"rg-test@example.com","subject":"[RG] {{input.topic}} 안내","body":"RG 본문 {{input.topic}}"}},
+{"id":"hook","type":"webhook","name":"지연 웹훅","requiresApproval":true,"approvalMode":"deferred","config":{"url":"https://hooks.example.com/rg","method":"POST","headers":{"Authorization":"Bearer p2-secret-token"},"body":{"topic":"{{input.topic}}"}}},
+{"id":"task","type":"create_task","name":"후속 할 일","config":{"title":"{{input.topic}} 후속"}}
+]}}

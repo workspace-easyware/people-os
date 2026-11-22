@@ -1,0 +1,1 @@
+{"ok":true,"users":[{"id":"u_bf_admin","name":"관리자BF","email":"bf.admin@example.test","coaching_role":"coach"},{"id":"u_bf_coachee","name":"대상BF","email":"bf.coachee@example.test","coaching_role":"coachee"},{"id":"u_bf_coach","name":"코치BF","email":"bf.coach@example.test","coaching_role":"coach"}]}
