@@ -1,0 +1,1 @@
+{"ok":true,"job":{"id":"dxjob_mwqt6j7q_4j6ear","kind":"edit","status":"failed","attempts":1,"createdAt":"2026-11-21T19:36:19.142Z","startedAt":"2026-11-21T19:36:44.250Z","finishedAt":"2026-11-21T19:36:47.822Z","elapsedMs":28680,"error":"AI가 지시를 편집으로 바꾸지 못했습니다: 날씨 질문은 문서 편집 지시가 아닙니다.","errorStatus":422}}

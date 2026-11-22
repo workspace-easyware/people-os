@@ -1,0 +1,4 @@
+# doc-fix 2026-11-22 로컬 토큰 하네스. 배포하지 않는다.
+name = "doc-fix-token-local"
+main = "token.js"
+compatibility_date = "2025-07-18"

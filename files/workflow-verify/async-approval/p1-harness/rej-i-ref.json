@@ -1,0 +1,4 @@
+{"name":"거부 i 출력 참조","definition":{"version":1,"steps":[
+{"id":"mail","type":"send_email","name":"지연 메일","approvalMode":"deferred","config":{"to":"a@example.com","subject":"s","body":"b"}},
+{"id":"task","type":"create_task","name":"참조","config":{"title":"발송 id {{steps.mail.output.providerId}}"}}
+]}}

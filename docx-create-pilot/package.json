@@ -1,0 +1,9 @@
+{
+  "name": "people-os-docx-create-pilot",
+  "private": true,
+  "type": "module",
+  "description": "Isolated pilot: docx (dolanmiu) Word document creation in Workers (not part of People OS build)",
+  "dependencies": {
+    "docx": "9.16.0"
+  }
+}

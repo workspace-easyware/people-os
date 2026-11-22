@@ -1,0 +1,6 @@
+{"name":"P3 편집기 모양","definition":{"version":1,"steps":[
+{"id":"s1","type":"agent","name":"에이전트 (목표만 주기)","config":{"goal":"메일을 보내라","tools":["send_email","create_task"]},"approvalMode":"deferred"},
+{"id":"s2","type":"send_email","name":"메일 발송","config":{"to":"kim@example.com","subject":"x","body":"y"},"requiresApproval":true,"approvalMode":"deferred"},
+{"id":"s3","type":"webhook","name":"웹훅 호출","config":{"url":"https://hooks.example.com/p3"},"requiresApproval":true},
+{"id":"s4","type":"webhook","name":"웹훅 지연","config":{"url":"https://hooks.example.com/p3","method":"PUT"},"requiresApproval":true,"approvalMode":"deferred"}
+]}}

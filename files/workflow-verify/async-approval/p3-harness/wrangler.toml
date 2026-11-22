@@ -1,0 +1,51 @@
+# 비동기 승인 P3 로컬 하네스 (2026-11-21). 배포하지 않는다. harness.ts는 P2 하네스 사본(운영 workflowApp·소비자 그대로).
+# 마이그레이션: npx wrangler d1 migrations apply people-os-db --config <이 파일 절대 경로> --persist-to <p3-harness/state> --local
+# 실행: npx wrangler dev --local --config <이 파일 절대 경로> --port 8814 --persist-to <p3-harness/state>
+# public/을 정적 자산으로 함께 서빙한다 — 화면이 받는 workflow.js를 로컬로 받아 정적 확인하기 위해서.
+name = "people-os-p3-harness-local"
+main = "harness.ts"
+compatibility_date = "2025-07-18"
+compatibility_flags = ["nodejs_compat", "enable_ctx_exports"]
+
+[assets]
+directory = "../../../../public"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "people-os-db"
+database_id = "00000000-0000-0000-0000-0000000000p3"
+migrations_dir = "../../../../migrations"
+
+[[kv_namespaces]]
+binding = "CACHE"
+id = "p3harnesskv"
+
+[[r2_buckets]]
+binding = "FILES"
+bucket_name = "p3-harness-files"
+
+[[durable_objects.bindings]]
+name = "ThinkAgent"
+class_name = "HarnessThinkAgent"
+
+[[durable_objects.bindings]]
+name = "WORKFLOW_AGENT"
+class_name = "HarnessWorkflowAgent"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["HarnessThinkAgent", "HarnessWorkflowAgent"]
+
+[[queues.producers]]
+binding = "PIPELINE"
+queue = "p3-harness-pipeline"
+
+[[queues.consumers]]
+queue = "p3-harness-pipeline"
+max_batch_size = 1
+max_batch_timeout = 1
+max_retries = 3
+
+[vars]
+AGENT_RUNTIME = "think"
+RESEND_API_KEY = "re_test_fake_key"

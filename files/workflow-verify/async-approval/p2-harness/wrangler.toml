@@ -1,0 +1,48 @@
+# 비동기 승인 P2 로컬 하네스 (2026-11-21). 배포하지 않는다.
+# 마이그레이션: npx wrangler d1 migrations apply people-os-db --config files/workflow-verify/async-approval/p2-harness/wrangler.toml --persist-to files/workflow-verify/async-approval/p2-harness/state --local
+# 실행: npx wrangler dev --local --config files/workflow-verify/async-approval/p2-harness/wrangler.toml --port 8813 --persist-to files/workflow-verify/async-approval/p2-harness/state
+# D1·KV·큐·DO 전부 로컬. 모델은 대본 모의(legacy: callModel, Think: MockLanguageModel). 외부 fetch는 harness.ts가 가로채 기록만 한다.
+name = "people-os-p2-harness-local"
+main = "harness.ts"
+compatibility_date = "2025-07-18"
+compatibility_flags = ["nodejs_compat", "enable_ctx_exports"]
+
+[[d1_databases]]
+binding = "DB"
+database_name = "people-os-db"
+database_id = "00000000-0000-0000-0000-0000000000p2"
+migrations_dir = "../../../../migrations"
+
+[[kv_namespaces]]
+binding = "CACHE"
+id = "p2harnesskv"
+
+[[r2_buckets]]
+binding = "FILES"
+bucket_name = "p2-harness-files"
+
+[[durable_objects.bindings]]
+name = "ThinkAgent"
+class_name = "HarnessThinkAgent"
+
+[[durable_objects.bindings]]
+name = "WORKFLOW_AGENT"
+class_name = "HarnessWorkflowAgent"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["HarnessThinkAgent", "HarnessWorkflowAgent"]
+
+[[queues.producers]]
+binding = "PIPELINE"
+queue = "p2-harness-pipeline"
+
+[[queues.consumers]]
+queue = "p2-harness-pipeline"
+max_batch_size = 1
+max_batch_timeout = 1
+max_retries = 3
+
+[vars]
+AGENT_RUNTIME = "think"
+RESEND_API_KEY = "re_test_fake_key"

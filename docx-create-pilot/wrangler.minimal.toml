@@ -1,0 +1,5 @@
+# Bundle-size measurement only (dry-run). Never deployed.
+name = "people-os-docx-pilot-minimal"
+main = "src/minimal.js"
+compatibility_date = "2025-07-18"
+workers_dev = true

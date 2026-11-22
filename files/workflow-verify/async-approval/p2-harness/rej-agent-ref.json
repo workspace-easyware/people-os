@@ -1,0 +1,4 @@
+{"name":"P2 거부: 지연 agent 출력 참조","definition":{"version":1,"steps":[
+ {"id":"ag","type":"agent","name":"에이전트","approvalMode":"deferred","config":{"goal":"메일을 보내라.","tools":["send_email"]}},
+ {"id":"t2","type":"create_task","name":"후속","config":{"title":"결과: {{steps.ag.output.final}}"}}
+]}}

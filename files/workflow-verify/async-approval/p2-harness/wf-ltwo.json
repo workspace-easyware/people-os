@@ -1,0 +1,3 @@
+{"name":"P2 legacy 두 건","definition":{"version":1,"steps":[
+ {"id":"ag","type":"agent","name":"두 건 에이전트","approvalMode":"deferred","config":{"goal":"[S:LTWO] 메일을 보내고 외부 시스템에도 알려라.","tools":["send_email","webhook"],"maxSteps":5}}
+]}}

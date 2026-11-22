@@ -1,0 +1,1 @@
+{"results":[{"id":"wfpa_wfrun_mwp7y0wl_2np2ge_0","status":"approved","code":200},{"id":"wfpa_wfrun_mwp7xyvv_lg0vp1_0","status":"executed","code":409,"error":"이미 결정된 동작입니다 (executed)."},{"id":"wfpa_bogus_id","status":"not_found","code":404,"error":"대기 동작을 찾을 수 없습니다."}]}

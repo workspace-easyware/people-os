@@ -1,0 +1,4 @@
+{"name":"P1-A 지연 메일 + 할 일","definition":{"version":1,"steps":[
+{"id":"mail","type":"send_email","name":"지연 메일","approvalMode":"deferred","config":{"to":"{{input.to}}","subject":"[P1] {{input.topic}} 안내","body":"안녕하세요, {{input.topic}} 건입니다."}},
+{"id":"task","type":"create_task","name":"후속 할 일","config":{"title":"{{input.topic}} 후속 확인"}}
+]}}

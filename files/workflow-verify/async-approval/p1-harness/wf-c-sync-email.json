@@ -1,0 +1,3 @@
+{"name":"P1-C 동기식 메일","definition":{"version":1,"steps":[
+{"id":"mail","type":"send_email","name":"동기 메일","config":{"to":"sync@example.com","subject":"[P1] 동기식","body":"승인 후 발송"}}
+]}}

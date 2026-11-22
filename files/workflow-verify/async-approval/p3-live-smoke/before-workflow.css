@@ -1,0 +1,71 @@
+/* 워크플로우 빌더 WF-5 (2026-11-17) — styles.css의 토큰만 사용한다. 새 변수·폰트 없음. */
+#workflowMount [hidden]{display:none !important}
+.wf-card{padding:var(--space-4)}
+.wf-msg{min-height:18px;margin:4px 0;font-size:var(--text-sm);color:var(--color-ok)}
+.wf-msg.err{color:var(--color-err)}
+.wf-layout{display:grid;grid-template-columns:260px minmax(0,1fr);gap:var(--space-4);align-items:start}
+@media (max-width:820px){.wf-layout{grid-template-columns:1fr}}
+.wf-side{border-right:1px solid var(--color-line);padding-right:var(--space-3)}
+@media (max-width:820px){.wf-side{border-right:0;padding-right:0;border-bottom:1px solid var(--color-line);padding-bottom:var(--space-3)}}
+.wf-list{list-style:none;margin:var(--space-3) 0 0;padding:0}
+.wf-item{margin:4px 0}
+.wf-item-btn{width:100%;display:flex;flex-direction:column;align-items:flex-start;gap:2px;text-align:left;padding:8px 10px;background:var(--color-surface);border:1px solid var(--color-line);border-radius:var(--radius-sm);color:var(--color-text)}
+.wf-item-btn:hover{border-color:var(--color-primary-line);background:var(--color-primary-soft)}
+.wf-item.sel .wf-item-btn{border-color:var(--color-primary);background:var(--color-surface-tint)}
+.wf-item-name{font-weight:var(--weight-medium);overflow-wrap:anywhere}
+.wf-label{display:block;margin:var(--space-3) 0 4px;font-size:var(--text-sm);color:var(--color-text-2);font-weight:var(--weight-medium)}
+.wf-main select{height:var(--control-h);padding:0 10px;border:1px solid var(--color-line-strong);border-radius:var(--radius-sm);background:#fff;color:var(--color-text);font-size:var(--text-sm);max-width:100%}
+.wf-main input[type=date],.wf-main input[type=datetime-local]{height:var(--control-h);padding:0 10px;border:1px solid var(--color-line-strong);border-radius:var(--radius-sm);background:#fff;color:var(--color-text);font-size:var(--text-sm)}
+.wf-main input[type=checkbox]{accent-color:var(--color-primary)}
+.wf-actions{display:flex;flex-wrap:wrap;gap:var(--space-2);align-items:center;margin:var(--space-3) 0}
+.wf-actions button{margin-top:0}
+.wf-note{font-size:var(--text-sm);color:var(--color-warn);background:var(--color-warn-bg);border:1px solid var(--color-warn-line);border-radius:var(--radius-sm);padding:4px 10px}
+.wf-danger{color:var(--color-err) !important}
+.wf-steps{display:flex;flex-direction:column;gap:var(--space-2)}
+.wf-step{display:flex;gap:var(--space-3);align-items:flex-start;padding:10px 12px;background:var(--color-surface);border:1px solid var(--color-line);border-radius:var(--radius-sm)}
+.wf-step-ord{flex:none;width:24px;height:24px;border-radius:var(--radius-pill);background:var(--color-primary-soft);color:var(--color-primary);font-size:var(--text-xs);font-weight:var(--weight-bold);display:flex;align-items:center;justify-content:center}
+.wf-step-body{flex:1;min-width:0}
+.wf-step-sum{overflow-wrap:anywhere;margin-top:2px}
+.wf-step-ctl{flex:none;display:flex;gap:2px}
+button.iconbtn:disabled{opacity:.3}
+.wf-form{margin:var(--space-3) 0;padding:var(--space-3);background:var(--color-surface-soft);border:1px solid var(--color-line);border-radius:var(--radius-sm)}
+.wf-hint{margin:8px 0}
+.wf-pending{margin:var(--space-2) 0}
+.wf-pending h3{margin-top:0}
+.wf-pend-row{display:flex;gap:var(--space-3);align-items:center;justify-content:space-between;padding:6px 10px;margin:4px 0;background:var(--color-warn-bg);border:1px solid var(--color-warn-line);border-radius:var(--radius-sm)}
+.wf-pend-row button{margin-top:0}
+.wf-runarea{margin-top:var(--space-4);border-top:1px solid var(--color-line);padding-top:var(--space-3)}
+.wf-adv{margin-top:var(--space-2);font-size:var(--text-sm)}
+.wf-runs{list-style:none;margin:0;padding:0}
+.wf-run{margin:4px 0}
+.wf-run-btn{width:100%;text-align:left;padding:6px 10px;background:var(--color-surface);border:1px solid var(--color-line);border-radius:var(--radius-sm);color:var(--color-text)}
+.wf-run-btn:hover{border-color:var(--color-primary-line);background:var(--color-primary-soft)}
+.wf-run.sel .wf-run-btn{border-color:var(--color-primary);background:var(--color-surface-tint)}
+.wf-detail{margin-top:var(--space-3)}
+.wf-approve{margin:var(--space-3) 0;padding:var(--space-3);background:var(--color-warn-bg);border:1px solid var(--color-warn-line);border-radius:var(--radius-sm)}
+button.wf-big{height:44px;padding:0 28px;font-size:var(--text-base)}
+.wf-timeline{list-style:none;margin:var(--space-2) 0 0;padding:0 0 0 var(--space-3);border-left:2px solid var(--color-line)}
+.wf-tl{margin:0 0 var(--space-3);padding-left:var(--space-2)}
+.wf-tl-failed{border-left:3px solid var(--color-err);margin-left:-2px}
+.wf-tl-succeeded{border-left:3px solid var(--color-ok);margin-left:-2px}
+.wf-out{margin-top:2px;overflow-wrap:anywhere;white-space:pre-wrap}
+/* WF-9 공유·복사·웹훅 헤더 */
+.wf-side-h{margin:var(--space-4) 0 0;font-size:var(--text-sm)}
+.wf-sharearea{margin-top:var(--space-4);border-top:1px solid var(--color-line);padding-top:var(--space-3)}
+.wf-shares{list-style:none;margin:0;padding:0}
+.wf-share-row{display:flex;gap:var(--space-3);align-items:center;justify-content:space-between;padding:6px 10px;margin:4px 0;background:var(--color-surface);border:1px solid var(--color-line);border-radius:var(--radius-sm)}
+.wf-share-row button{margin-top:0}
+button.wf-copy{height:44px;padding:0 24px}
+.wf-hdr-row{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,2fr);gap:var(--space-2);margin:4px 0}
+.badge.err{background:var(--color-err-bg);border-color:var(--color-err-line);color:var(--color-err)}
+/* 기업용 템플릿 카드 (2026-11-19) */
+.wf-intro{background:var(--color-surface-2,#f3f7fc);border:1px solid var(--color-line);border-radius:8px;padding:var(--space-3);margin-bottom:var(--space-3)}
+.wf-intro h3{margin:0 0 var(--space-1)}
+.wf-intro p{margin:0}
+.wf-tpl-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:var(--space-3)}
+.wf-tpl-card{border:1px solid var(--color-line);border-radius:8px;padding:var(--space-3);display:flex;flex-direction:column;gap:var(--space-2)}
+.wf-tpl-card p{margin:0}
+.wf-tpl-meta{display:flex;gap:var(--space-1);flex-wrap:wrap}
+.wf-tpl-warn{color:#8a5a00}
+.wf-tpl-steps{margin:0;padding-left:1.2em}
+.wf-tpl-card button{margin-top:auto}

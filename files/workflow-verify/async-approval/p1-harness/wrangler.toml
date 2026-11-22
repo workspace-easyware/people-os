@@ -1,0 +1,21 @@
+# 비동기 승인 P1 로컬 하네스 (2026-11-21). 배포하지 않는다.
+# 마이그레이션: npx wrangler d1 migrations apply people-os-db --config files/workflow-verify/async-approval/p1-harness/wrangler.toml --persist-to files/workflow-verify/async-approval/p1-harness/state --local
+# 실행: npx wrangler dev --local --config files/workflow-verify/async-approval/p1-harness/wrangler.toml --port 8812 --persist-to files/workflow-verify/async-approval/p1-harness/state
+name = "people-os-p1-harness-local"
+main = "harness.ts"
+compatibility_date = "2025-07-18"
+compatibility_flags = ["nodejs_compat", "enable_ctx_exports"]
+
+[[d1_databases]]
+binding = "DB"
+database_name = "people-os-db"
+database_id = "00000000-0000-0000-0000-0000000000p1"
+migrations_dir = "../../../../migrations"
+
+[[kv_namespaces]]
+binding = "CACHE"
+id = "p1harnesskv"
+
+[[r2_buckets]]
+binding = "FILES"
+bucket_name = "p1-harness-files"
