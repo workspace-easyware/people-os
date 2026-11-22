@@ -1,0 +1,706 @@
+{
+  "timingsMs": {
+    "make": 38,
+    "load": 360,
+    "edit": 781,
+    "verify": 325
+  },
+  "original": {
+    "slides": [
+      {
+        "n": 1,
+        "id": "ppt/slides/slide1.xml",
+        "elements": [
+          {
+            "id": "ppt/slides/slide1.xml-shape-0",
+            "type": "shape",
+            "name": "Shape 0",
+            "x": 58,
+            "y": 53,
+            "w": 86,
+            "h": 8,
+            "shapeType": "rect",
+            "fill": "#2D7DDE"
+          },
+          {
+            "id": "ppt/slides/slide1.xml-shape-1",
+            "type": "text",
+            "name": "Text 1",
+            "x": 58,
+            "y": 192,
+            "w": 1056,
+            "h": 115,
+            "text": "2026 리더십 코칭 결과 보고",
+            "segments": [
+              "2026 리더십 코칭 결과 보고"
+            ],
+            "shapeType": "rect",
+            "fill": "transparent"
+          },
+          {
+            "id": "ppt/slides/slide1.xml-shape-2",
+            "type": "text",
+            "name": "Text 2",
+            "x": 58,
+            "y": 317,
+            "w": 1056,
+            "h": 58,
+            "text": "People OS 파일럿 덱",
+            "segments": [
+              "People OS 파일럿 덱"
+            ],
+            "shapeType": "rect",
+            "fill": "transparent"
+          }
+        ]
+      },
+      {
+        "n": 2,
+        "id": "ppt/slides/slide2.xml",
+        "elements": [
+          {
+            "id": "ppt/slides/slide2.xml-shape-0",
+            "type": "text",
+            "name": "Text 0",
+            "x": 58,
+            "y": 38,
+            "w": 1056,
+            "h": 77,
+            "text": "도형 슬라이드",
+            "segments": [
+              "도형 슬라이드"
+            ],
+            "shapeType": "rect",
+            "fill": "transparent"
+          },
+          {
+            "id": "ppt/slides/slide2.xml-shape-1",
+            "type": "shape",
+            "name": "Shape 1",
+            "x": 96,
+            "y": 173,
+            "w": 288,
+            "h": 192,
+            "shapeType": "rect",
+            "fill": "#2D7DDE"
+          },
+          {
+            "id": "ppt/slides/slide2.xml-shape-2",
+            "type": "shape",
+            "name": "Shape 2",
+            "x": 480,
+            "y": 173,
+            "w": 240,
+            "h": 240,
+            "shapeType": "ellipse",
+            "fill": "#10B981"
+          },
+          {
+            "id": "ppt/slides/slide2.xml-shape-3",
+            "type": "shape",
+            "name": "Shape 3",
+            "x": 816,
+            "y": 173,
+            "w": 288,
+            "h": 192,
+            "shapeType": "roundRect",
+            "fill": "#F59E0B"
+          }
+        ]
+      },
+      {
+        "n": 3,
+        "id": "ppt/slides/slide3.xml",
+        "elements": [
+          {
+            "id": "ppt/slides/slide3.xml-shape-0",
+            "type": "text",
+            "name": "Text 0",
+            "x": 58,
+            "y": 38,
+            "w": 1056,
+            "h": 77,
+            "text": "표 슬라이드",
+            "segments": [
+              "표 슬라이드"
+            ],
+            "shapeType": "rect",
+            "fill": "transparent"
+          },
+          {
+            "id": "ppt/slides/slide3.xml-frame-0",
+            "type": "table",
+            "name": "Table 0",
+            "x": 58,
+            "y": 144,
+            "w": 960,
+            "h": 96,
+            "cells": [
+              [
+                "이름",
+                "역할",
+                "점수"
+              ],
+              [
+                "김코치",
+                "코치",
+                "92"
+              ],
+              [
+                "이리더",
+                "코치이",
+                "85"
+              ],
+              [
+                "박매니저",
+                "코치이",
+                "78"
+              ]
+            ]
+          }
+        ]
+      },
+      {
+        "n": 4,
+        "id": "ppt/slides/slide4.xml",
+        "elements": [
+          {
+            "id": "ppt/slides/slide4.xml-shape-0",
+            "type": "text",
+            "name": "Text 0",
+            "x": 58,
+            "y": 38,
+            "w": 1056,
+            "h": 77,
+            "text": "차트 슬라이드",
+            "segments": [
+              "차트 슬라이드"
+            ],
+            "shapeType": "rect",
+            "fill": "transparent"
+          },
+          {
+            "id": "ppt/slides/slide4.xml-frame-0",
+            "type": "chart",
+            "name": "Chart 0",
+            "x": 77,
+            "y": 134,
+            "w": 1056,
+            "h": 528,
+            "chart": {
+              "type": "bar",
+              "title": "분기별 코칭 세션 수",
+              "categories": [
+                "1분기",
+                "2분기",
+                "3분기",
+                "4분기"
+              ],
+              "series": [
+                {
+                  "name": "2025",
+                  "values": [
+                    10,
+                    20,
+                    30,
+                    40
+                  ]
+                },
+                {
+                  "name": "2026",
+                  "values": [
+                    15,
+                    25,
+                    35,
+                    45
+                  ]
+                }
+              ]
+            }
+          }
+        ]
+      },
+      {
+        "n": 5,
+        "id": "ppt/slides/slide5.xml",
+        "elements": [
+          {
+            "id": "ppt/slides/slide5.xml-shape-0",
+            "type": "text",
+            "name": "Text 0",
+            "x": 58,
+            "y": 38,
+            "w": 1056,
+            "h": 77,
+            "text": "손대지 않는 슬라이드",
+            "segments": [
+              "손대지 않는 슬라이드"
+            ],
+            "shapeType": "rect",
+            "fill": "transparent"
+          },
+          {
+            "id": "ppt/slides/slide5.xml-shape-1",
+            "type": "text",
+            "name": "Text 1",
+            "x": 58,
+            "y": 154,
+            "w": 1056,
+            "h": 77,
+            "text": "이 슬라이드는 편집하지 않는다 (바이트 동일성 대조군).",
+            "segments": [
+              "이 슬라이드는 편집하지 않는다 (바이트 동일성 대조군)."
+            ],
+            "shapeType": "rect",
+            "fill": "transparent"
+          }
+        ]
+      }
+    ],
+    "warnings": [],
+    "compat": []
+  },
+  "sizes": {
+    "original": 109703,
+    "edited": 33656,
+    "delta": -76047
+  },
+  "parts": {
+    "original": 58,
+    "edited": 43,
+    "identical": 21,
+    "changed": [
+      "[Content_Types].xml",
+      "docProps/app.xml",
+      "docProps/core.xml",
+      "ppt/_rels/presentation.xml.rels",
+      "ppt/charts/chart2.xml",
+      "ppt/embeddings/Microsoft_Excel_Worksheet2.xlsx",
+      "ppt/presentation.xml",
+      "ppt/slideLayouts/slideLayout1.xml",
+      "ppt/slideMasters/slideMaster1.xml",
+      "ppt/slides/_rels/slide1.xml.rels",
+      "ppt/slides/_rels/slide2.xml.rels",
+      "ppt/slides/_rels/slide3.xml.rels",
+      "ppt/slides/_rels/slide4.xml.rels",
+      "ppt/slides/slide1.xml",
+      "ppt/slides/slide2.xml",
+      "ppt/slides/slide3.xml",
+      "ppt/slides/slide4.xml",
+      "ppt/viewProps.xml"
+    ],
+    "removed": [
+      "_rels/",
+      "docProps/",
+      "ppt/",
+      "ppt/_rels/",
+      "ppt/charts/",
+      "ppt/charts/_rels/",
+      "ppt/embeddings/",
+      "ppt/media/",
+      "ppt/notesMasters/",
+      "ppt/notesMasters/_rels/",
+      "ppt/notesSlides/",
+      "ppt/notesSlides/_rels/",
+      "ppt/slideLayouts/",
+      "ppt/slideLayouts/_rels/",
+      "ppt/slideMasters/",
+      "ppt/slideMasters/_rels/",
+      "ppt/slides/",
+      "ppt/slides/_rels/",
+      "ppt/theme/"
+    ],
+    "added": [
+      "ppt/notesSlides/_rels/notesSlide6.xml.rels",
+      "ppt/notesSlides/notesSlide6.xml",
+      "ppt/slides/_rels/slide6.xml.rels",
+      "ppt/slides/slide6.xml"
+    ]
+  },
+  "controlSlide5": "identical",
+  "xmlWellFormed": true,
+  "xmlErrors": [],
+  "validatePptx": {
+    "valid": true,
+    "issues": [
+      {
+        "severity": "warning",
+        "code": "CONTENT_TYPE_MISSING_PART",
+        "message": "Content type override references \"/ppt/slideMasters/slideMaster2.xml\" which does not exist in the archive",
+        "path": "[Content_Types].xml"
+      },
+      {
+        "severity": "warning",
+        "code": "CONTENT_TYPE_MISSING_PART",
+        "message": "Content type override references \"/ppt/slideMasters/slideMaster3.xml\" which does not exist in the archive",
+        "path": "[Content_Types].xml"
+      },
+      {
+        "severity": "warning",
+        "code": "CONTENT_TYPE_MISSING_PART",
+        "message": "Content type override references \"/ppt/slideMasters/slideMaster4.xml\" which does not exist in the archive",
+        "path": "[Content_Types].xml"
+      },
+      {
+        "severity": "warning",
+        "code": "CONTENT_TYPE_MISSING_PART",
+        "message": "Content type override references \"/ppt/slideMasters/slideMaster5.xml\" which does not exist in the archive",
+        "path": "[Content_Types].xml"
+      }
+    ],
+    "conformance": {
+      "level": "rule-checked",
+      "dialect": "transitional",
+      "description": "Package, namespace, MCE, and selected ECMA-376 content-model/simple-type rules checked; this is not exhaustive XSD validation."
+    }
+  },
+  "editLog": [
+    {
+      "step": "text-run",
+      "via": "setPresentationRunText",
+      "elementId": "ppt/slides/slide1.xml-shape-1"
+    },
+    {
+      "step": "text-model",
+      "elementId": "ppt/slides/slide1.xml-shape-2"
+    },
+    {
+      "step": "shape",
+      "elementId": "ppt/slides/slide2.xml-shape-1",
+      "before": {
+        "x": 96,
+        "y": 173,
+        "w": 288,
+        "h": 192,
+        "fill": "#2D7DDE"
+      },
+      "after": {
+        "x": 196,
+        "y": 213,
+        "w": 432,
+        "h": 240,
+        "fill": "#DC2626"
+      }
+    },
+    {
+      "step": "table",
+      "elementId": "ppt/slides/slide3.xml-frame-0"
+    },
+    {
+      "step": "chart",
+      "elementId": "ppt/slides/slide4.xml-frame-0"
+    },
+    {
+      "step": "duplicate",
+      "from": "ppt/slides/slide3.xml",
+      "newId": "slide6"
+    }
+  ],
+  "reparsed": {
+    "slides": [
+      {
+        "n": 1,
+        "id": "ppt/slides/slide1.xml",
+        "elements": [
+          {
+            "id": "ppt/slides/slide1.xml-shape-0",
+            "type": "shape",
+            "name": "Shape 0",
+            "x": 58,
+            "y": 53,
+            "w": 86,
+            "h": 8,
+            "shapeType": "rect",
+            "fill": "#2D7DDE"
+          },
+          {
+            "id": "ppt/slides/slide1.xml-shape-1",
+            "type": "text",
+            "name": "Text 1",
+            "x": 58,
+            "y": 192,
+            "w": 1056,
+            "h": 115,
+            "text": "2027 리더십 코칭 중간 보고",
+            "segments": [
+              "2027 리더십 코칭 중간 보고"
+            ],
+            "shapeType": "rect",
+            "fill": "transparent"
+          },
+          {
+            "id": "ppt/slides/slide1.xml-shape-2",
+            "type": "text",
+            "name": "Text 2",
+            "x": 58,
+            "y": 317,
+            "w": 1056,
+            "h": 58,
+            "text": "People OS 편집 파일럿 (수정됨)",
+            "segments": [
+              "People OS 편집 파일럿 (수정됨)"
+            ],
+            "shapeType": "rect",
+            "fill": "transparent"
+          }
+        ]
+      },
+      {
+        "n": 2,
+        "id": "ppt/slides/slide2.xml",
+        "elements": [
+          {
+            "id": "ppt/slides/slide2.xml-shape-0",
+            "type": "text",
+            "name": "Text 0",
+            "x": 58,
+            "y": 38,
+            "w": 1056,
+            "h": 77,
+            "text": "도형 슬라이드",
+            "segments": [
+              "도형 슬라이드"
+            ],
+            "shapeType": "rect",
+            "fill": "transparent"
+          },
+          {
+            "id": "ppt/slides/slide2.xml-shape-1",
+            "type": "shape",
+            "name": "Shape 1",
+            "x": 196,
+            "y": 213,
+            "w": 432,
+            "h": 240,
+            "shapeType": "rect",
+            "fill": "#DC2626"
+          },
+          {
+            "id": "ppt/slides/slide2.xml-shape-2",
+            "type": "shape",
+            "name": "Shape 2",
+            "x": 480,
+            "y": 173,
+            "w": 240,
+            "h": 240,
+            "shapeType": "ellipse",
+            "fill": "#10B981"
+          },
+          {
+            "id": "ppt/slides/slide2.xml-shape-3",
+            "type": "shape",
+            "name": "Shape 3",
+            "x": 816,
+            "y": 173,
+            "w": 288,
+            "h": 192,
+            "shapeType": "roundRect",
+            "fill": "#F59E0B"
+          }
+        ]
+      },
+      {
+        "n": 3,
+        "id": "ppt/slides/slide3.xml",
+        "elements": [
+          {
+            "id": "ppt/slides/slide3.xml-shape-0",
+            "type": "text",
+            "name": "Text 0",
+            "x": 58,
+            "y": 38,
+            "w": 1056,
+            "h": 77,
+            "text": "표 슬라이드",
+            "segments": [
+              "표 슬라이드"
+            ],
+            "shapeType": "rect",
+            "fill": "transparent"
+          },
+          {
+            "id": "ppt/slides/slide3.xml-frame-0",
+            "type": "table",
+            "name": "Table 0",
+            "x": 58,
+            "y": 144,
+            "w": 960,
+            "h": 96,
+            "cells": [
+              [
+                "이름",
+                "역할",
+                "점수"
+              ],
+              [
+                "최코치",
+                "코치",
+                "92"
+              ],
+              [
+                "이리더",
+                "코치이",
+                "99"
+              ],
+              [
+                "박매니저",
+                "코치이",
+                "78"
+              ]
+            ]
+          }
+        ]
+      },
+      {
+        "n": 4,
+        "id": "ppt/slides/slide4.xml",
+        "elements": [
+          {
+            "id": "ppt/slides/slide4.xml-shape-0",
+            "type": "text",
+            "name": "Text 0",
+            "x": 58,
+            "y": 38,
+            "w": 1056,
+            "h": 77,
+            "text": "차트 슬라이드",
+            "segments": [
+              "차트 슬라이드"
+            ],
+            "shapeType": "rect",
+            "fill": "transparent"
+          },
+          {
+            "id": "ppt/slides/slide4.xml-frame-0",
+            "type": "chart",
+            "name": "Chart 0",
+            "x": 77,
+            "y": 134,
+            "w": 1056,
+            "h": 528,
+            "chart": {
+              "type": "bar",
+              "title": "분기별 코칭 세션 수 (수정)",
+              "categories": [
+                "1분기",
+                "2분기",
+                "3분기",
+                "4분기"
+              ],
+              "series": [
+                {
+                  "name": "2025",
+                  "values": [
+                    11,
+                    22,
+                    33,
+                    44
+                  ]
+                },
+                {
+                  "name": "2026",
+                  "values": [
+                    50,
+                    60,
+                    70,
+                    80
+                  ]
+                }
+              ]
+            }
+          }
+        ]
+      },
+      {
+        "n": 5,
+        "id": "ppt/slides/slide5.xml",
+        "elements": [
+          {
+            "id": "ppt/slides/slide5.xml-shape-0",
+            "type": "text",
+            "name": "Text 0",
+            "x": 58,
+            "y": 38,
+            "w": 1056,
+            "h": 77,
+            "text": "손대지 않는 슬라이드",
+            "segments": [
+              "손대지 않는 슬라이드"
+            ],
+            "shapeType": "rect",
+            "fill": "transparent"
+          },
+          {
+            "id": "ppt/slides/slide5.xml-shape-1",
+            "type": "text",
+            "name": "Text 1",
+            "x": 58,
+            "y": 154,
+            "w": 1056,
+            "h": 77,
+            "text": "이 슬라이드는 편집하지 않는다 (바이트 동일성 대조군).",
+            "segments": [
+              "이 슬라이드는 편집하지 않는다 (바이트 동일성 대조군)."
+            ],
+            "shapeType": "rect",
+            "fill": "transparent"
+          }
+        ]
+      },
+      {
+        "n": 6,
+        "id": "ppt/slides/slide6.xml",
+        "elements": [
+          {
+            "id": "ppt/slides/slide6.xml-shape-0",
+            "type": "text",
+            "name": "Text 0",
+            "x": 58,
+            "y": 38,
+            "w": 1056,
+            "h": 77,
+            "text": "표 슬라이드",
+            "segments": [
+              "표 슬라이드"
+            ],
+            "shapeType": "rect",
+            "fill": "transparent"
+          },
+          {
+            "id": "ppt/slides/slide6.xml-frame-0",
+            "type": "table",
+            "name": "Table 0",
+            "x": 58,
+            "y": 144,
+            "w": 960,
+            "h": 96,
+            "cells": [
+              [
+                "이름",
+                "역할",
+                "점수"
+              ],
+              [
+                "최코치",
+                "코치",
+                "92"
+              ],
+              [
+                "이리더",
+                "코치이",
+                "99"
+              ],
+              [
+                "박매니저",
+                "코치이",
+                "78"
+              ]
+            ]
+          }
+        ]
+      }
+    ],
+    "warnings": [],
+    "compat": []
+  }
+}

@@ -1,0 +1,58 @@
+# Think T3 로컬 하네스 (2026-11-20). 운영 코드(src/assistant/*, src/workflow/*, src/obs/routes-workflows.ts)를 그대로 import해 wrangler dev(로컬)에서 시험한다. 배포하지 않는다.
+# 실행: cf-wrangler.py dev --config files/workflow-verify/think-full/t3-harness/wrangler.toml --local --port 8797 --persist-to files/workflow-verify/think-full/t3-harness/state
+# 실제 모델 시험은 원격 시험 Worker(wrangler.remote.toml)에서 한다 (로컬 dev는 Workers AI를 못 부른다).
+name = "people-os-t3-harness-local"
+main = "harness.ts"
+compatibility_date = "2025-07-18"
+compatibility_flags = ["nodejs_compat", "enable_ctx_exports"]
+
+[assets]
+directory = "../../../../public"
+binding = "ASSETS"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "people-os-db"
+database_id = "00000000-0000-0000-0000-0000000000t3"
+migrations_dir = "../../../../migrations"
+
+[[kv_namespaces]]
+binding = "CACHE"
+id = "t3harnesskv"
+
+[[r2_buckets]]
+binding = "FILES"
+bucket_name = "t3-harness-files"
+
+[[durable_objects.bindings]]
+name = "ASSISTANT_AGENT"
+class_name = "HarnessAssistantAgent"
+
+[[durable_objects.bindings]]
+name = "AGENT_SESSION"
+class_name = "AgentSession"
+
+[[durable_objects.bindings]]
+name = "ThinkAgent"
+class_name = "HarnessThinkAgent"
+
+[[durable_objects.bindings]]
+name = "WORKFLOW_AGENT"
+class_name = "WorkflowAgent"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["HarnessAssistantAgent", "AgentSession", "HarnessThinkAgent", "WorkflowAgent"]
+
+[[queues.producers]]
+binding = "PIPELINE"
+queue = "t3-harness-pipeline"
+
+[[queues.consumers]]
+queue = "t3-harness-pipeline"
+max_batch_size = 1
+max_batch_timeout = 1
+max_retries = 3
+
+[vars]
+AGENT_RUNTIME = "think"

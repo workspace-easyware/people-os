@@ -7,7 +7,7 @@
 .apv-title{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}
 .apv-title .small{margin-left:6px}
 .apv-meta{white-space:nowrap;color:var(--color-muted);font-size:12px;overflow:hidden;text-overflow:ellipsis}
-.apv-urgent{color:#b91c1c;font-weight:700;margin-right:4px}
+.apv-urgent{color:var(--color-err);font-weight:600;margin-right:4px}
 .apv-sub{display:flex;gap:8px;margin:0 0 var(--space-3)}
 .apv-sub button{border:1px solid var(--color-line-strong);background:#fff;border-radius:999px;padding:2px 12px;font-size:12px;cursor:pointer}
 .apv-sub button[aria-pressed="true"]{background:var(--color-primary);border-color:var(--color-primary);color:#fff}
@@ -17,10 +17,10 @@
 .apv-hdr dt{color:var(--color-muted)}
 .apv-hdr dd{margin:0;word-break:break-all}
 .apv-line{list-style:none;margin:0;padding:0;border-left:2px solid var(--color-line);margin-left:8px}
-.apv-line li{position:relative;padding:0 0 14px 18px;font-size:13px}
+.apv-line li{position:relative;padding:0 0 16px 20px;font-size:13px}
 .apv-line li::before{content:"";position:absolute;left:-7px;top:3px;width:12px;height:12px;border-radius:50%;background:#fff;border:2px solid var(--color-line-strong)}
 .apv-line li.APPROVED::before{background:var(--color-ok,#166534);border-color:var(--color-ok,#166534)}
-.apv-line li.REJECTED::before{background:#b91c1c;border-color:#b91c1c}
+.apv-line li.REJECTED::before{background:var(--color-err);border-color:var(--color-err)}
 .apv-line li.APPROVING::before{background:var(--color-primary);border-color:var(--color-primary);box-shadow:0 0 0 3px var(--color-primary-soft)}
 .apv-line li.SKIPPED{opacity:.55}
 .apv-line .who{font-weight:600}
@@ -33,21 +33,22 @@
 .apv-route-edit{list-style:none;margin:0 0 8px;padding:0}
 .apv-route-edit li{display:flex;align-items:center;gap:6px;padding:6px 8px;border:1px solid var(--color-line);border-radius:6px;margin-bottom:4px;background:#fff;font-size:13px}
 .apv-route-edit li .nm{flex:1}
-.apv-route-edit button{border:1px solid var(--color-line-strong);background:#fff;border-radius:6px;padding:1px 7px;cursor:pointer}
+.apv-route-edit button{border:1px solid var(--color-line-strong);background:#fff;border-radius:6px;padding:0 8px;min-height:24px;cursor:pointer}
 .apv-found{border:1px solid var(--color-line);border-radius:6px;max-height:160px;overflow:auto;margin-top:4px}
 .apv-found div{padding:6px 8px;cursor:pointer;font-size:13px;border-bottom:1px solid var(--color-line)}
 .apv-found div:hover{background:var(--color-surface-soft)}
-.apv-err{color:#b91c1c;font-size:13px;min-height:18px}
+.apv-err{color:var(--color-err);font-size:13px;min-height:18px}
 .apv-err:empty{display:none}
 .hero{position:relative}
-.ntf-bell{position:absolute;right:16px;top:14px;border:1px solid rgba(255,255,255,.35);background:rgba(255,255,255,.12);color:#fff;border-radius:999px;width:36px;height:36px;font-size:16px;line-height:1;cursor:pointer;padding:0;margin:0}
-.ntf-bell:hover{background:rgba(255,255,255,.25)}
-.ntf-count{position:absolute;right:-4px;top:-4px;background:#dc2626;color:#fff;border-radius:999px;font-size:11px;line-height:16px;min-width:16px;padding:0 4px;box-sizing:border-box}
+.ntf-bell{position:absolute;right:16px;top:16px;display:grid;place-items:center;border:1px solid rgba(255,255,255,.28);background:rgba(255,255,255,.12);color:#fff;border-radius:8px;width:36px;height:36px;cursor:pointer;padding:0;margin:0;transition:background .15s ease}
+.ntf-bell:hover{background:rgba(255,255,255,.22)}
+.ntf-bell:focus-visible{outline:2px solid #fff;outline-offset:2px}
+.ntf-count{position:absolute;right:-4px;top:-4px;background:var(--color-danger,#dc2626);color:#fff;border-radius:999px;font-size:11px;line-height:16px;min-width:16px;padding:0 4px;box-sizing:border-box;font-variant-numeric:tabular-nums}
 .ntf-panel{position:absolute;right:16px;top:56px;width:340px;max-width:calc(100vw - 32px);background:#fff;color:var(--color-text,#18181b);border:1px solid var(--color-line-strong);border-radius:8px;box-shadow:var(--shadow-lg);z-index:20;display:none}
 .ntf-panel.open{display:block}
 .ntf-panel header{display:flex;justify-content:space-between;align-items:center;padding:8px 12px;border-bottom:1px solid var(--color-line);font-size:13px}
 .ntf-panel header button{border:0;background:none;color:var(--color-primary);cursor:pointer;font-size:12px;padding:0}
-.ntf-item{padding:9px 12px;border-bottom:1px solid var(--color-line);cursor:pointer;font-size:13px}
+.ntf-item{padding:8px 12px;border-bottom:1px solid var(--color-line);cursor:pointer;font-size:13px}
 .ntf-item:last-child{border-bottom:0}
 .ntf-item:hover{background:var(--color-surface-soft)}
 .ntf-item.unread{background:var(--color-primary-soft)}

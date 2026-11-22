@@ -1,0 +1,18 @@
+# T3 사전 확인 Worker (2026-11-20). 운영과 같은 compatibility_date·플래그에서 facet(하위 에이전트)이 되는지만 본다. 바인딩은 DO 1개뿐 (운영 자원 없음).
+# 배포: cf-wrangler.py deploy --config files/workflow-verify/think-full/t3-probe/wrangler.toml — 시험 뒤 삭제.
+name = "people-os-t3-probe"
+main = "probe.ts"
+compatibility_date = "2025-07-18"
+compatibility_flags = ["nodejs_compat", "enable_ctx_exports"]
+workers_dev = true
+
+[[durable_objects.bindings]]
+name = "PARENT"
+class_name = "ProbeParent"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["ProbeParent"]
+
+[vars]
+OPEN_UNTIL = "1795186800000" # 11-21 00:00 KST

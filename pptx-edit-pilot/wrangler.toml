@@ -1,0 +1,6 @@
+# Pilot-only test Worker. NOT the People OS Worker. Deploy as people-os-pptx-pilot, delete after the pilot.
+name = "people-os-pptx-pilot"
+main = "src/lab.js"
+compatibility_date = "2025-07-18"
+compatibility_flags = ["nodejs_compat"]
+workers_dev = true

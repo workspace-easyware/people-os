@@ -1,0 +1,4 @@
+# Bundle-size baseline only (dry-run). Minimal edit path, no pptxgenjs, no nodejs_compat.
+name = "people-os-pptx-pilot-minimal"
+main = "src/minimal.js"
+compatibility_date = "2025-07-18"

@@ -1,0 +1,423 @@
+/* 에이전트 화면 (Think T3, 2026-11-20). 순수 HTML+JS (빌드·React 없음). 스타일: agents.css.
+ *
+ *   agentsOpen(mountEl)  — 메뉴 "에이전트" 진입 (index.html switchTab이 부른다)
+ *   agentsLeave()        — 다른 탭으로 나갈 때 폴링을 멈춘다
+ *
+ * API (src/assistant/routes.ts — 세션 쿠키 전용):
+ *   GET    /api/agents                       목록: { assistant:{id,usage,running,lastTurn}, workflowAgents:[...] }
+ *   GET    /api/agents/:id/messages          대화 + 최근 턴 + 오늘 사용량
+ *   POST   /api/agents/:id/messages          {text, clientId} → 202 (턴은 서버 DO 안에서 돈다)
+ *   DELETE /api/agents/:id/messages          대화 지우기
+ *   GET    /api/agents/:id/events?after=N    진행 이벤트 (도구 시작·끝, 스텝, 판단 근거, 하위 에이전트·조사 진행, 답 글 조각 delta)
+ *                                            턴이 열려 있으면 SSE(EventSource)로 받고, 안 되면 2초 폴링 (T3 고침 2)
+ *   GET    /api/agents/wf/:runId/:step       워크플로 agent 단계의 도구 호출 기록
+ * 승인 처리는 여기서 하지 않는다 — 승인 대기는 표시만 하고 결재함·워크플로 실행 화면(기존 승인 흐름)으로 보낸다.
+ * 답은 delta 이벤트로 만들어지는 대로 말풍선에 이어 붙이고, 턴이 끝나면 저장된 대화로 바꾼다. 판단 근거(thinking)는 접어 두고 "모델 원문·영어"로 표시한다 (Qwen thinking이 언어 지시를 안 따름 — T3-FIXES 3번).
+ * 서버 데이터는 전부 agEsc()를 거쳐 넣는다.
+ */
+(function (global) {
+  'use strict';
+  var POLL_MS = 2000;
+  // es: SSE 연결, sseOff: 이 화면에서 SSE가 안 돼 폴링으로 돌아갔는가, live/liveTurn: 스트리밍 중인 답 글 (T3 고침 2), open: 열린 턴이 있는가
+  var S = { mount: null, list: null, sel: null, cursor: 0, events: [], timer: null, alive: false, sending: false, wfTimer: null, es: null, sseOff: false, live: '', liveTurn: null, open: false };
+
+  function agEsc(s) { return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;'); }
+  function api(path, init) {
+    var opts = Object.assign({ credentials: 'same-origin', headers: {} }, init || {});
+    if (opts.body && typeof opts.body !== 'string') { opts.body = JSON.stringify(opts.body); opts.headers['content-type'] = 'application/json'; }
+    return fetch(path, opts).then(function (res) {
+      return res.json().catch(function () { return null; }).then(function (j) {
+        if (!res.ok) { var e = new Error((j && j.error) || ('요청 실패 (' + res.status + ')')); e.status = res.status; throw e; }
+        return j || {};
+      });
+    });
+  }
+  function badge(text, kind) { return '<span class="ag-badge ' + (kind || '') + '">' + agEsc(text) + '</span>'; }
+  function hhmm(ms) {
+    if (!ms) return '';
+    var d = new Date(typeof ms === 'number' ? ms : Date.parse(ms));
+    if (isNaN(d.getTime())) return '';
+    return d.toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false, timeZone: 'Asia/Seoul' });
+  }
+  function kst(t) {
+    if (!t) return '';
+    var d = new Date(typeof t === 'number' ? t : Date.parse(t));
+    if (isNaN(d.getTime())) return '';
+    return d.toLocaleString('ko-KR', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false, timeZone: 'Asia/Seoul' });
+  }
+  var TURN_KO = { queued: ['대기', 'info'], running: ['실행 중', 'info'], completed: ['완료', 'ok'], aborted: ['중단', 'err'], skipped: ['건너뜀', ''], error: ['오류', 'err'] };
+  var STEP_KO = { pending: ['대기', ''], running: ['실행 중', 'info'], succeeded: ['완료', 'ok'], failed: ['실패', 'err'], skipped: ['건너뜀', ''], waiting_approval: ['승인 대기', 'warn'] };
+  var STOP_KO = { max_steps: '단계 상한', llm_cap: 'LLM 호출 상한', timeout: '시간 상한', repeat_tool: '같은 도구 반복', tool_selection_failed: '도구 선택 실패', approval_required: '승인 필요' };
+  var TOOL_KO = { ask_rag: 'HR 규정 검색', ask_personal: '개인 문서 검색', summarize: '문서 요약', llm: 'LLM', email_draft: '메일 초안', create_task: '할 일 만들기', research: '조사 위임(하위 에이전트)', send_email: '메일 발송', webhook: '웹훅' };
+  function toolName(t) { return TOOL_KO[t] ? TOOL_KO[t] + ' (' + t + ')' : String(t || ''); }
+
+  function stopPolling() {
+    if (S.timer) { clearTimeout(S.timer); S.timer = null; }
+    if (S.wfTimer) { clearTimeout(S.wfTimer); S.wfTimer = null; }
+    if (S.es) { try { S.es.close(); } catch (x) { /* 무시 */ } S.es = null; }
+  }
+
+  // ---------------------------------------------------------------- 뼈대 + 목록
+  function shell() {
+    S.mount.innerHTML =
+      '<div class="card ag-card"><div class="ag-layout">' +
+      '<aside class="ag-side"><div class="ag-head"><b>내 에이전트</b><button type="button" class="secondary" data-ag="refresh">새로고침</button></div>' +
+      '<div data-ag="list"><p class="ag-empty">불러오는 중…</p></div></aside>' +
+      '<div class="ag-main" data-ag="main"><p class="ag-empty">왼쪽에서 에이전트를 고르세요.</p></div>' +
+      '</div></div>';
+    S.mount.querySelector('[data-ag="refresh"]').onclick = function () { loadList(); };
+  }
+
+  function loadList() {
+    var box = S.mount && S.mount.querySelector('[data-ag="list"]');
+    if (!box) return Promise.resolve();
+    return api('/api/agents').then(function (j) {
+      if (!S.alive) return;
+      S.list = j;
+      renderList();
+      if (!S.sel) select({ kind: 'assistant', id: j.assistant.id });
+    }).catch(function (e) {
+      box.innerHTML = '<p class="ag-msgline err" role="alert">' + agEsc(e.status === 401 ? '로그인이 필요합니다.' : e.message) + '</p>';
+    });
+  }
+
+  function renderList() {
+    var box = S.mount.querySelector('[data-ag="list"]');
+    var j = S.list || {};
+    var a = j.assistant || {};
+    var html = '<h3>어시스턴트</h3><ul class="ag-list">' +
+      '<li class="ag-item' + (S.sel && S.sel.kind === 'assistant' ? ' sel' : '') + '"><button type="button" class="ag-item-btn" data-sel="assistant">' +
+      '<span class="ag-item-name">' + agEsc(a.name || '내 어시스턴트') + '</span><span class="ag-item-meta">' +
+      (a.running ? '<span class="ag-dot" aria-hidden="true"></span>' + badge('실행 중', 'info') : (a.lastTurn ? badge((TURN_KO[a.lastTurn.status] || [a.lastTurn.status])[0], (TURN_KO[a.lastTurn.status] || [])[1]) : badge('대화 없음'))) +
+      (a.usage ? ' 오늘 ' + agEsc(a.usage.used) + '/' + agEsc(a.usage.cap) + '회' : '') + '</span></button></li></ul>';
+    var wf = j.workflowAgents || [];
+    html += '<h3>워크플로 에이전트 실행</h3>';
+    if (j.workflowError) html += '<p class="ag-msgline err">' + agEsc(j.workflowError) + '</p>';
+    if (!wf.length) html += '<p class="ag-empty">에이전트 단계가 있는 워크플로 실행이 없습니다.</p>';
+    else {
+      html += '<ul class="ag-list">' + wf.map(function (w, i) {
+        var st = STEP_KO[w.status] || [w.status, ''];
+        var sel = S.sel && S.sel.kind === 'wf' && S.sel.runId === w.runId && S.sel.stepIndex === w.stepIndex;
+        return '<li class="ag-item' + (sel ? ' sel' : '') + '"><button type="button" class="ag-item-btn" data-sel="wf" data-i="' + i + '">' +
+          '<span class="ag-item-name">' + agEsc(w.workflowName) + ' › ' + agEsc(w.stepName) + '</span><span class="ag-item-meta">' +
+          (w.running ? '<span class="ag-dot" aria-hidden="true"></span>' : '') + badge(st[0], st[1]) + badge(w.runtime === 'think' ? 'Think' : 'legacy') +
+          ' ' + agEsc(kst(w.startedAt)) + (w.tools && w.tools.length ? ' · 도구 ' + agEsc(w.tools.length) + '회' : '') + '</span></button></li>';
+      }).join('') + '</ul>';
+    }
+    box.innerHTML = html;
+    var ab = box.querySelector('[data-sel="assistant"]');
+    if (ab) ab.onclick = function () { select({ kind: 'assistant', id: a.id }); };
+    Array.prototype.forEach.call(box.querySelectorAll('[data-sel="wf"]'), function (b) {
+      b.onclick = function () { var w = wf[Number(b.getAttribute('data-i'))]; select({ kind: 'wf', runId: w.runId, stepIndex: w.stepIndex }); };
+    });
+  }
+
+  function select(sel) {
+    stopPolling();
+    S.sel = sel;
+    if (S.list) renderList();
+    if (sel.kind === 'assistant') openAssistant(sel.id); else openWorkflowAgent(sel.runId, sel.stepIndex);
+  }
+
+  // ---------------------------------------------------------------- 어시스턴트
+  function openAssistant(id) {
+    var main = S.mount.querySelector('[data-ag="main"]');
+    S.cursor = 0; S.events = []; S.live = ''; S.liveTurn = null; S.open = false;
+    main.innerHTML =
+      '<div class="ag-head"><h2>내 어시스턴트</h2><div><span class="ag-usage" data-ag="usage"></span> ' +
+      '<button type="button" class="secondary" data-ag="clear">대화 지우기</button></div></div>' +
+      '<p class="small">회사 규정 질문은 HR 규정 검색(ask_rag)으로 근거를 찾아 답하고, 여러 규정을 비교·정리하는 요청은 조사 하위 에이전트에게 맡깁니다. 메일은 초안까지만 만들고 보내지 않습니다.</p>' +
+      '<div class="ag-chat" data-ag="chat" aria-live="polite"><p class="ag-empty">불러오는 중…</p></div>' +
+      '<form class="ag-form" data-ag="form"><textarea data-ag="text" maxlength="4000" placeholder="예) 연차 휴가는 1년에 며칠인가요? / 연차와 경조사 휴가 규정을 비교해 정리해 줘" aria-label="어시스턴트에게 보낼 메시지"></textarea>' +
+      '<button type="submit" class="primary" data-ag="send">보내기</button></form>' +
+      '<div class="ag-msgline" data-ag="msg" role="status"></div>' +
+      '<section class="ag-events"><h3>진행 기록 <span class="small" data-ag="evstate"></span></h3>' +
+      '<p class="small">도구 호출·스텝·판단 근거(모델 원문·영어, 접어둠)·하위 에이전트 위임과 조사 진행이 쌓입니다. 답은 만들어지는 대로 위 말풍선에 이어 붙습니다 (실시간 연결이 안 되면 2초마다 갱신).</p>' +
+      '<ul class="ag-ev" data-ag="ev"><li class="ag-empty">아직 기록이 없습니다.</li></ul></section>';
+    var form = main.querySelector('[data-ag="form"]');
+    var ta = main.querySelector('[data-ag="text"]');
+    form.onsubmit = function (ev) { ev.preventDefault(); send(id, ta); };
+    ta.onkeydown = function (ev) { if (ev.key === 'Enter' && (ev.ctrlKey || ev.metaKey)) { ev.preventDefault(); send(id, ta); } };
+    main.querySelector('[data-ag="clear"]').onclick = function () { clearChat(id); };
+    loadHistory(id).then(function () { poll(id, true); });
+  }
+
+  function msgline(text, err) {
+    var el = S.mount && S.mount.querySelector('[data-ag="msg"]');
+    if (!el) return;
+    el.textContent = text || '';
+    el.className = 'ag-msgline' + (err ? ' err' : '');
+  }
+
+  function loadHistory(id) {
+    return api('/api/agents/' + encodeURIComponent(id) + '/messages?limit=60').then(function (j) {
+      if (!S.alive || !S.sel || S.sel.kind !== 'assistant') return;
+      var chat = S.mount.querySelector('[data-ag="chat"]');
+      var msgs = j.messages || [];
+      chat.innerHTML = msgs.length ? msgs.map(function (m) {
+        var tools = (m.tools || []).map(function (t) { return t.tool; }).filter(Boolean);
+        return '<div class="ag-msg ' + (m.role === 'user' ? 'user' : 'assistant') + '">' + agEsc(m.text || (tools.length ? '' : '(빈 메시지)')) +
+          (tools.length ? '<div class="ag-msg-tools">사용한 도구: ' + tools.map(function (t) { return agEsc(toolName(t)); }).join(', ') + '</div>' : '') + '</div>';
+      }).join('') : '<p class="ag-empty">대화가 없습니다. 아래에 메시지를 보내 보세요.</p>';
+      chat.scrollTop = chat.scrollHeight;
+      var u = j.usage;
+      var ue = S.mount.querySelector('[data-ag="usage"]');
+      if (ue && u) ue.textContent = '오늘 ' + u.used + ' / ' + u.cap + '회';
+      var last = (j.turns || [])[(j.turns || []).length - 1];
+      var open = last && (last.status === 'queued' || last.status === 'running');
+      if (open) {
+        // 진행 중인 턴: 답 말풍선을 다시 달고, 이미 받은 글 조각이 있으면 이어서 보여 준다 (T3 고침 2)
+        chat.insertAdjacentHTML('beforeend', '<div class="ag-msg assistant" data-ag="pending"><span class="ag-dot" aria-hidden="true"></span> 답을 만드는 중…</div>');
+        if (S.liveTurn === last.turnNo && liveText()) appendDelta({ turn: last.turnNo, data: { text: '' } });
+        chat.scrollTop = chat.scrollHeight;
+      }
+      var btn = S.mount.querySelector('[data-ag="send"]');
+      if (btn) btn.disabled = S.sending;
+      return open;
+    }).catch(function (e) { msgline(e.message, true); });
+  }
+
+  function send(id, ta) {
+    var text = ta.value.trim();
+    if (!text || S.sending) return;
+    S.sending = true;
+    var btn = S.mount.querySelector('[data-ag="send"]');
+    if (btn) btn.disabled = true;
+    msgline('보내는 중…');
+    var clientId = 'c' + Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
+    api('/api/agents/' + encodeURIComponent(id) + '/messages', { method: 'POST', body: { text: text, clientId: clientId } }).then(function (j) {
+      ta.value = '';
+      msgline('접수했습니다 (턴 ' + j.turnNo + '). 진행 기록에서 단계별로 볼 수 있습니다.');
+      var chat = S.mount.querySelector('[data-ag="chat"]');
+      if (chat) {
+        var empty = chat.querySelector('.ag-empty'); if (empty) empty.remove();
+        chat.insertAdjacentHTML('beforeend', '<div class="ag-msg user">' + agEsc(text) + '</div><div class="ag-msg assistant" data-ag="pending"><span class="ag-dot" aria-hidden="true"></span> 답을 만드는 중…</div>');
+        chat.scrollTop = chat.scrollHeight;
+      }
+      poll(id, true);
+    }).catch(function (e) {
+      msgline(e.message, true);
+    }).then(function () {
+      S.sending = false;
+      var b = S.mount && S.mount.querySelector('[data-ag="send"]');
+      if (b) b.disabled = false;
+    });
+  }
+
+  function clearChat(id) {
+    if (!global.confirm('대화를 모두 지울까요? 지운 대화는 되돌릴 수 없습니다. (오늘 사용 횟수는 그대로입니다)')) return;
+    api('/api/agents/' + encodeURIComponent(id) + '/messages', { method: 'DELETE' }).then(function () {
+      msgline('대화를 지웠습니다.');
+      S.events = [];
+      renderEvents(false);
+      loadHistory(id);
+      loadList();
+    }).catch(function (e) { msgline(e.message, true); });
+  }
+
+  function onAssistant() { return S.alive && S.sel && S.sel.kind === 'assistant'; }
+
+  /**
+   * 이벤트 묶음 반영 (폴링·SSE 공통). id가 커서 이하인 이벤트는 건너뛴다 (두 경로가 겹쳐도 한 번만).
+   * delta(답 글 조각)는 진행 기록에 넣지 않고 답 말풍선에 이어 붙인다 (T3 고침 2). 돌려주는 값: turnEnd가 있었는가.
+   */
+  function ingest(evs) {
+    var ended = false;
+    evs.forEach(function (e) {
+      if (typeof e.id === 'number') { if (e.id <= S.cursor) return; S.cursor = e.id; }
+      if (e.ev === 'delta') { appendDelta(e); return; }
+      if (e.ev === 'cleared') S.events = [];
+      else S.events.push(e);
+      if (e.ev === 'turnQueued' || e.ev === 'turnStart' || e.ev === 'turnResume') S.open = true;
+      if (e.ev === 'step' && e.data && (e.data.tools || []).length) resetLive(); // 도구를 부른 스텝의 글은 답이 아니다
+      if (e.ev === 'turnEnd') { ended = true; S.open = false; }
+    });
+    if (S.events.length > 400) S.events = S.events.slice(-400);
+    return ended;
+  }
+
+  // ---- 답 말풍선 이어 붙이기 (T3 고침 2) ----
+  function liveText() {
+    var t = S.live.replace(/<think>[\s\S]*?<\/think>/g, '');
+    var i = t.indexOf('<think>');
+    if (i >= 0) t = t.slice(0, i); // 닫히지 않은 사고 과정은 감춘다
+    return t.replace(/^\s+/, '');
+  }
+  function appendDelta(e) {
+    if (S.liveTurn !== e.turn) { S.liveTurn = e.turn; S.live = ''; }
+    S.live += String((e.data && e.data.text) || '');
+    var b = S.mount && S.mount.querySelector('[data-ag="pending"]');
+    var t = liveText();
+    if (!b || !t) return;
+    b.innerHTML = agEsc(t) + ' <span class="ag-dot" aria-hidden="true"></span>';
+    var chat = S.mount.querySelector('[data-ag="chat"]');
+    if (chat) chat.scrollTop = chat.scrollHeight;
+  }
+  function resetLive() {
+    S.live = '';
+    var b = S.mount && S.mount.querySelector('[data-ag="pending"]');
+    if (b) b.innerHTML = '<span class="ag-dot" aria-hidden="true"></span> 답을 만드는 중…';
+  }
+
+  /** 턴이 열려 있는 동안 다음 받기: SSE가 되면 SSE, 아니면 2초 폴링. */
+  function follow(id) {
+    if (!onAssistant()) return;
+    if (!S.sseOff && typeof global.EventSource === 'function') openStream(id);
+    else S.timer = setTimeout(function () { poll(id, false); }, POLL_MS);
+  }
+
+  /**
+   * T3 고침 2: SSE로 진행 이벤트·글 조각을 받는다 (GET /events, Accept: text/event-stream — EventSource가 보낸다).
+   * 서버는 최대 55초 뒤 또는 턴이 끝나면 `end`를 보내고 닫는다 → 폴링 1회로 상태를 맞춘 뒤 열린 턴이 있으면 다시 연다.
+   * 첫 메시지 전에 오류가 나면 이 화면에서는 SSE를 끄고 2초 폴링으로 돌아간다 (폴백). 도중 오류도 폴링 1회 → 다시 연결.
+   */
+  var EV_NAMES = ['turnQueued', 'turnStart', 'turnResume', 'toolStart', 'toolEnd', 'toolBlocked', 'toolReplay', 'researchStart', 'researchProgress', 'researchEnd',
+    'step', 'limit', 'recovery', 'turnEnd', 'cleared', 'noteFailed', 'summaryFailed', 'clearRunsFailed', 'delta'];
+  function closeStream() { if (S.es) { try { S.es.close(); } catch (x) { /* 무시 */ } S.es = null; } }
+  function openStream(id) {
+    if (S.es || !onAssistant()) return;
+    var es;
+    try { es = new global.EventSource('/api/agents/' + encodeURIComponent(id) + '/events?after=' + S.cursor, { withCredentials: true }); }
+    catch (x) { S.sseOff = true; S.timer = setTimeout(function () { poll(id, false); }, POLL_MS); return; }
+    S.es = es;
+    var got = false;
+    var st = S.mount && S.mount.querySelector('[data-ag="evstate"]');
+    var onMsg = function (m) {
+      got = true;
+      if (!onAssistant()) { closeStream(); return; }
+      var e;
+      try { e = JSON.parse(m.data); } catch (x) { return; }
+      var ended = ingest([e]);
+      if (e.ev !== 'delta') renderEvents(S.open);
+      if (ended) { loadHistory(id); loadList(); }
+    };
+    EV_NAMES.forEach(function (n) { es.addEventListener(n, onMsg); });
+    es.addEventListener('end', function () {
+      got = true;
+      closeStream();
+      poll(id, false); // 남은 이벤트·턴 상태를 맞추고, 열린 턴이 있으면 follow가 다시 연다
+    });
+    es.onerror = function () {
+      if (S.es !== es) return;
+      closeStream();
+      if (!got) S.sseOff = true; // 이 환경에서는 SSE가 안 된다 → 폴링으로
+      if (st) st.textContent = got ? '(실시간 연결이 끊겨 다시 연결합니다)' : '(실시간 연결이 안 되어 2초마다 갱신합니다)';
+      S.timer = setTimeout(function () { poll(id, false); }, POLL_MS);
+    };
+  }
+
+  /** 진행 이벤트 폴링 (첫 화면·폴백): 열린 턴이 있으면 follow로 넘긴다. 턴이 끝나면(turnEnd) 대화를 다시 읽고 멈춘다. */
+  function poll(id, first) {
+    if (S.timer) { clearTimeout(S.timer); S.timer = null; }
+    if (!onAssistant()) return;
+    api('/api/agents/' + encodeURIComponent(id) + '/events?after=' + S.cursor).then(function (j) {
+      if (!onAssistant()) return;
+      var evs = j.events || [];
+      var ended = ingest(evs);
+      S.cursor = Math.max(S.cursor, j.cursor || 0);
+      var lt = j.latestTurn;
+      var open = !!lt && (lt.status === 'queued' || lt.status === 'running');
+      S.open = open;
+      renderEvents(open);
+      if (ended && !first) { loadHistory(id); loadList(); }
+      else if (ended && first) loadHistory(id);
+      if (first && evs.length >= 200) S.timer = setTimeout(function () { poll(id, true); }, 0); // 밀린 기록 마저 읽기
+      else if (open) follow(id);
+      else if (!first && !ended) { loadHistory(id); }
+    }).catch(function (e) {
+      var st = S.mount && S.mount.querySelector('[data-ag="evstate"]');
+      if (st) st.textContent = '(갱신 실패: ' + e.message + ' — 다시 시도합니다)';
+      S.timer = setTimeout(function () { poll(id, false); }, POLL_MS * 2);
+    });
+  }
+
+  function evLine(e) {
+    var d = e.data || {};
+    var t = '<span class="ag-ev-time">' + agEsc(hhmm(e.ts)) + ' · 턴 ' + agEsc(e.turn) + '</span>';
+    switch (e.ev) {
+      case 'turnQueued': return ['', t + '메시지 접수'];
+      case 'turnStart': return ['', t + '턴 시작 — 쓸 수 있는 도구 ' + agEsc((d.active || []).length) + '개' + ((d.active || []).length ? '<span class="ag-ev-detail">' + agEsc((d.active || []).join(', ')) + '</span>' : '')];
+      case 'turnResume': return ['warn', t + '중단된 턴을 이어서 실행 (복구)'];
+      case 'toolStart': return ['tool', t + '도구 호출: <b>' + agEsc(toolName(d.tool)) + '</b>' + (d.args ? '<span class="ag-ev-detail">' + agEsc(d.args) + '</span>' : '')];
+      case 'toolEnd': return [d.ok ? 'ok' : 'err', t + '도구 결과: ' + agEsc(toolName(d.tool)) + ' ' + (d.ok ? badge('성공', 'ok') : badge('실패', 'err')) + (d.grounded === true ? ' ' + badge('근거 있음', 'ok') : d.grounded === false ? ' ' + badge('근거 없음', 'warn') : '') +
+        '<span class="ag-ev-detail">' + agEsc(d.ok ? d.observation : d.error) + '</span>'];
+      case 'toolBlocked': return ['err', t + '도구 차단: ' + agEsc(toolName(d.tool)) + ' (' + agEsc(d.why) + ')'];
+      case 'toolReplay': return ['', t + '이전 결과 재사용: ' + agEsc(toolName(d.tool))];
+      case 'researchStart': return ['sub', t + '<b>조사 하위 에이전트에 위임</b><span class="ag-ev-detail">' + agEsc(d.topic) + '</span>'];
+      case 'researchProgress': {
+        var sec = typeof d.elapsedMs === 'number' ? ', 경과 ' + Math.round(d.elapsedMs / 1000) + '초' : '';
+        if (d.source === 'heartbeat') return ['sub', t + '조사 중… (' + agEsc(d.steps || 0) + '스텝 진행' + agEsc(sec) + ')'];
+        return ['sub', t + '조사 진행: 스텝 ' + agEsc(d.steps == null ? '?' : d.steps) + (d.maxSteps ? '/' + agEsc(d.maxSteps) : '') +
+          (d.tool ? ' · ' + agEsc(toolName(d.tool)) + ' 실행' : d.message ? ' · ' + agEsc(d.message) : '') + agEsc(sec)];
+      }
+      case 'researchEnd': return [d.status === 'completed' ? 'sub' : 'err', t + '조사 하위 에이전트 ' + (d.status === 'completed' ? '완료' : '실패 (' + agEsc(d.status) + ')') +
+        ' — 스텝 ' + agEsc(d.steps == null ? '?' : d.steps) + ', LLM ' + agEsc(d.llmCalls == null ? '?' : d.llmCalls) + '회' + ((d.tools || []).length ? ', 도구 ' + agEsc(d.tools.join(', ')) : '') +
+        ((d.sources || []).length ? '<span class="ag-ev-detail">출처: ' + agEsc(d.sources.join(' · ')) + '</span>' : '') + (d.summary ? '<span class="ag-ev-detail">' + agEsc(d.summary) + '</span>' : '') + (d.error ? '<span class="ag-ev-detail">' + agEsc(d.error) + '</span>' : '')];
+      case 'step': return ['', t + '스텝 ' + agEsc(d.step) + ((d.tools || []).length ? ' → ' + agEsc(d.tools.map(toolName).join(', ')) : ' → 답 작성') + ' · LLM 누적 ' + agEsc(d.llmCalls) +
+        (d.thinking ? '<details class="ag-think"><summary>판단 근거 (모델 원문·영어)</summary>' + agEsc(d.thinking) + '</details>' : '') + (d.text ? '<span class="ag-ev-detail">' + agEsc(d.text) + '</span>' : '')];
+      case 'limit': return ['warn', t + '한도에 걸려 멈춤: ' + agEsc(STOP_KO[d.reason] || d.reason)];
+      case 'recovery': return ['warn', t + '복구 시도 ' + agEsc(d.attempt) + (d.stopped ? ' (한도로 멈춤)' : '')];
+      case 'turnEnd': return [d.status === 'completed' && !d.stoppedReason ? 'ok' : 'err', t + '턴 끝: ' + agEsc((TURN_KO[d.status] || [d.status])[0]) + (d.stoppedReason ? ' (' + agEsc(STOP_KO[d.stoppedReason] || d.stoppedReason) + ')' : '') +
+        ' — 스텝 ' + agEsc(d.steps) + ', LLM ' + agEsc(d.llmCalls) + '회, 도구 ' + agEsc(d.toolCalls) + '회' + (d.researchRuns ? ', 조사 위임 ' + agEsc(d.researchRuns) + '회' : '') + (typeof d.ms === 'number' ? ', ' + agEsc(Math.round(d.ms / 1000)) + '초' : '')];
+      default: return ['', t + agEsc(e.ev)];
+    }
+  }
+
+  function renderEvents(open) {
+    var ul = S.mount && S.mount.querySelector('[data-ag="ev"]');
+    if (!ul) return;
+    var st = S.mount.querySelector('[data-ag="evstate"]');
+    if (st) st.innerHTML = open ? '<span class="ag-dot" aria-hidden="true"></span> 실행 중' : '';
+    var list = S.events.slice(-120);
+    ul.innerHTML = list.length ? list.map(function (e) { var x = evLine(e); return '<li class="' + x[0] + '">' + x[1] + '</li>'; }).join('') : '<li class="ag-empty">아직 기록이 없습니다.</li>';
+    ul.scrollTop = ul.scrollHeight;
+  }
+
+  // ---------------------------------------------------------------- 워크플로 agent 단계
+  function openWorkflowAgent(runId, stepIndex) {
+    var main = S.mount.querySelector('[data-ag="main"]');
+    main.innerHTML = '<p class="ag-empty">불러오는 중…</p>';
+    api('/api/agents/wf/' + encodeURIComponent(runId) + '/' + encodeURIComponent(stepIndex)).then(function (j) {
+      if (!S.alive || !S.sel || S.sel.kind !== 'wf' || S.sel.runId !== runId) return;
+      var st = j.waitingApproval ? STEP_KO.waiting_approval : (STEP_KO[j.status] || [j.status, '']);
+      var running = !j.waitingApproval && (j.status === 'running' || (j.status === 'pending' && (j.runStatus === 'running' || j.runStatus === 'queued')));
+      var html = '<div class="ag-head"><h2>워크플로 에이전트 단계</h2><div>' + (running ? '<span class="ag-dot" aria-hidden="true"></span> ' : '') + badge(st[0], st[1]) + ' ' + badge(j.runtime === 'think' ? 'Think 런타임' : 'legacy 런타임') + '</div></div>' +
+        '<p class="small">실행 <code>' + agEsc(j.runId) + '</code> · 단계 ' + agEsc(j.stepIndex + 1) + ' · <a href="' + agEsc(j.link) + '">워크플로 실행 화면 열기</a></p>';
+      if (j.waitingApproval) {
+        html += '<div class="ag-note" role="status">밖으로 나가는 동작(메일 발송·웹훅 등)이 <b>승인을 기다리고 있습니다</b>. 승인 전에는 실행되지 않습니다. ' +
+          '<a href="#approval">결재함</a> 또는 <a href="' + agEsc(j.link) + '">워크플로 실행 화면</a>에서 승인·거절하세요.' +
+          (j.live && j.live.pendingTool ? ' (대기 중인 도구: ' + agEsc(toolName(j.live.pendingTool)) + ')' : '') + '</div>';
+      }
+      if (j.live) html += '<p class="small">진행 중 — 스텝 ' + agEsc(j.live.steps) + ', LLM ' + agEsc(j.live.llmCalls) + '회' + (j.live.stop ? ', 멈춤: ' + agEsc(STOP_KO[j.live.stop] || j.live.stop) : '') + '</p>';
+      if (j.stoppedReason) html += '<div class="ag-note">한도로 멈춤: ' + agEsc(STOP_KO[j.stoppedReason] || j.stoppedReason) + '</div>';
+      if (j.error) html += '<p class="ag-msgline err">' + agEsc(j.error) + '</p>';
+      if (j.final) html += '<h3>최종 답</h3><div class="ag-final">' + agEsc(j.final) + '</div>';
+      var turns = j.turns || [];
+      html += '<h3>도구 호출 기록</h3>';
+      if (!turns.length) html += '<p class="ag-empty">' + (running && j.runtime !== 'think' ? 'legacy 런타임은 단계가 끝난 뒤 기록이 보입니다.' : '기록이 없습니다.') + '</p>';
+      else {
+        html += '<div class="ag-turns">' + turns.map(function (t) {
+          var head = t.action === 'tool' ? '도구: ' + agEsc(toolName(t.tool)) : t.action === 'finish' ? '최종 답' : '빈 응답';
+          return '<div class="ag-turn"><div class="ag-turn-h">스텝 ' + agEsc(t.turn + 1) + ' · ' + head + (t.at ? ' <span class="small">' + agEsc(hhmm(t.at)) + '</span>' : '') + '</div>' +
+            (t.thinking ? '<details class="ag-think"><summary>판단 근거 (모델 원문·영어)</summary>' + agEsc(t.thinking) + '</details>' : '') +
+            (t.observation ? '<pre>' + agEsc(t.observation) + '</pre>' : '') + (t.final ? '<pre>' + agEsc(t.final) + '</pre>' : '') + (t.error ? '<p class="ag-msgline err">' + agEsc(t.error) + '</p>' : '') + '</div>';
+        }).join('') + '</div>';
+      }
+      main.innerHTML = html;
+      if (running) S.wfTimer = setTimeout(function () { if (S.alive && S.sel && S.sel.kind === 'wf' && S.sel.runId === runId) openWorkflowAgent(runId, stepIndex); }, 5000);
+    }).catch(function (e) { main.innerHTML = '<p class="ag-msgline err" role="alert">' + agEsc(e.message) + '</p>'; });
+  }
+
+  // ---------------------------------------------------------------- 진입·이탈
+  global.agentsOpen = function (mountEl) {
+    if (!mountEl) return;
+    stopPolling();
+    S.mount = mountEl; S.alive = true; S.sel = null; S.list = null;
+    shell();
+    loadList();
+  };
+  global.agentsLeave = function () {
+    S.alive = false;
+    stopPolling();
+  };
+})(typeof window !== 'undefined' ? window : globalThis);

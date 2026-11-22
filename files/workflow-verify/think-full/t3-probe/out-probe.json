@@ -1,0 +1,5 @@
+{
+  "note": "people-os-t3-probe, compatibility_date 2025-07-18, 2026-11-20 13:30 KST",
+  "flags_nodejs_compat_only": {"version": "943d1874-bb29-4313-9b53-c3bd99495265", "result": {"facets":"object","exports":"undefined","exportKeys":null,"childError":"Error: subAgent() is not supported in this runtime — `ctx.facets` / `ctx.exports` are unavailable. Update to the latest `compatibility_date` in your wrangler.jsonc."}},
+  "flags_nodejs_compat_plus_enable_ctx_exports": {"version": "e144af5b-712a-4ca3-a5c6-1b6cec840b39", "result": {"facets":"object","exports":"object","exportKeys":["default","ProbeChild","ProbeParent"],"child":"child ok, rows=2"}}
+}

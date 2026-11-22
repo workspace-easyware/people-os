@@ -1,0 +1,11 @@
+{
+  "name": "people-os-pptx-edit-pilot",
+  "private": true,
+  "type": "module",
+  "description": "Isolated pilot: ooxml-core / pptx-viewer-core PPTX editing (not part of People OS build)",
+  "dependencies": {
+    "ooxml-core": "^2.0.0",
+    "pptx-viewer-core": "^5.0.0",
+    "pptxgenjs": "^4.0.1"
+  }
+}

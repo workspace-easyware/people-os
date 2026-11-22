@@ -1,0 +1,10 @@
+{
+  "_note": "wrangler tail people-os-xlsx-pilot --format json, 2026-11-21. Version 21e88276-6d28-468f-a071-254892ea61b4. Raw tail went to the session's /tmp task output (copying it out needs approval), so these are the fields copied from it. All exceptions arrays were empty.",
+  "events": [
+    { "route": "POST /selftest (test-book.xlsx 5,113 B, 9 ops + full verification)", "cpuTime": 156, "wallTime": 161, "outcome": "ok" },
+    { "route": "POST /selftest?out=xlsx (same, returns bytes)", "cpuTime": 190, "wallTime": 194, "outcome": "ok" },
+    { "route": "POST /edit (1 cell op, test-book.xlsx)", "cpuTime": 90, "wallTime": 96, "outcome": "ok" },
+    { "route": "POST /limits (12 error/limit cases)", "cpuTime": 521, "wallTime": 535, "outcome": "ok" },
+    { "route": "POST /edit (big-10k.xlsx 507,974 B, 100,003 cells; cell + row + formula ops)", "cpuTime": 3975, "wallTime": 4238, "outcome": "ok" }
+  ]
+}

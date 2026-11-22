@@ -91,6 +91,7 @@
 .cal-pair input[type=date]{flex:1 1 auto;min-width:0}
 .cal-pair select{flex:0 0 84px;width:84px}
 .cal-tz{margin:-6px 0 0}
+.cal-warn-inline{color:var(--color-warn);font-weight:600}
 .cal-warn{margin:0;background:var(--color-warn-bg);border:1px solid var(--color-warn-line);color:var(--color-warn);border-radius:var(--radius-sm);padding:8px 12px;font-size:var(--text-sm)}
 
 @media (max-width:720px){

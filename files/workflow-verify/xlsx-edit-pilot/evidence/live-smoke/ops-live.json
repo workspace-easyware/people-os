@@ -1,0 +1,11 @@
+{"source":"doc:doc_mwpx6gwg_web6lu","title":"XLSX 라이브 스모크 (편집본)","ops":[
+{"op":"cell","sheet":"요약","cell":"B4","value":25},
+{"op":"formula","sheet":"요약","cell":"B6","formula":"SUM(B4:B5)","result":55},
+{"op":"formula","sheet":"요약","cell":"B7","formula":"=MAX(B4:B5)","result":30},
+{"op":"cell","sheet":"요약","cell":"A7","value":"최대"},
+{"op":"row","sheet":"데이터","values":["정코치","커리어",4]},
+{"op":"formula","sheet":"요약","cell":"B8","formula":"SUM(데이터!C2:C6)","result":30},
+{"op":"sheet","name":"메모"},
+{"op":"cell","sheet":"메모","cell":"A1","value":"라이브 편집됨"},
+{"op":"formula","sheet":"메모","cell":"B1","formula":"요약!B6","result":55}
+]}

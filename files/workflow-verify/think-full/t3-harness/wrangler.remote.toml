@@ -1,0 +1,51 @@
+# Think T3 원격 시험 Worker (2026-11-20).
+#  (1) /h/real: 실제 Qwen(부모·조사 자식) + 실제 ask-pipeline으로 조사 위임 시험 (로컬 dev는 Workers AI·Vectorize를 못 쓴다).
+#  (2) /h/live-run: 라이브 think 비교용 run 1개 생성 — 운영 큐에 **생산자로만** 붙는다 (소비자 없음 → 운영 Worker가 처리).
+# 배포: cf-wrangler.py deploy --config files/workflow-verify/think-full/t3-harness/wrangler.remote.toml
+# 주의: ask_rag가 운영 D1·R2에 질문 트레이스를 남긴다 (sessionId 접두어 wf_asst_u_t3r / wf_research_u_t3r). 시험 뒤 이 Worker는 지운다.
+# 시험 창 OPEN_UNTIL(ms) 이후에는 403. /h/session(세션 발급)은 원격에서 막혀 있다.
+name = "people-os-t3-harness"
+main = "harness.ts"
+compatibility_date = "2025-07-18"
+compatibility_flags = ["nodejs_compat", "enable_ctx_exports"]
+workers_dev = true
+
+[ai]
+binding = "AI"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "people-os-db"
+database_id = "5dff997a-fe7b-4f27-9624-1c88e40857c1"
+
+[[kv_namespaces]]
+binding = "CACHE"
+id = "de4c7ddf4c76495381ba82c56fb23dbb"
+
+[[r2_buckets]]
+binding = "FILES"
+bucket_name = "people-os-files"
+
+[[vectorize]]
+binding = "VECTOR"
+index_name = "people-os-index-m3"
+
+[[durable_objects.bindings]]
+name = "ASSISTANT_AGENT"
+class_name = "HarnessAssistantAgent"
+
+[[durable_objects.bindings]]
+name = "AGENT_SESSION"
+class_name = "AgentSession"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["HarnessAssistantAgent", "AgentSession"]
+
+[[queues.producers]]
+binding = "PIPELINE"
+queue = "people-os-pipeline"
+
+[vars]
+OPEN_UNTIL = "1795186800000" # 11-21 00:00 KST
+LIVE_WF = "wf_mwo6tt5c_lfyb1p"

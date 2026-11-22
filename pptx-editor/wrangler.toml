@@ -1,0 +1,19 @@
+# People OS 문서 편집 Worker (PPTX 2026-11-21 + XLSX 2026-11-21, 파일럿 PILOT-RESULT.md 통합 개요 1번).
+# 2026-11-22: people-os-pptx-editor → people-os-doc-editor로 개명 (XLSX도 맡게 되어). 폴더명 pptx-editor/는 그대로 둔다.
+# People OS 본체(people-os)가 서비스 바인딩 DOC_EDITOR로 RPC(WorkerEntrypoint)만 부른다. 바깥 HTTP는 상태 확인용 GET / 하나뿐이다.
+# 배포: ~/workspace/custom-connectors/custom.cloudflare/bin/cf-wrangler.py deploy --config <이 파일의 절대 경로>
+# 버전 고정: pptx-viewer-core 5.0.0 / ooxml-core 2.0.0 (package.json, 단일 저자 라이브러리라 API 파손 대비).
+name = "people-os-doc-editor"
+main = "src/index.js"
+compatibility_date = "2025-07-18"
+compatibility_flags = ["nodejs_compat"]
+# 바깥 주소는 필요 없다 (People OS가 서비스 바인딩으로만 부른다).
+workers_dev = false
+
+# XLSX(2026-11-21, src/xlsx.js, xlvane 1.3.4 고정)도 이 Worker가 맡는다. 상한을 낮추려면 [vars] XLSX_MAX_CELLS(기본 200000) / XLSX_MAX_SHEETS(기본 50).
+# DOCX(2026-11-22, src/docx.js, ooxml-core 2.0.0의 docx 영역)도 이 Worker가 맡는다. 상한을 낮추려면 [vars] DOCX_MAX_PARAGRAPHS(기본 5000).
+# 슬라이드 상한을 낮추려면 [vars] PPTX_MAX_SLIDES = "<60 미만>" (src/index.js useEnv — 올리지는 못한다). 기본은 설정 없음 = 60장.
+
+[observability]
+enabled = true
+head_sampling_rate = 1

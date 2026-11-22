@@ -1,0 +1,361 @@
+{
+  "compression": {
+    "originalMethods": {
+      "0": 58
+    },
+    "editedMethods": {
+      "8": 43
+    },
+    "originalUncompressedBytes": 102423,
+    "editedUncompressedBytes": 119297
+  },
+  "diffs": {
+    "ppt/slideLayouts/slideLayout1.xml": {
+      "at": 55,
+      "lenA": 687,
+      "lenB": 774,
+      "a": "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>\n\t\t<p:sldLayout xmlns:a=\"http://schemas.openxmlformats.org/drawingml/2006/main\" xmlns:r=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships\" xmlns:p=\"http://schemas.openxmlformats.org/presentationml/2006",
+      "b": "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?><p:sldLayout xmlns:a=\"http://schemas.openxmlformats.org/drawingml/2006/main\" xmlns:r=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships\" xmlns:p=\"http://schemas.openxmlformats.org/presentationml/2006/ma"
+    },
+    "ppt/slideMasters/slideMaster1.xml": {
+      "at": 55,
+      "lenA": 7814,
+      "lenB": 8806,
+      "a": "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>\r\n<p:sldMaster xmlns:a=\"http://schemas.openxmlformats.org/drawingml/2006/main\" xmlns:r=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships\" xmlns:p=\"http://schemas.openxmlformats.org/presentationml/2006/",
+      "b": "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?><p:sldMaster xmlns:a=\"http://schemas.openxmlformats.org/drawingml/2006/main\" xmlns:r=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships\" xmlns:p=\"http://schemas.openxmlformats.org/presentationml/2006/ma"
+    },
+    "ppt/viewProps.xml": {
+      "at": 1,
+      "lenA": 816,
+      "lenB": 861,
+      "a": "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>\r\n<p:viewPr xmlns:a=\"http://schemas.openxmlformats.org/drawingml/2006/main\" xmlns:r=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships\" xmlns:p=\"htt",
+      "b": "<p:viewPr xmlns:a=\"http://schemas.openxmlformats.org/drawingml/2006/main\" xmlns:r=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships\" xmlns:p=\"http://schemas.openxmlformats.org/presentationml/2006/main\">"
+    },
+    "ppt/presentation.xml": {
+      "at": 55,
+      "lenA": 3389,
+      "lenB": 3830,
+      "a": "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>\r\n<p:presentation xmlns:a=\"http://schemas.openxmlformats.org/drawingml/2006/main\" xmlns:r=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships\" xmlns:p=\"http://schemas.openxmlformats.org/presentationml/20",
+      "b": "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?><p:presentation xmlns:a=\"http://schemas.openxmlformats.org/drawingml/2006/main\" xmlns:r=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships\" xmlns:p=\"http://schemas.openxmlformats.org/presentationml/2006"
+    },
+    "docProps/app.xml": {
+      "at": 266,
+      "lenA": 1473,
+      "lenB": 1543,
+      "a": "mats.org/officeDocument/2006/docPropsVTypes\">\n\t<TotalTime>0</TotalTime>\n\t<Words>0</Words>\n\t<Application>Microsoft Office PowerPoint</Application>\n\t<PresentationFormat>On-screen Show (16:9)</PresentationFormat>\n\t<Paragraphs>0</Paragraphs>\n\t<Slides>5</Slides>\n\t<Notes>5</Notes>\n\t<HiddenSlides>0</Hidden",
+      "b": "mats.org/officeDocument/2006/docPropsVTypes\">\n\t<TotalTime>0</TotalTime>\n\t<Words>62</Words>\n\t<Application>Microsoft Office PowerPoint</Application>\n\t<PresentationFormat>On-screen Show (16:9)</PresentationFormat>\n\t<Paragraphs>38</Paragraphs>\n\t<Slides>6</Slides>\n\t<Notes>6</Notes>\n\t<HiddenSlides>0</Hidd"
+    },
+    "[Content_Types].xml": {
+      "at": 55,
+      "lenA": 4280,
+      "lenB": 4920,
+      "a": "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>\r\n<Types xmlns=\"http://schemas.openxmlformats.org/package/2006/content-types\"><Default Extension=\"xml\" ContentType=\"application/xml\"/><Default Extension=\"rels\" ContentType=\"application/vnd.openxmlformats-package.relation",
+      "b": "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?><Types xmlns=\"http://schemas.openxmlformats.org/package/2006/content-types\"><Default Extension=\"xml\" ContentType=\"application/xml\"></Default><Default Extension=\"rels\" ContentType=\"application/vnd.openxmlformats-package.r"
+    },
+    "ppt/slides/slide2.xml": {
+      "at": 55,
+      "lenA": 2306,
+      "lenB": 2607,
+      "a": "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>\r\n<p:sld xmlns:a=\"http://schemas.openxmlformats.org/drawingml/2006/main\" xmlns:r=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships\" xmlns:p=\"http://schemas.openxmlformats.org/presentationml/2006/main\">",
+      "b": "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?><p:sld xmlns:a=\"http://schemas.openxmlformats.org/drawingml/2006/main\" xmlns:r=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships\" xmlns:p=\"http://schemas.openxmlformats.org/presentationml/2006/main\"><p"
+    },
+    "ppt/slides/slide3.xml": {
+      "at": 55,
+      "lenA": 17464,
+      "lenB": 19207,
+      "a": "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>\r\n<p:sld xmlns:a=\"http://schemas.openxmlformats.org/drawingml/2006/main\" xmlns:r=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships\" xmlns:p=\"http://schemas.openxmlformats.org/presentationml/2006/main\">",
+      "b": "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?><p:sld xmlns:a=\"http://schemas.openxmlformats.org/drawingml/2006/main\" xmlns:r=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships\" xmlns:p=\"http://schemas.openxmlformats.org/presentationml/2006/main\"><p"
+    }
+  },
+  "chart": {
+    "chartParts": [
+      "ppt/charts/chart1.xml"
+    ],
+    "embeddings": [
+      "ppt/embeddings/Microsoft_Excel_Worksheet1.xlsx"
+    ],
+    "ppt/embeddings/Microsoft_Excel_Worksheet1.xlsx": {
+      "sheetHas50_60_70_80": true,
+      "sheetHas11_22": true,
+      "sheetSnippet": "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?><worksheet xmlns=\"http://schemas.openxmlformats.org/spreadsheetml/2006/main\" xmlns:r=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships\" xmlns:mc=\"http://schemas.openxmlformats.org/markup-compatibility/2006\" mc:Ignorable=\"x14ac\" xmlns:x14ac=\"http://schemas.microsoft.com/office/spreadsheetml/2009/9/ac\"><dimension ref=\"A1:C5\"/><sheetViews><sheetView tabSelected=\"1\" workbookViewId=\"0\"><selection activeCell=\"B1\" sqref=\"B1\"/></sheetView></sheetViews><sheetFormatPr baseColWidth=\"10\" defaultRowHeight=\"16\"/><sheetData><row r=\"1\" ",
+      "sharedStringsSnippet": "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?><sst xmlns=\"http://schemas.openxmlformats.org/spreadsheetml/2006/main\" count=\"7\" uniqueCount=\"7\"><si><t xml:space=\"preserve\"></t></si><si><t>2025</t></si><si><t>2026</t></si><si><t>1분기</t></si><si><t>2분기</t></si><si><t>3분기</t></si><si><t>4분기</t>"
+    },
+    "ppt/charts/chart1.xml": {
+      "cacheHas50": true,
+      "titleEdited": true,
+      "hasExternalData": true
+    }
+  },
+  "validateOriginal": {
+    "valid": false,
+    "issues": [
+      {
+        "severity": "warning",
+        "code": "CONTENT_TYPE_MISSING_PART",
+        "message": "Content type override references \"/ppt/slideMasters/slideMaster2.xml\" which does not exist in the archive",
+        "path": "[Content_Types].xml"
+      },
+      {
+        "severity": "warning",
+        "code": "CONTENT_TYPE_MISSING_PART",
+        "message": "Content type override references \"/ppt/slideMasters/slideMaster3.xml\" which does not exist in the archive",
+        "path": "[Content_Types].xml"
+      },
+      {
+        "severity": "warning",
+        "code": "CONTENT_TYPE_MISSING_PART",
+        "message": "Content type override references \"/ppt/slideMasters/slideMaster4.xml\" which does not exist in the archive",
+        "path": "[Content_Types].xml"
+      },
+      {
+        "severity": "warning",
+        "code": "CONTENT_TYPE_MISSING_PART",
+        "message": "Content type override references \"/ppt/slideMasters/slideMaster5.xml\" which does not exist in the archive",
+        "path": "[Content_Types].xml"
+      },
+      {
+        "severity": "error",
+        "code": "INVALID_CONTENT_ORDER",
+        "message": "<p:presentation> child <notesMasterIdLst> is out of ECMA-376 sequence order",
+        "path": "ppt/presentation.xml"
+      }
+    ],
+    "conformance": {
+      "level": "rule-checked",
+      "dialect": "transitional",
+      "description": "Package, namespace, MCE, and selected ECMA-376 content-model/simple-type rules checked; this is not exhaustive XSD validation."
+    }
+  },
+  "signature": {
+    "input": [
+      "_xmlsignatures/origin.sigs",
+      "_xmlsignatures/sig1.xml",
+      "_xmlsignatures/_rels/origin.sigs.rels"
+    ],
+    "afterSaveNoEdit": [],
+    "afterSaveWithEdit": [],
+    "rootRelsAfterEditHasSig": false
+  },
+  "smartArt": {
+    "created": true,
+    "diagramParts": [
+      "ppt/diagrams/data1.xml",
+      "ppt/diagrams/layout1.xml",
+      "ppt/diagrams/quickStyle1.xml",
+      "ppt/diagrams/colors1.xml",
+      "ppt/diagrams/drawing1.xml"
+    ],
+    "nodesAfterReload": [
+      "계획",
+      "실행",
+      "회고"
+    ],
+    "nodesAfterEditReload": [
+      "계획",
+      "실행(수정)",
+      "회고"
+    ],
+    "validate": [
+      {
+        "severity": "warning",
+        "code": "CONTENT_TYPE_MISSING_PART",
+        "message": "Content type override references \"/ppt/slideMasters/slideMaster2.xml\" which does not exist in the archive",
+        "path": "[Content_Types].xml"
+      },
+      {
+        "severity": "warning",
+        "code": "CONTENT_TYPE_MISSING_PART",
+        "message": "Content type override references \"/ppt/slideMasters/slideMaster3.xml\" which does not exist in the archive",
+        "path": "[Content_Types].xml"
+      },
+      {
+        "severity": "warning",
+        "code": "CONTENT_TYPE_MISSING_PART",
+        "message": "Content type override references \"/ppt/slideMasters/slideMaster4.xml\" which does not exist in the archive",
+        "path": "[Content_Types].xml"
+      },
+      {
+        "severity": "warning",
+        "code": "CONTENT_TYPE_MISSING_PART",
+        "message": "Content type override references \"/ppt/slideMasters/slideMaster5.xml\" which does not exist in the archive",
+        "path": "[Content_Types].xml"
+      }
+    ],
+    "dataXmlHasEdit": true,
+    "drawingXmlHasEdit": false
+  },
+  "perShape": {
+    "ppt/slides/slide1.xml": [
+      {
+        "i": 0,
+        "identical": false,
+        "lenA": 407,
+        "lenB": 466,
+        "d": {
+          "at": 67,
+          "lenA": 407,
+          "lenB": 466,
+          "a": "<p:sp><p:nvSpPr><p:cNvPr id=\"2\" name=\"Shape 0\"></p:cNvPr><p:cNvSpPr/><p:nvPr></p:nvPr></p:nvSpPr><p:spPr><a:xfrm><a:off x=\"548640\" y=\"502920\"/><a:ext cx=\"822960\" cy=\"73152\"/></a:xfrm><a:prstGeom prst=\"rect\"><a:avLst></a:avLst></a:prstGeom><a:solidFill><a:srgbClr val=\"2D7DDE\"/></a:solidF",
+          "b": "<p:sp><p:nvSpPr><p:cNvPr id=\"2\" name=\"Shape 0\"></p:cNvPr><p:cNvSpPr></p:cNvSpPr><p:nvPr></p:nvPr></p:nvSpPr><p:spPr><a:xfrm><a:off x=\"548640\" y=\"502920\"></a:off><a:ext cx=\"822960\" cy=\"73152\"></a:ext></a:xfrm><a:prstGeom prst=\"rect\"><a:avLst></a:avLst></a:prstGeom><a:solidFill><a:srgbClr"
+        }
+      },
+      {
+        "i": 1,
+        "identical": false,
+        "lenA": 818,
+        "lenB": 921,
+        "d": {
+          "at": 66,
+          "lenA": 818,
+          "lenB": 921,
+          "a": "<p:sp><p:nvSpPr><p:cNvPr id=\"3\" name=\"Text 1\"></p:cNvPr><p:cNvSpPr/><p:nvPr></p:nvPr></p:nvSpPr><p:spPr><a:xfrm><a:off x=\"548640\" y=\"1828800\"/><a:ext cx=\"10058400\" cy=\"1097280\"/></a:xfrm><a:prstGeom prst=\"rect\"><a:avLst></a:avLst></a:prstGeom><a:noFill/><a:ln></a:ln></p:spPr><p:txBody>",
+          "b": "<p:sp><p:nvSpPr><p:cNvPr id=\"3\" name=\"Text 1\"></p:cNvPr><p:cNvSpPr></p:cNvSpPr><p:nvPr></p:nvPr></p:nvSpPr><p:spPr><a:xfrm><a:off x=\"548640\" y=\"1828800\"></a:off><a:ext cx=\"10058400\" cy=\"1097280\"></a:ext></a:xfrm><a:prstGeom prst=\"rect\"><a:avLst></a:avLst></a:prstGeom><a:noFill></a:noFi"
+        }
+      },
+      {
+        "i": 2,
+        "identical": false,
+        "lenA": 617,
+        "lenB": 706,
+        "d": {
+          "at": 66,
+          "lenA": 617,
+          "lenB": 706,
+          "a": "<p:sp><p:nvSpPr><p:cNvPr id=\"4\" name=\"Text 2\"></p:cNvPr><p:cNvSpPr/><p:nvPr></p:nvPr></p:nvSpPr><p:spPr><a:xfrm><a:off x=\"548640\" y=\"3017520\"/><a:ext cx=\"10058400\" cy=\"548640\"/></a:xfrm><a:prstGeom prst=\"rect\"><a:avLst></a:avLst></a:prstGeom><a:noFill/><a:ln></a:ln></p:spPr><p:txBody><",
+          "b": "<p:sp><p:nvSpPr><p:cNvPr id=\"4\" name=\"Text 2\"></p:cNvPr><p:cNvSpPr></p:cNvSpPr><p:nvPr></p:nvPr></p:nvSpPr><p:spPr><a:xfrm><a:off x=\"548640\" y=\"3017520\"></a:off><a:ext cx=\"10058400\" cy=\"548640\"></a:ext></a:xfrm><a:prstGeom prst=\"rect\"><a:avLst></a:avLst></a:prstGeom><a:noFill></a:noFil"
+        }
+      }
+    ],
+    "ppt/slides/slide2.xml": [
+      {
+        "i": 0,
+        "identical": false,
+        "lenA": 614,
+        "lenB": 696,
+        "d": {
+          "at": 66,
+          "lenA": 614,
+          "lenB": 696,
+          "a": "<p:sp><p:nvSpPr><p:cNvPr id=\"2\" name=\"Text 0\"></p:cNvPr><p:cNvSpPr/><p:nvPr></p:nvPr></p:nvSpPr><p:spPr><a:xfrm><a:off x=\"548640\" y=\"365760\"/><a:ext cx=\"10058400\" cy=\"731520\"/></a:xfrm><a:prstGeom prst=\"rect\"><a:avLst></a:avLst></a:prstGeom><a:noFill/><a:ln></a:ln></p:spPr><p:txBody><a",
+          "b": "<p:sp><p:nvSpPr><p:cNvPr id=\"2\" name=\"Text 0\"></p:cNvPr><p:cNvSpPr></p:cNvSpPr><p:nvPr></p:nvPr></p:nvSpPr><p:spPr><a:xfrm><a:off x=\"548640\" y=\"365760\"></a:off><a:ext cx=\"10058400\" cy=\"731520\"></a:ext></a:xfrm><a:prstGeom prst=\"rect\"><a:avLst></a:avLst></a:prstGeom><a:noFill></a:noFill"
+        }
+      },
+      {
+        "i": 1,
+        "identical": false,
+        "lenA": 411,
+        "lenB": 471,
+        "d": {
+          "at": 67,
+          "lenA": 411,
+          "lenB": 471,
+          "a": "<p:sp><p:nvSpPr><p:cNvPr id=\"3\" name=\"Shape 1\"></p:cNvPr><p:cNvSpPr/><p:nvPr></p:nvPr></p:nvSpPr><p:spPr><a:xfrm><a:off x=\"914400\" y=\"1645920\"/><a:ext cx=\"2743200\" cy=\"1828800\"/></a:xfrm><a:prstGeom prst=\"rect\"><a:avLst></a:avLst></a:prstGeom><a:solidFill><a:srgbClr val=\"2D7DDE\"/></a:so",
+          "b": "<p:sp><p:nvSpPr><p:cNvPr id=\"3\" name=\"Shape 1\"></p:cNvPr><p:cNvSpPr></p:cNvSpPr><p:nvPr></p:nvPr></p:nvSpPr><p:spPr><a:xfrm><a:off x=\"1866900\" y=\"2028825\"></a:off><a:ext cx=\"4114800\" cy=\"2286000\"></a:ext></a:xfrm><a:prstGeom prst=\"rect\"><a:avLst></a:avLst></a:prstGeom><a:solidFill><a:sr"
+        }
+      },
+      {
+        "i": 2,
+        "identical": false,
+        "lenA": 328,
+        "lenB": 364,
+        "d": {
+          "at": 67,
+          "lenA": 328,
+          "lenB": 364,
+          "a": "<p:sp><p:nvSpPr><p:cNvPr id=\"4\" name=\"Shape 2\"></p:cNvPr><p:cNvSpPr/><p:nvPr></p:nvPr></p:nvSpPr><p:spPr><a:xfrm><a:off x=\"4572000\" y=\"1645920\"/><a:ext cx=\"2286000\" cy=\"2286000\"/></a:xfrm><a:prstGeom prst=\"ellipse\"><a:avLst></a:avLst></a:prstGeom><a:solidFill><a:srgbClr val=\"10B981\"/></",
+          "b": "<p:sp><p:nvSpPr><p:cNvPr id=\"4\" name=\"Shape 2\"></p:cNvPr><p:cNvSpPr></p:cNvSpPr><p:nvPr></p:nvPr></p:nvSpPr><p:spPr><a:xfrm><a:off x=\"4572000\" y=\"1645920\"></a:off><a:ext cx=\"2286000\" cy=\"2286000\"></a:ext></a:xfrm><a:prstGeom prst=\"ellipse\"><a:avLst></a:avLst></a:prstGeom><a:solidFill><a"
+        }
+      },
+      {
+        "i": 3,
+        "identical": false,
+        "lenA": 365,
+        "lenB": 407,
+        "d": {
+          "at": 67,
+          "lenA": 365,
+          "lenB": 407,
+          "a": "<p:sp><p:nvSpPr><p:cNvPr id=\"5\" name=\"Shape 3\"></p:cNvPr><p:cNvSpPr/><p:nvPr></p:nvPr></p:nvSpPr><p:spPr><a:xfrm><a:off x=\"7772400\" y=\"1645920\"/><a:ext cx=\"2743200\" cy=\"1828800\"/></a:xfrm><a:prstGeom prst=\"roundRect\"><a:avLst><a:gd name=\"adj\" fmla=\"val 10000\"/></a:avLst></a:prstGeom><a:",
+          "b": "<p:sp><p:nvSpPr><p:cNvPr id=\"5\" name=\"Shape 3\"></p:cNvPr><p:cNvSpPr></p:cNvSpPr><p:nvPr></p:nvPr></p:nvSpPr><p:spPr><a:xfrm><a:off x=\"7772400\" y=\"1645920\"></a:off><a:ext cx=\"2743200\" cy=\"1828800\"></a:ext></a:xfrm><a:prstGeom prst=\"roundRect\"><a:avLst><a:gd name=\"adj\" fmla=\"val 10000\"></"
+        }
+      }
+    ],
+    "ppt/slides/slide3.xml": [
+      {
+        "i": 0,
+        "identical": false,
+        "lenA": 613,
+        "lenB": 695,
+        "d": {
+          "at": 66,
+          "lenA": 613,
+          "lenB": 695,
+          "a": "<p:sp><p:nvSpPr><p:cNvPr id=\"2\" name=\"Text 0\"></p:cNvPr><p:cNvSpPr/><p:nvPr></p:nvPr></p:nvSpPr><p:spPr><a:xfrm><a:off x=\"548640\" y=\"365760\"/><a:ext cx=\"10058400\" cy=\"731520\"/></a:xfrm><a:prstGeom prst=\"rect\"><a:avLst></a:avLst></a:prstGeom><a:noFill/><a:ln></a:ln></p:spPr><p:txBody><a",
+          "b": "<p:sp><p:nvSpPr><p:cNvPr id=\"2\" name=\"Text 0\"></p:cNvPr><p:cNvSpPr></p:cNvSpPr><p:nvPr></p:nvPr></p:nvSpPr><p:spPr><a:xfrm><a:off x=\"548640\" y=\"365760\"></a:off><a:ext cx=\"10058400\" cy=\"731520\"></a:ext></a:xfrm><a:prstGeom prst=\"rect\"><a:avLst></a:avLst></a:prstGeom><a:noFill></a:noFill"
+        }
+      },
+      {
+        "i": 1,
+        "identical": false,
+        "lenA": 16263,
+        "lenB": 17843,
+        "d": {
+          "at": 66,
+          "lenA": 16263,
+          "lenB": 17843,
+          "a": "<p:graphicFrame><p:nvGraphicFramePr><p:cNvPr id=\"4\" name=\"Table 0\"/><p:cNvGraphicFramePr><a:graphicFrameLocks noGrp=\"1\"/></p:cNvGraphicFramePr>  <p:nvPr><p:extLst><p:ext uri=\"{D42A27DB-BD31-4B8C-83A1-F6EECF244321}\"><p14:modId xmlns:p14=\"http://schemas.microsoft.com/office/powerpoint/20",
+          "b": "<p:graphicFrame><p:nvGraphicFramePr><p:cNvPr id=\"4\" name=\"Table 0\"></p:cNvPr><p:cNvGraphicFramePr><a:graphicFrameLocks noGrp=\"1\"></a:graphicFrameLocks></p:cNvGraphicFramePr><p:nvPr><p:extLst><p:ext uri=\"{D42A27DB-BD31-4B8C-83A1-F6EECF244321}\"><p14:modId xmlns:p14=\"http://schemas.micros"
+        }
+      }
+    ],
+    "ppt/slides/slide4.xml": [
+      {
+        "i": 0,
+        "identical": false,
+        "lenA": 614,
+        "lenB": 696,
+        "d": {
+          "at": 66,
+          "lenA": 614,
+          "lenB": 696,
+          "a": "<p:sp><p:nvSpPr><p:cNvPr id=\"2\" name=\"Text 0\"></p:cNvPr><p:cNvSpPr/><p:nvPr></p:nvPr></p:nvSpPr><p:spPr><a:xfrm><a:off x=\"548640\" y=\"365760\"/><a:ext cx=\"10058400\" cy=\"731520\"/></a:xfrm><a:prstGeom prst=\"rect\"><a:avLst></a:avLst></a:prstGeom><a:noFill/><a:ln></a:ln></p:spPr><p:txBody><a",
+          "b": "<p:sp><p:nvSpPr><p:cNvPr id=\"2\" name=\"Text 0\"></p:cNvPr><p:cNvSpPr></p:cNvSpPr><p:nvPr></p:nvPr></p:nvSpPr><p:spPr><a:xfrm><a:off x=\"548640\" y=\"365760\"></a:off><a:ext cx=\"10058400\" cy=\"731520\"></a:ext></a:xfrm><a:prstGeom prst=\"rect\"><a:avLst></a:avLst></a:prstGeom><a:noFill></a:noFill"
+        }
+      },
+      {
+        "i": 1,
+        "identical": false,
+        "lenA": 524,
+        "lenB": 556,
+        "d": {
+          "at": 16,
+          "lenA": 524,
+          "lenB": 556,
+          "a": "<p:graphicFrame> <p:nvGraphicFramePr>   <p:cNvPr id=\"3\" name=\"Chart 0\" descr=\"\"/>   <p:cNvGraphicFramePr/>   <p:nvPr></p:nvPr> </p:nvGraphicFramePr> <p:xfrm><a:off x=\"731520\" y=\"1280160\"/><a:ext cx=\"10058400\" cy=\"5029200\"/></p:xfrm> <a:",
+          "b": "<p:graphicFrame><p:nvGraphicFramePr><p:cNvPr id=\"3\" name=\"Chart 0\" descr=\"\"></p:cNvPr><p:cNvGraphicFramePr></p:cNvGraphicFramePr><p:nvPr></p:nvPr></p:nvGraphicFramePr><p:xfrm><a:off x=\"731520\" y=\"1280160\"></a:off><a:ext cx=\"10058400\" cy"
+        }
+      }
+    ]
+  },
+  "masterAfterWhitespaceNormalize": {
+    "at": 278,
+    "lenA": 7711,
+    "lenB": 8751,
+    "a": "presentationml/2006/main\"><p:cSld><p:spTree><p:nvGrpSpPr><p:cNvPr id=\"1\" name=\"\"/><p:cNvGrpSpPr/><p:nvPr/></p:nvGrpSpPr><p:grpSpPr><a:xfrm><a:off x=\"0\" y=\"0\"/><a:ext cx=\"0\" cy=\"0\"/><a:chOff x=\"0\" y=\"0\"/><a:chExt cx=\"0\" cy=\"0\"/></a:xfrm></p:grpSpPr></p:spTree></p:cSld><p:clrMap bg1=\"lt1\" tx1=\"dk1\" bg",
+    "b": "presentationml/2006/main\"><p:cSld><p:spTree><p:nvGrpSpPr><p:cNvPr id=\"1\" name=\"\"></p:cNvPr><p:cNvGrpSpPr></p:cNvGrpSpPr><p:nvPr></p:nvPr></p:nvGrpSpPr><p:grpSpPr><a:xfrm><a:off x=\"0\" y=\"0\"></a:off><a:ext cx=\"0\" cy=\"0\"></a:ext><a:chOff x=\"0\" y=\"0\"></a:chOff><a:chExt cx=\"0\" cy=\"0\"></a:chExt></a:xfrm><"
+  },
+  "noEditRoundTrip": {
+    "changed": [
+      "[Content_Types].xml",
+      "docProps/app.xml",
+      "docProps/core.xml",
+      "ppt/_rels/presentation.xml.rels",
+      "ppt/presentation.xml",
+      "ppt/viewProps.xml",
+      "ppt/slideLayouts/slideLayout1.xml",
+      "ppt/slideMasters/slideMaster1.xml"
+    ],
+    "removed": [],
+    "added": []
+  }
+}

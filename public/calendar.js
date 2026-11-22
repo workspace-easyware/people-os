@@ -367,6 +367,20 @@ function calRemindLabel(ev) {
   return hit ? hit[1] : ev.remind_minutes + '분 전';
 }
 
+/** C6: "구글에도 저장" 상태 문구 (소유자에게만 값이 온다). 저장 안 하는 일정은 빈 문자열 → 줄을 그리지 않는다. */
+function calGoogleSyncLabel(ev) {
+  if (!ev.google_sync) return '';
+  if (ev.google_status === 'synced') return '내 구글 캘린더에도 저장됨';
+  if (ev.google_status === 'failed') {
+    const why = ev.google_error === 'needs_reconnect' || ev.google_error === 'not_connected' ? '구글을 다시 연결해 주세요'
+      : ev.google_error === 'no_write_scope' ? '구글 쓰기 권한 동의가 필요합니다' : '자동으로 다시 시도합니다';
+    return `<span class="cal-warn-inline">구글 반영 실패</span> <span class="small muted">(${esc(why)})</span>`;
+  }
+  return '구글에 반영하는 중…';
+}
+/** C6: 지금 "구글에도 저장"을 켤 수 있는가 (연결됨 + 쓰기 권한 동의). */
+function calGoogleCanWrite() { return !!(calGStatus && calGStatus.status === 'connected' && calGStatus.can_write); }
+
 // ---------- 상세 ----------
 function calShowDetail(ev) {
   const isMine = currentUser && ev.owner_id === currentUser.id;
@@ -381,6 +395,7 @@ function calShowDetail(ev) {
     row('장소', ev.location ? esc(ev.location) : '') +
     row('메모', ev.description ? `<div class="cal-pre">${esc(ev.description)}</div>` : '') +
     row('알림', esc(calRemindLabel(ev))) +
+    row('구글 캘린더', calGoogleSyncLabel(ev)) +
     (team && !isMine ? row('작성자', esc(ev.owner_name || '알 수 없음')) : '') +
     '</dl>' +
     '<div class="cal-modal-btns">' +
@@ -443,6 +458,9 @@ function calShowForm(ev, pre) {
     const e = calShift(pre.date, st, 60);
     v = { title: '', all_day: !!pre.allDay, sd: pre.date, st, ed: pre.allDay ? pre.date : e.date, et: e.time, visibility: 'private', category: 'general', location: '', description: '', remind: null };
   }
+  v.gsync = !!(ev && ev.google_sync);
+  // 구글 저장 칸: 내 일정이고, 구글이 연결돼 있거나(동의 안내 포함) 이미 저장 중일 때 보인다.
+  const gShow = own && (v.gsync || !!(calGStatus && calGStatus.status === 'connected'));
   const html =
     `<h2 id="calFormTitle" class="cal-detail-title">${isNew ? '일정 추가' : '일정 수정'}</h2>` +
     '<form id="calForm" class="cal-form" novalidate>' +
@@ -460,6 +478,10 @@ function calShowForm(ev, pre) {
     `<label>장소 (선택)<input id="calFLoc" type="text" maxlength="200" value="${escAttr(v.location)}" /></label>` +
     `<label>메모 (선택)<textarea id="calFDesc" rows="3" maxlength="2000">${esc(v.description)}</textarea></label>` +
     `<label>알림<select id="calFRemind">${calRemindOpts(v.all_day, v.remind)}</select></label>` +
+    '<p class="small muted cal-tz">알림은 15분 간격으로 확인해 보냅니다 (종 아이콘 + 개인 일정은 메일).</p>' +
+    // C6: 구글 연결이 있을 때만 보인다. 개인 일정 + 쓰기 권한 동의가 있어야 켤 수 있다.
+    (gShow ? `<label class="cal-check"><input id="calFGSync" type="checkbox"${v.gsync ? ' checked' : ''} /> 구글 캘린더에도 저장</label>` +
+      '<p class="small muted cal-tz" id="calFGNote"></p>' : '') +
     '<div class="cal-msg err" id="calFErr" role="alert" hidden></div>' +
     '<div class="cal-modal-btns"><button type="submit" class="primary" id="calFSave">저장</button>' +
     '<button type="button" class="secondary" data-act="cancel">취소</button>' +
@@ -472,7 +494,19 @@ function calShowForm(ev, pre) {
     const cur = g('calFRemind').value;
     g('calFRemind').innerHTML = calRemindOpts(ad, cur === '' ? null : Number(cur));
   };
-  const syncTeam = () => { g('calFTeamNote').hidden = g('calFVis').value !== 'team'; };
+  const syncTeam = () => {
+    const team = g('calFVis').value === 'team';
+    g('calFTeamNote').hidden = !team;
+    const gs = g('calFGSync');
+    if (!gs) return;
+    // 팀 일정은 구글에 쓰지 않는다. 쓰기 권한 동의가 없으면 새로 켤 수 없다 (이미 켜진 것을 끄는 것은 된다).
+    const can = calGoogleCanWrite();
+    if (team) gs.checked = false;
+    gs.disabled = team || (!can && !v.gsync);
+    g('calFGNote').textContent = team ? '팀 공유 일정은 구글 캘린더에 저장하지 않습니다.'
+      : !can ? '구글에 저장하려면 쓰기 권한 동의가 필요합니다 — 툴바의 구글 칩 → "구글에 저장 허용".'
+        : '켜면 내 구글 기본 캘린더에 같은 일정을 만들고, 수정·삭제도 따라갑니다. 구글에서 고치면 구글 내용이 우선합니다.';
+  };
   // 시작을 바꾸면 종료도 같은 간격으로 따라간다.
   let prevStart = Date.parse(g('calFSD').value + 'T' + g('calFST').value + ':00Z');
   const onStart = () => {
@@ -537,8 +571,11 @@ async function calSubmit(ev, own, m) {
   if (r.error) { showErr(r.error); return; }
   const body = r.body;
   if (own) body.visibility = g('calFVis').value; // 남의 팀 일정을 고치는 hr_admin은 공개 범위를 못 바꾼다 (서버도 403)
+  // C6: 구글 저장 칸이 보일 때만 값을 보낸다 (안 보이면 서버가 지금 상태를 유지한다).
+  const gs = g('calFGSync');
+  if (own && gs && (gs.checked !== !!(ev && ev.google_sync) || (!ev && gs.checked))) body.google_sync = gs.checked;
   if (body.visibility === 'team' && (!ev || ev.visibility !== 'team')) {
-    if (!confirm('이 일정은 모든 사용자의 달력에 표시됩니다. 저장할까요?')) return;
+    if (!(await uiConfirm('이 일정은 모든 사용자의 달력에 표시됩니다. 저장할까요?', { title: '팀 일정 저장', okText: '저장' }))) return;
   }
   const save = g('calFSave');
   save.disabled = true;
@@ -559,6 +596,8 @@ async function calSubmit(ev, own, m) {
   calCloseModal();
   calMsg(ev ? '일정을 저장했습니다.' : '일정을 추가했습니다.');
   calRefetch();
+  // C6: 구글 반영은 응답 뒤에 끝난다 — 잠시 뒤 한 번 더 읽어 "반영하는 중"을 "저장됨"으로 바꾼다.
+  if (j.event && j.event.google_status === 'pending') { const seq = calSeq; setTimeout(() => { if (seq === calSeq) calRefetch(); }, 4000); }
 }
 
 // ---------- 구글 연결 상태 칩 (C3, calendar-plan.md 5.5) ----------
@@ -580,6 +619,22 @@ async function calGoogleRefresh() {
   else if (!j.ok) j = { ok: true, status: 'error' };
   calGStatus = j;
   calGoogleRender();
+  calGoogleSyncLinks();
+}
+
+// C6: 구글에 저장한 내 일정을 구글과 맞춘다 (구글에서 고쳤거나 지운 것을 가져온다). 쓰기 권한이 있고 저장한 일정이 있을 때만,
+// 탭을 열 때·새로고침 버튼에서 한 번. 바뀐 것이 있으면 달력을 다시 읽는다.
+let calGSyncBusy = false;
+async function calGoogleSyncLinks() {
+  if (calGSyncBusy || !calGoogleCanWrite() || !calGStatus.linked_count) return;
+  calGSyncBusy = true;
+  const seq = calSeq;
+  let j;
+  try { j = await api('/api/calendar/google/sync', { method: 'POST', body: '{}' }); } catch { j = { ok: false }; }
+  calGSyncBusy = false;
+  if (seq !== calSeq || !j || !j.ok || !j.changed) return;
+  calMsg('구글 캘린더에서 바뀐 내용을 반영했습니다.');
+  calRefetch();
 }
 
 function calGoogleRender() {
@@ -613,19 +668,27 @@ function calGooglePanel() {
   if (s === 'unconfigured') {
     body = '<p>관리자가 Google OAuth 설정을 마쳐야 합니다. (Worker 시크릿 GOOGLE_CLIENT_ID · GOOGLE_CLIENT_SECRET · GCAL_TOKEN_KEY)</p>';
   } else if (s === 'not_connected') {
-    body = '<p>구글 <b>기본 캘린더의 일정을 읽기만</b> 합니다. 일정 내용은 People OS에 저장하지 않습니다.</p>' +
+    body = '<p>구글 <b>기본 캘린더의 일정을 읽기만</b> 합니다. 구글 일정 내용은 People OS에 저장하지 않습니다.</p>' +
+      '<p class="small muted">People OS 개인 일정을 구글에도 저장하려면 "읽기 + 구글에 저장 허용"으로 연결하세요 (일정마다 직접 켠 것만 구글에 씁니다).</p>' +
       '<p class="small muted">구글 화면에서 계정을 고르고 권한에 동의하면 이 화면으로 돌아옵니다.</p>';
-    btns = '<button type="button" class="primary" data-g="connect">구글 캘린더 연결</button>';
+    btns = '<button type="button" class="primary" data-g="connect">구글 캘린더 연결 (읽기)</button>' +
+      '<button type="button" class="secondary" data-g="connect-write">읽기 + 구글에 저장 허용</button>';
   } else if (s === 'connected') {
     body = `<dl class="cal-dl"><div class="cal-row"><dt>계정</dt><dd>${esc(j.email || '(이메일 정보 없음)')}</dd></div>` +
-      '<div class="cal-row"><dt>권한</dt><dd>캘린더 일정 읽기 전용</dd></div></dl>' +
+      `<div class="cal-row"><dt>권한</dt><dd>${j.can_write ? '일정 읽기 + People OS 개인 일정을 구글에 저장' : '캘린더 일정 읽기 전용'}</dd></div>` +
+      (j.linked_count ? `<div class="cal-row"><dt>구글에 저장 중</dt><dd>${Number(j.linked_count)}건${j.failed_count ? ` · <span class="cal-warn-inline">반영 실패 ${Number(j.failed_count)}건</span>` : ''}</dd></div>` : '') +
+      '</dl>' +
+      (j.can_write ? '' : '<p class="small muted">People OS 개인 일정을 구글 캘린더에도 저장하려면 구글에서 <b>쓰기 권한에 한 번 더 동의</b>해야 합니다. 동의해도 일정마다 "구글 캘린더에도 저장"을 켠 것만 구글에 씁니다.</p>') +
       (j.degraded ? '<p class="cal-warn">구글 일정을 불러오지 못했습니다. 내 일정과 팀 일정은 정상입니다.</p>' : '');
     btns = (j.degraded ? '<button type="button" class="primary" data-g="retry">다시 시도</button>' : '') +
+      (j.can_write ? '' : '<button type="button" class="primary" data-g="connect-write">구글에 저장 허용 (다시 동의)</button>') +
       '<button type="button" class="secondary cal-danger" data-g="disconnect">연결 해제</button>';
   } else if (s === 'needs_reconnect') {
     body = `<p class="cal-warn">구글 권한이 만료됐거나 회수됐습니다. 다시 연결해 주세요.</p>` +
-      (j.email ? `<p class="small muted">이전 계정: ${esc(j.email)}</p>` : '');
-    btns = '<button type="button" class="primary" data-g="connect">다시 연결</button>' +
+      (j.email ? `<p class="small muted">이전 계정: ${esc(j.email)}</p>` : '') +
+      (j.linked_count ? '<p class="small muted">구글에 저장하던 일정이 있습니다 — "읽기 + 구글에 저장 허용"으로 다시 연결해야 계속 반영됩니다.</p>' : '');
+    btns = '<button type="button" class="primary" data-g="connect">다시 연결 (읽기)</button>' +
+      '<button type="button" class="secondary" data-g="connect-write">읽기 + 구글에 저장 허용</button>' +
       '<button type="button" class="secondary cal-danger" data-g="disconnect">연결 해제</button>';
   } else {
     body = '<p>구글 연결 상태를 확인하지 못했습니다. 내 일정과 팀 일정은 정상입니다.</p>';
@@ -640,17 +703,20 @@ function calGooglePanel() {
   const err = (t) => { const e = m.querySelector('#calGErr'); e.textContent = t; e.hidden = false; };
   on('close', () => calCloseModal());
   on('retry', () => { calCloseModal(); calGoogleRefresh(); });
-  on('connect', async (e) => {
+  const connect = (write) => async (e) => {
     e.target.disabled = true;
     let r;
-    try { r = await api('/api/calendar/google/connect', { method: 'POST', body: '{}' }); } catch { r = { ok: false, error: '네트워크 오류' }; }
+    try { r = await api('/api/calendar/google/connect', { method: 'POST', body: JSON.stringify({ write }) }); } catch { r = { ok: false, error: '네트워크 오류' }; }
     if (!r.ok || typeof r.url !== 'string' || !r.url.startsWith(CAL_G_AUTH_PREFIX)) {
       e.target.disabled = false; err('연결을 시작하지 못했습니다. ' + (r.error || '')); return;
     }
     location.assign(r.url); // 구글 동의 화면 → /api/calendar/google/callback → /#calendar
-  });
+  };
+  // 이미 쓰기 권한이 있는 연결을 "다시 연결"하면 쓰기 권한을 유지한 채로 요청한다.
+  on('connect', connect(!!j.can_write));
+  on('connect-write', connect(true));
   on('disconnect', async (e) => {
-    if (!confirm('구글 캘린더 연결을 해제할까요? People OS의 일정은 그대로 남습니다.')) return;
+    if (!(await uiConfirm('구글 캘린더 연결을 해제할까요? People OS의 일정은 그대로 남습니다. 구글에 이미 저장된 일정은 구글에 남습니다.', { title: '구글 캘린더 연결 해제', okText: '연결 해제', danger: true }))) return;
     e.target.disabled = true;
     let r;
     try { r = await api('/api/calendar/google/disconnect', { method: 'POST', body: '{}' }); } catch { r = { ok: false, error: '네트워크 오류' }; }
@@ -662,7 +728,7 @@ function calGooglePanel() {
 }
 
 async function calDelete(ev) {
-  const ok = confirm(ev.visibility === 'team' ? `"${ev.title}" 팀 일정을 삭제할까요? 전원의 달력에서 사라집니다.` : `"${ev.title}" 일정을 삭제할까요?`);
+  const ok = await uiConfirm(ev.visibility === 'team' ? `"${ev.title}" 팀 일정을 삭제할까요? 전원의 달력에서 사라집니다.` : `"${ev.title}" 일정을 삭제할까요?`, { title: '일정 삭제', okText: '삭제', danger: true });
   if (!ok) return;
   let j;
   try { j = await api('/api/calendar/events/' + encodeURIComponent(ev.id), { method: 'DELETE' }); } catch { j = { ok: false, error: '네트워크 오류' }; }

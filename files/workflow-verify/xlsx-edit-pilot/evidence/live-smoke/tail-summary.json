@@ -1,0 +1,11 @@
+{
+  "_note": "wrangler tail (--format json), 2026-11-21 live smoke after deploy. Raw tail went to the session /tmp task output (copying out needs approval); fields copied here.",
+  "people-os-pptx-editor (84973507-d5e5-4898-873e-1c22462f5b6c)": [
+    { "rpcMethod": "inspectWorkbook", "what": "test-book 5,113 B, live inspect", "cpuTime": 53, "wallTime": 63, "outcome": "ok" },
+    { "rpcMethod": "applyWorkbookOps", "what": "9 ops (cell, formula x4, row, sheet, cell, formula) + reread + diff + parts + XML check", "cpuTime": 175, "wallTime": 183, "outcome": "ok" },
+    { "rpcMethod": "inspectWorkbook", "what": "re-inspect edited (4 sheets)", "cpuTime": 42, "wallTime": 48, "outcome": "ok" },
+    { "rpcMethod": "inspectWorkbook", "what": "planner summary for instruction edit", "cpuTime": 33, "wallTime": 42, "outcome": "ok" },
+    { "rpcMethod": "applyWorkbookOps", "what": "3 ops planned by Qwen", "cpuTime": 79, "wallTime": 83, "outcome": "ok" }
+  ],
+  "people-os (4a7af7af-f6f1-44b8-b027-f85e10bdc156)": { "events": 22, "outcome_ok": 22, "exceptions": 0, "logged": ["xlsx.edit x2", "[tree] build-tree for the uploaded original"] }
+}

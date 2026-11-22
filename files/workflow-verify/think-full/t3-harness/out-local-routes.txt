@@ -1,0 +1,48 @@
+T3 로컬 하네스 (wrangler dev --local, port 8797) — 운영 라우트 agentsApp / workflowRunsApp, 운영 createSession 쿠키. 2026-11-20 04:40~04:43Z.
+사용자 A=u_t3a, B=u_t3b (role user), 관리자=u_t3adm (role hr_admin), 엔진 시험 사용자=u_t3eng. 응답 원문 그대로 (쿠키 값은 로컬 시험용).
+
+== 항목 2: 하루 턴 상한 (시험값 dailyCap 2) ==
+POST /api/agents/asst_u_t3a/messages {"text":"연차 며칠이야?","clientId":"a1"} → 202 {"turnNo":1,"accepted":true}
+/h/wait turn 1 → completed, steps 2, llmCalls 3, exec [ask_rag]
+POST {"text":"다시 알려줘","clientId":"a2"} → 202 {"turnNo":2}
+/h/wait turn 2 → completed
+POST {"text":"세 번째","clientId":"a3"} → 429 {"ok":false,"error":"오늘 어시스턴트 사용 한도(2회)를 다 썼습니다. 내일(한국 시간 0시 이후) 다시 이용해 주세요.","code":"daily_limit"}
+POST 같은 clientId a1 재전송 → 202 {"turnNo":1,"accepted":false,"status":"completed","duplicate":true}   (재전송은 세지 않음)
+/h/config dayOffset 1 ("다음 날") → POST {"text":"다음 날 첫 메시지","clientId":"a4"} → 202 {"turnNo":3}, completed
+GET messages → "usage":{"day":"2026-11-21","used":1,"cap":2}, 메시지 6개 (out-daily-a-history.json)
+
+== 항목 3: 대화 지우기 ==
+B 턴 1 → completed ("B의 답입니다.")
+DELETE /api/agents/asst_u_t3a/messages (B 쿠키) → 404 {"error":"어시스턴트를 찾을 수 없습니다."}
+DELETE (쿠키 없음) → 401
+DELETE (A 쿠키, Origin: https://evil.example) → 403 {"error":"허용되지 않는 요청입니다."}
+DELETE (A 쿠키) → 200 {"cleared":true,"clearedThrough":3}
+GET A messages → {"messages":[],"turns":[],"usage":{"day":"2026-11-21","used":1,"cap":2}}   (사용량은 그대로)
+GET A events?after=0 → 이벤트 1개만: {"id":16,"turn":0,"ev":"cleared","data":{"clearedThrough":3}}   (커서는 지운 뒤에도 증가)
+GET B messages → 메시지 2개 그대로 ("B의 질문" / "B의 답입니다."), usage used 1/30
+A 새 턴 4 (지운 뒤) → 202, completed. GET A messages → 메시지 2개(턴 4만), turns [4], usage used 2/2
+
+== 항목 4: 관측 API (D1 assistant_turns, 0041) ==
+GET /api/obs/assistant-turns?limit=20 (hr_admin 세션) → 200, 6행: u_t3a 턴 4·3·2·1, u_t3b 턴 1, u_res1 턴 1(llm_calls 6, tools ["research"], research_runs 1)
+  예: {"user_id":"u_t3a","turn_no":1,"status":"completed","stopped_reason":null,"steps":2,"llm_calls":3,"tool_calls":1,"tools":["ask_rag"],"research_runs":0,"recoveries":0,"duration_ms":168}
+  (지운 대화의 턴 1~3도 관측에는 남는다 — 대화 내용은 없음)
+GET (일반 사용자 A) → 403 {"error":"관리자만 볼 수 있습니다."}
+GET (쿠키 없음) → 401
+
+== 항목 5: 화면 API ==
+GET /api/agents (A) → {"assistant":{"id":"asst_u_t3a","usage":{"used":2,"cap":2},"running":false,"lastTurn":{"turnNo":4,"status":"completed",...}},"workflowAgents":[]}
+GET /api/agents (u_t3eng) → workflowAgents 1개 (runtime think, status succeeded, stoppedReason llm_cap, tools 4회) — out-list-eng.json
+GET /api/agents/wf/wr_t3llm_…/26 (u_t3eng) → 200 turns 4개 (out-wf-detail.json); 같은 URL을 A 쿠키로 → 404
+승인 대기: /h/eng/approval (think agent가 create_task → send_email) → run waiting_approval, D1 workflow_agent_steps.status approval
+  GET /api/agents (u_t3eng) → {"runId":"wr_t3apr_…","runtime":"think","status":"waiting_approval","waitingApproval":true,"steps":2,"llmCalls":2,...}
+  GET /api/agents/wf/wr_t3apr_…/0 → waitingApproval true, turns [create_task 관찰, send_email "(차단) 승인이 필요한 동작입니다…"], live.pendingTool "send_email"
+  /h/eng/think-sent → {"sent":0,"exec":[{"tool":"create_task","approved":false}],"stop":"approval_required"}   (발송 0)
+정적 자산: GET /agents.js 200 22,934 B, /agents.css 200, /obs/assistant.js 200, GET / 에 data-tab="agents"·agentsMount·/agents.js·obsTab-assistant 7곳
+node --check public/agents.js, public/obs/assistant.js → 출력 없음 (문법 오류 0)
+
+== 항목 8: Think 경로 run 한도 (운영 엔진 processWorkflowStep + checkWorkflowRateLimit, AGENT_RUNTIME=think) ==
+/h/eng/rate → {"concurrent":{"ok":false,"reason":"동시 실행 상한(3개)"},"daily":{"first20":true,"call21":"no:하루 실행 상한(20회)"}}
+/h/eng/active (31분 전 시작한 think agent run) → run failed "실행 시간 상한(30분)을 넘었습니다.", 단계 행 0, workflow_agent_steps 행 없음 (DO에 제출 안 함)
+/h/eng/llm (llm 노드 26개 성공 뒤 agent) → workflow_agent_steps {runtime think, status completed, steps 4, llm_calls 4}, DO {llmBudget 4, stop llm_cap}
+  → run 합계 26 + 4 = 30에서 agent가 멈춤. 그 뒤 llm 노드 #27은 막히지 않고 실행됨 (로컬은 AI 바인딩이 없어 "Cannot read properties of undefined (reading 'run')"로 실패)
+  = T1 주의 1 남은 문제 재현: 엔진의 30회 캡은 LLM 노드 수만 세고 agent 사용량을 세지 않는다.

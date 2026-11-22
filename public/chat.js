@@ -41,7 +41,11 @@
   function clear(e) { e.textContent = ''; }
   function meId() { return typeof currentUser !== 'undefined' && currentUser ? currentUser.id : ''; }
   function isAdmin() { return typeof currentUser !== 'undefined' && !!currentUser && currentUser.role === 'hr_admin'; }
-  function ask(msg) { return typeof confirm === 'function' ? confirm(msg) : true; }
+  // 2026-11-22: 네이티브 confirm() → 페이지 내 대화상자 (Promise<boolean>). 부르는 곳 2곳(멤버 제거·생성자 넘기기)은 .then으로 받는다.
+  function ask(msg, opts) {
+    if (typeof uiConfirm === 'function') return uiConfirm(msg, opts);
+    return Promise.resolve(typeof confirm === 'function' ? confirm(msg) : true);
+  }
 
   async function getJson(path, opts) {
     var r = await fetch(path, opts);
@@ -826,8 +830,11 @@
         var target = s.members.filter(function (m) { return m.id === to; })[0];
         var who = target ? (target.name || target.email) : '선택한 멤버';
         var msg = t.isMe ? '방 생성자를 ' + who + '님에게 넘기고 이 그룹에서 나갈까요?' : (t.member.name || t.member.email) + '님을 제거하고 방 생성자를 ' + who + '님에게 넘길까요?';
-        if (!ask(msg)) return;
-        removeMember(t.member, to);
+        var tok = s.token;
+        ask(msg, { title: '방 생성자 넘기기', okText: t.isMe ? '넘기고 나가기' : '넘기고 제거', danger: true }).then(function (ok) {
+          if (!ok || S !== s || s.token !== tok) return; // 대화상자가 떠 있는 동안 방이 바뀌었으면 하지 않는다
+          removeMember(t.member, to);
+        });
       } }),
       h('button', { type: 'button', cls: 'secondary', id: 'chatTransferCancel', text: '취소', onclick: function () { s.transfer = null; setNote(s.mNote, ''); renderTransfer(); } }));
   }
@@ -840,8 +847,11 @@
     var msg;
     if (isMe) msg = m.is_creator ? '이 방에는 다른 멤버가 없습니다. 나가면 방이 삭제됩니다. 나갈까요?' : '"' + s.group.name + '" 그룹에서 나갈까요?';
     else msg = (m.name || m.email) + '님을 이 그룹에서 제거할까요?';
-    if (!ask(msg)) return;
-    removeMember(m, null);
+    var tok = s.token;
+    ask(msg, { title: isMe ? '그룹 나가기' : '멤버 제거', okText: isMe ? '나가기' : '제거', danger: true }).then(function (ok) {
+      if (!ok || S !== s || s.token !== tok) return; // 대화상자가 떠 있는 동안 방이 바뀌었으면 하지 않는다
+      removeMember(m, null);
+    });
   }
 
   async function removeMember(m, transferTo) {
