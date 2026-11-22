@@ -99,7 +99,7 @@ function lmsRenderCourse(mount) {
   $('lmsLessonList').innerHTML = lmsLessons.map(l => {
     const cur = l.id === lmsCurId;
     return `<button type="button" class="lms-lesson${cur ? ' cur' : ''}${l.completed ? ' done' : ''}" onclick="lmsSelect('${escAttr(l.id)}')"${cur ? ' aria-current="true"' : ''}>
-      <span class="lms-mark">${l.completed ? '✓' : cur ? '▶' : ''}</span>
+      <span class="lms-mark">${l.completed ? '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" role="img" aria-label="완료"><polyline points="20 6 9 17 4 12"/></svg>' : cur ? '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" role="img" aria-label="재생 중"><polygon points="6 3 20 12 6 21 6 3"/></svg>' : ''}</span>
       <span class="lms-lt">${esc(l.ord)}. ${esc(l.title)}</span>
       <span class="lms-ld">${esc(lmsDur(l))}</span>
     </button>`;
@@ -171,10 +171,13 @@ async function lmsHomeCard() {
   if (!j || !j.ok || !j.lesson_count) { card.style.display = 'none'; return; }
   card.style.display = '';
   const n = j.next;
+  // 과정 제목과 강의 제목이 같으면(강의 1개짜리 과정) 같은 말을 두 번 쓰지 않는다.
+  const ct = n ? String(n.course_title || '').trim() : '', lt = n ? String(n.lesson_title || '').trim() : '';
+  const nextLabel = !ct || !lt || ct === lt ? (lt || ct) : `${ct} · ${lt}`;
   $('homeLms').innerHTML =
     `<p><b>${j.completed_count}/${j.lesson_count}</b> 강의 완료</p>${lmsBar(j.completed_count, j.lesson_count)}` +
     (n
-      ? `<p class="small" style="margin-top:8px">다음 강의: ${esc(n.course_title)} · ${esc(n.lesson_title)}</p>
+      ? `<p class="small" style="margin-top:8px">다음 강의: ${esc(nextLabel)}</p>
          <div class="btnrow"><button type="button" onclick="lmsOpenNext('${escAttr(n.course_id)}','${escAttr(n.lesson_id)}')">강의실 열기 →</button></div>`
       : '<p class="small" style="margin-top:8px">모든 강의를 마쳤습니다.</p><div class="btnrow"><button type="button" class="secondary" onclick="switchTab(\'lms\')">강의실 열기 →</button></div>');
 }
@@ -195,7 +198,7 @@ function lmsPaintSettingsBtn() {
   const h2 = $('lmsListCard') && $('lmsListCard').querySelector('h2');
   if (!h2) return;
   const b = document.createElement('button');
-  b.type = 'button'; b.id = 'lmsSettingsBtn'; b.className = 'secondary lms-setbtn'; b.textContent = '⚙ 설정';
+  b.type = 'button'; b.id = 'lmsSettingsBtn'; b.className = 'secondary lms-setbtn'; b.textContent = '강의실 설정';
   b.onclick = lmsSettingsOpen;
   h2.insertAdjacentElement('afterend', b);
 }
@@ -274,11 +277,12 @@ async function lmsCourseSave(id) {
 }
 async function lmsCourseDelete(id) {
   const c = lmsSetCourses.find(x => x.id === id);
-  if (!c || !confirm(`과정 "${c.title}"을(를) 삭제할까요?\n소속 강의 ${c.lesson_count}개와 모든 사용자의 진도가 함께 삭제됩니다. (R2 영상 파일은 남습니다)`)) return;
+  if (!c || !(await uiConfirm(`과정 "${c.title}"을(를) 삭제할까요?\n소속 강의 ${c.lesson_count}개와 모든 사용자의 진도가 함께 삭제됩니다. (R2 영상 파일은 남습니다)`, { title: '과정 삭제', okText: '삭제', danger: true }))) return;
   let j;
   try { j = await api('/api/lms/admin/courses/' + encodeURIComponent(id), { method: 'DELETE' }); } catch { j = { ok: false, error: '네트워크 오류' }; }
-  if (!j.ok) { alert(j.error || '삭제하지 못했습니다.'); return; }
+  if (!j.ok) { uiToast(j.error || '삭제하지 못했습니다.', true); return; }
   await lmsSetCoursesLoad();
+  uiToast('과정을 삭제했습니다.');
 }
 
 // ---- 강의 관리 ----
@@ -357,9 +361,10 @@ async function lmsLessonSave(id) {
 }
 async function lmsLessonDelete(id) {
   const l = lmsSetCourse.lessons.find(x => x.id === id);
-  if (!l || !confirm(`강의 "${l.title}"을(를) 삭제할까요?\n모든 사용자의 이 강의 진도도 삭제됩니다. (R2 영상 파일은 남습니다)`)) return;
+  if (!l || !(await uiConfirm(`강의 "${l.title}"을(를) 삭제할까요?\n모든 사용자의 이 강의 진도도 삭제됩니다. (R2 영상 파일은 남습니다)`, { title: '강의 삭제', okText: '삭제', danger: true }))) return;
   let j;
   try { j = await api('/api/lms/admin/lessons/' + encodeURIComponent(id), { method: 'DELETE' }); } catch { j = { ok: false, error: '네트워크 오류' }; }
-  if (!j.ok) { alert(j.error || '삭제하지 못했습니다.'); return; }
+  if (!j.ok) { uiToast(j.error || '삭제하지 못했습니다.', true); return; }
   await lmsSetLessons(lmsSetCourse.course.id);
+  uiToast('강의를 삭제했습니다.');
 }

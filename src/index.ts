@@ -37,22 +37,40 @@ import { lmsApp } from "./lms/routes";
 import { approvalApp } from "./approval/routes";
 import { agentActivityApp } from "./agent/activity"; // 에이전트 활동 타임라인 A1 (2026-11-17, 읽기 전용)
 import { calendarApp } from "./calendar/routes"; // 캘린더 C1 (2026-11-17, migration 0025)
+import { runCalendarTick } from "./calendar/tick"; // 캘린더 C5·C6 (2026-11-22, migration 0045): 15분 크론 틱
 import { plaudApp, setPlaudHooks } from "./plaud/routes"; // Plaud 연동 (2026-11-19, migration 0033)
 import { notificationsApp } from "./notifications/routes"; // DO-2 알림 WebSocket
 import { chatApp } from "./chat/routes"; // 채팅 DO-1a (2026-11-18, 1:1만)
 import { workflowApp } from "./workflow/routes"; // 워크플로우 WF-1 (2026-11-18, migration 0027)
+import { agentsApp } from "./assistant/routes"; // Think T2 어시스턴트 (/api/agents)
 import { meetApp } from "./meet/routes"; // 화상회의 V0 (2026-11-19, RealtimeKit, migration 0038)
 import { setMeetHooks, sweepMeetings } from "./meet/transcript"; // 화상회의 V1+V2: 회의 후 전사 → 기존 파이프라인 (migration 0039)
 import { processWorkflowStep, sweepStaleWorkflowRuns } from "./workflow/engine"; // 워크플로우 실행 엔진 WF-3
-import type { WorkflowStepMessage } from "./workflow/types";
+import type { WorkflowActionMessage, WorkflowStepMessage } from "./workflow/types";
+import { processWorkflowAction } from "./workflow/pending-actions"; // 비동기 승인 P2: 승인된 대기 동작 실행
 import { runDueSchedules, runEventTriggers } from "./workflow/schedules"; // 워크플로우 스케줄·이벤트 트리거 WF-8 (migration 0028)
+import { MAX_INSTRUCTION, inspectSource, listEditVersions, parseSourceRef, tryPptxEdit } from "./pptx/edit"; // PPTX 편집 (2026-11-21, 별도 Worker DOC_EDITOR)
+import { MAX_XLSX_INSTRUCTION, inspectXlsxSource, listXlsxVersions, parseXlsxSource, tryXlsxEdit } from "./xlsx/edit"; // XLSX 편집 (2026-11-21, 같은 Worker DOC_EDITOR의 XLSX RPC)
+import type { PptxWho } from "./pptx/edit";
+import { precheckDocxCreate, tryDocxCreate } from "./docx/create"; // Word 새 문서 만들기 (2026-11-21, docx 9.16.0, 본체 Worker)
+import { inspectDocxSource, listDocxVersions, parseDocxSource, precheckDocxEdit, tryDocxEdit } from "./docx/edit"; // Word 기존 문서 편집 (2026-11-22, 같은 Worker DOC_EDITOR의 DOCX RPC)
+import { enqueueDocxJob, getDocxJob, processDocxJob, sweepDocxJobs } from "./docx/jobs"; // Word AI 지시 작업 (2026-11-22, Queue 이동, migration 0043)
+import type { DocxJobMessage } from "./docx/jobs";
+import { handOffDocxJob } from "./docx/job-runner"; // Word AI 지시 작업 실행기 DO (2026-11-22, 직렬 실행 해결, 마이그레이션 v6)
+import { shouldQueueDoc } from "./doc-load"; // 큰 파일 판정 (2026-11-22, 예상 CPU ≥ 2초면 Queue)
+import { docJobFits, enqueueDocJob, getDocJob, processDocJob, sweepDocJobs } from "./doc-jobs"; // 큰 파일 문서 작업 (2026-11-22, migration 0044)
+import type { DocJobInput, DocJobMessage } from "./doc-jobs";
 
 export { adminAllowed };
 
 export { AgentSession };
 export { WorkflowAgent } from "./workflow/agent-do"; // WF-6 에이전트 루프 DO (wrangler.toml 마이그레이션 v2)
+export { ThinkAgent } from "./workflow/think-agent"; // Think T1: agent 단계의 Think 런타임 DO (마이그레이션 v4, AGENT_RUNTIME으로 선택)
+export { AssistantAgent } from "./assistant/agent"; // Think T2: 사용자당 어시스턴트 DO (마이그레이션 v5, 이름 assistant:<userId>)
+export { ResearchAgent } from "./assistant/research"; // Think T3: 어시스턴트의 조사 하위 에이전트 (facet — 바인딩·마이그레이션 없음, ctx.exports로 찾으므로 export만 필요)
 export { NotificationHub } from "./notifications/hub"; // DO-2 알림 허브 DO (마이그레이션 v3는 DO-MIG에서)
 export { RateLimiter } from "./ratelimit/limiter"; // DO-3 질문 레이트 리미터 DO (마이그레이션 v3는 DO-MIG에서)
+export { DocJobRunner } from "./docx/job-runner"; // Word AI 지시 작업 실행기 DO (마이그레이션 v6, 인스턴스 1개 = 작업 1개 — 작업들이 서로 기다리지 않게)
 export { ChatRoom } from "./chat/room"; // DO-1a 채팅방 DO (마이그레이션 v3는 DO-MIG에서)
 
 type Env = {
@@ -63,14 +81,22 @@ type Env = {
   AI: Ai;
   AGENT_SESSION: DurableObjectNamespace;
   WORKFLOW_AGENT: DurableObjectNamespace; // WF-6
+  ThinkAgent?: DurableObjectNamespace<import("./workflow/think-agent").ThinkAgent>; // Think T1 (v4)
+  AGENT_RUNTIME?: string; // Think T1: "think" | "legacy" ([vars])
+  ASSISTANT_AGENT?: DurableObjectNamespace<import("./assistant/agent").AssistantAgent>; // Think T2 (v5)
   CHAT_ROOM: DurableObjectNamespace; // DO-1a
   NOTIFICATION_HUB: DurableObjectNamespace; // DO-2
   RATE_LIMITER: DurableObjectNamespace; // DO-3 (없거나 실패하면 KV 폴백)
+  DOC_JOB_RUNNER?: DurableObjectNamespace; // Word AI 지시 작업 실행기 (v6, src/docx/job-runner.ts — 없으면 Queue 소비자가 직접 돌린다)
   ASSETS: Fetcher;
   // S1 Queues 파이프라인: 전사 완료 이벤트를 보내는 producer 바인딩.
   // 큐는 배포 전에 만들어야 한다 (wrangler.toml [[queues]] 참조).
   // S4: 같은 큐에 평가 항목 메시지(eval-item)도 싣는다 — msg.body.type으로 분기.
   PIPELINE: Queue<QueueMessage>;
+  // Word AI 지시 작업 전용 큐 (2026-11-22, src/docx/jobs.ts — 느린 작업이 파이프라인 큐를 막지 않게 나눴다). 소비자는 같은 queue() 핸들러.
+  DOCX_JOBS: Queue<DocxJobMessage>;
+  // 큰 파일 문서 작업 전용 큐 (2026-11-22, src/doc-jobs.ts — 몇 초짜리 CPU 작업이 1~5분짜리 AI 작업 뒤에 줄 서지 않게 또 나눴다). 없으면 예전처럼 요청 안에서 처리한다.
+  DOC_JOBS?: Queue<DocJobMessage>;
   // 운영용 경로(/api/debug-ai, /api/seed-vectors) 보호용 시크릿.
   // 코드·wrangler.toml에 넣지 않고 `wrangler secret put ADMIN_SECRET` /
   // Cloudflare 대시보드에서만 설정한다. 미설정 시 운영 경로는 항상 거부된다.
@@ -94,6 +120,9 @@ type Env = {
   // 메일 발송 (2026-11-17): Resend API 키. `wrangler secret put RESEND_API_KEY`로만 설정한다.
   // 미설정이면 POST /api/email/send가 503 "Resend 미설정"을 돌려준다 (fail-closed).
   RESEND_API_KEY?: string;
+  // 문서 편집 PPTX·XLSX (2026-11-21, 2026-11-22 개명): 별도 Worker people-os-doc-editor로 가는 서비스 바인딩 (RPC inspect/applyOps/replaceText + XLSX RPC).
+  // 없으면 /api/pptx/*·/api/xlsx/*와 pptx_edit·xlsx_edit 노드가 503 "문서 편집 Worker(DOC_EDITOR)가 연결되지 않았습니다"를 돌려준다. 모양은 src/pptx/types.ts PptxEditorRpc.
+  DOC_EDITOR?: Fetcher;
 };
 
 const app = new Hono<{ Bindings: Env }>();
@@ -147,7 +176,9 @@ type BuildTreeMessage = {
 };
 // S4: 큐 메시지 유니온 (전사 파이프라인 | 평가 항목 1건 | 트리 빌드).
 // WF-3: + 워크플로우 단계 1개 (src/workflow/engine.ts).
-type QueueMessage = PipelineMessage | EvalItemMessage | BuildTreeMessage | WorkflowStepMessage;
+// Word AI 지시 Queue 이동 (2026-11-22): + Word AI 작업 1번 시도 (src/docx/jobs.ts).
+// 큰 파일 문서 작업 (2026-11-22): + 큰 파일 편집·생성 1번 시도 (src/doc-jobs.ts).
+type QueueMessage = PipelineMessage | EvalItemMessage | BuildTreeMessage | WorkflowStepMessage | WorkflowActionMessage | DocxJobMessage | DocJobMessage;
 // S4 평가 cron: 03:00 KST. 07:00 KST 다이제스트 cron(0 22 * * *)과 event.cron으로 구분한다.
 const EVAL_CRON = "0 18 * * *";
 const WORKFLOW_CRON = "*/15 * * * *"; // WF-8 워크플로우 스케줄 틱
@@ -609,6 +640,11 @@ app.post("/api/documents", async (c) => {
   const id = uid("doc");
   const title = body.title || body.content.slice(0, 40);
   const kind = body.kind || "transcript";
+  // 2026-11-22 사용자 결정: 암묵지는 hr_admin만 만든다 — 게시 엔드포인트를 돌아가는 길(kind:"tacit" 직접 입력)도 같은 규칙.
+  if (kind === "tacit") {
+    const denied = await tacitPublishDenied(c);
+    if (denied) return c.json({ ok: false, error: denied.error }, denied.status);
+  }
   // 개인별 RAG 격리: 전사본은 기본 개인 소유(세션 사용자, 없으면 공용 NULL),
   // file/tacit은 기본 공용(NULL)이고 body.personal:true일 때만 개인으로 한다.
   // 관점 선택: hr_admin이 asUserId를 보내면 그 사용자의 개인 문서로 만든다.
@@ -1234,6 +1270,16 @@ async function loggedInOrAdmin(c: Context<{ Bindings: Env }>): Promise<boolean> 
   return (await getSessionUser(c.env, c.req.header("cookie"))) !== null;
 }
 
+// 암묵지(kind='tacit', 공용 RAG 근거)를 만들 수 있는지 (2026-11-22 사용자 결정: hr_admin 전용).
+// 통과면 null. X-Admin-Secret(운영 스크립트)은 관리자와 같게 본다. 로그인 안 됨 401, hr_admin 아님 403.
+async function tacitPublishDenied(c: Context<{ Bindings: Env }>): Promise<{ status: 401 | 403; error: string } | null> {
+  if (adminAllowed(c.env, c.req.header("x-admin-secret"))) return null;
+  const u = await getSessionUser(c.env, c.req.header("cookie"));
+  if (!u) return { status: 401, error: "로그인이 필요합니다." };
+  if (u.role !== "hr_admin") return { status: 403, error: "hr_admin만 게시할 수 있습니다." };
+  return null;
+}
+
 // 0021: 공백 질문자 표시 이름. 기록된 사용자가 있으면 그 이름, 없으면 평가 실행에서 온
 // 행(low-score/regression)은 "평가", 그 외는 "익명".
 function gapAskerName(source: string, userId: string | null, name: string | null): string {
@@ -1267,9 +1313,10 @@ app.get("/api/gaps", async (c) => {
 // 같은 질문을 다시 실행해 근거가 잡히면 resolved, 아니면 open으로 되돌린다.
 app.post("/api/gaps/:id/publish", async (c) => {
   await ensureSeeded(c.env.DB);
-  // 전체 점검(2026-11-18) P0: 게시한 답은 공용 RAG 근거가 되므로 익명 게시를 막는다
-  // (이전에는 로그인 없이 공용 지식에 아무 내용이나 넣을 수 있었다). 로그인 사용자는 기존과 같다.
-  if (!(await loggedInOrAdmin(c))) return c.json({ ok: false, error: "로그인이 필요합니다." }, 401);
+  // 전체 점검(2026-11-18) P0: 게시한 답은 공용 RAG 근거가 되므로 익명 게시를 막는다.
+  // 2026-11-22 사용자 결정: hr_admin만 게시한다 (로그인 안 됨 401, 일반 사용자 403).
+  const denied = await tacitPublishDenied(c);
+  if (denied) return c.json({ ok: false, error: denied.error }, denied.status);
   const id = c.req.param("id");
   const gap = await c.env.DB.prepare("SELECT id, question, status, doc_id FROM knowledge_gaps WHERE id = ?").bind(id)
     .first<{ id: string; question: string; status: string; doc_id: string | null }>();
@@ -1419,7 +1466,7 @@ app.post("/api/coaching/reflect", async (c) => {
     const ai = await c.env.AI.run(LLM_MODEL, {
       reasoning_effort: "medium",
       messages: [
-        { role: "system", content: "너는 코칭 리플렉션 분석가다. 세션 전사본에서 핵심 질문, 반복 패턴, 다음 세션 질문 3개를 한국어로 뽑아 JSON으로만 답하라: {\"questions\":[],\"patterns\":[],\"next_questions\":[]}" },
+        { role: "system", content: "너는 코칭 성찰 분석가다. 세션 전사본에서 핵심 질문, 반복 패턴, 다음 세션 질문 3개를 한국어로 뽑아 JSON으로만 답하라: {\"questions\":[],\"patterns\":[],\"next_questions\":[]}" },
         { role: "user", content: transcript.slice(0, 4000) },
       ],
     }, aiGatewayOptions({ tag: "coaching" }));
@@ -1458,14 +1505,14 @@ app.get("/api/home", async (c) => {
   const openTasks = await count(`SELECT COUNT(*) AS n FROM tasks t WHERE t.done = 0${tc.clause ? ` AND ${tc.clause}` : ""}`, tc.params);
   const rs = reflectionScope(viewer);
   const reflections = await count(`SELECT COUNT(*) AS n FROM reflections r${rs.clause ? ` WHERE ${rs.clause}` : ""}`, rs.params);
-  // 0021: 최근 문서·리플렉션·할 일에 소유자/참여자 이름을 붙인다 (NULL → 화면에서 공용/미지정).
+  // 0021: 최근 문서·성찰·할 일에 소유자/참여자 이름을 붙인다 (NULL → 화면에서 공용/미지정).
   const docCols = "documents.id, documents.title, documents.kind, documents.created_at, u.name AS owner_name";
   const recentDocuments = isAdmin
     ? (await c.env.DB.prepare(`SELECT ${docCols} FROM documents LEFT JOIN users u ON u.id = documents.owner_id ORDER BY documents.created_at DESC LIMIT 5`).all()).results || []
     : (await c.env.DB.prepare(`SELECT ${docCols} FROM documents LEFT JOIN users u ON u.id = documents.owner_id WHERE ${docClause} ORDER BY documents.created_at DESC LIMIT 5`).bind(...docParams).all()).results || [];
   const tasks = (await c.env.DB.prepare(`SELECT t.id, t.title, t.source, t.created_at, t.owner_id, COALESCE(u.name, '미지정') AS owner_name FROM tasks t LEFT JOIN users u ON u.id = t.owner_id WHERE t.done = 0${tc.clause ? ` AND ${tc.clause}` : ""} ORDER BY t.created_at DESC LIMIT 5`).bind(...tc.params).all()).results || [];
   const recentReflections = (await c.env.DB.prepare(`SELECT r.id, r.patterns, r.created_at, uc.name AS coach_name, ue.name AS coachee_name FROM reflections r LEFT JOIN users uc ON uc.id = r.coach_id LEFT JOIN users ue ON ue.id = r.coachee_id${rs.clause ? ` WHERE ${rs.clause}` : ""} ORDER BY r.created_at DESC LIMIT 3`).bind(...rs.params).all()).results || [];
-  // 0021: hr_admin 전용 사용자별 집계 (문서 = 소유 문서, 할 일 = 소유 할 일, 리플렉션 = 코치 또는 코칭 대상).
+  // 0021: hr_admin 전용 사용자별 집계 (문서 = 소유 문서, 할 일 = 소유 할 일, 성찰 = 코치 또는 코칭 대상).
   let byUser: Array<{ userId: string; name: string; email: string; documents: number; tasks: number; reflections: number }> | undefined;
   if (isAdmin) {
     const rows = await c.env.DB.prepare(
@@ -1495,7 +1542,7 @@ function canTouchTask(viewer: { id: string; role: string } | null, ownerId: stri
   return !!viewer && viewer.id === ownerId;
 }
 
-// 전체 점검(2026-11-18) P1: 리플렉션 읽기 범위. hr_admin 전체, 로그인 사용자는 본인이 코치·코칭 대상인 것 +
+// 전체 점검(2026-11-18) P1: 성찰 읽기 범위. hr_admin 전체, 로그인 사용자는 본인이 코치·코칭 대상인 것 +
 // 참여자 미기록(둘 다 NULL, 익명·초기 데이터), 익명은 참여자 미기록만. 이전에는 남의 코칭 패턴이 모두에게 보였다.
 function reflectionScope(viewer: { id: string; role: string } | null): { clause: string; params: string[] } {
   if (viewer?.role === "hr_admin") return { clause: "", params: [] };
@@ -1616,6 +1663,227 @@ app.get("/api/deck/:id", async (c) => {
   });
 });
 
+// ---- 덱 편집 (2026-11-21, 기존 PPTX 편집 — 편집은 별도 Worker DOC_EDITOR, 흐름은 src/pptx/edit.ts) ----
+// 원본(덱 또는 업로드한 .pptx 문서)은 읽기만 한다. 편집본은 새 덱 행 + 새 R2 키로 저장되고 GET /api/deck/:id로 받는다.
+// 로그인 필요 (편집 1회 ≈ CPU 1초라 익명에게 열지 않는다). 운영 점검용으로 X-Admin-Secret도 받는다 (그때 편집본은 공용 소유).
+async function pptxCaller(c: Context<{ Bindings: Env }>): Promise<{ who: PptxWho; ownerId: string | null } | null> {
+  const viewer = await getSessionUser(c.env, c.req.header("cookie"));
+  if (viewer) return { who: { id: viewer.id, role: viewer.role }, ownerId: viewer.id };
+  if (adminAllowed(c.env, c.req.header("x-admin-secret"))) return { who: { id: "", role: "hr_admin" }, ownerId: null };
+  return null;
+}
+
+// 큰 파일 문서 작업 (2026-11-22, src/doc-jobs.ts): 예상 CPU가 큰 구조화 편집·생성을 작업 행 + 전용 Queue에 넣고 202로 돌려준다.
+// 응답 모양은 Word AI 지시 작업과 같다 — {ok, queued:true, job:{id, kind, status, statusUrl, pollMs, heavy:true, estMs}}. 화면은 job.statusUrl을 2초마다 물어본다.
+async function queueDocJob(c: Context<{ Bindings: Env }>, ownerId: string | null, input: DocJobInput, load: import("./doc-load").DocLoad, extra: Record<string, unknown>) {
+  const q = await enqueueDocJob(c.env, ownerId, input, load);
+  if (!q.ok) return c.json({ ok: false, error: q.error, code: q.code }, q.status);
+  return c.json({ ok: true, queued: true, job: q.job, ...extra }, 202, { "cache-control": "no-store" });
+}
+
+// 큰 파일 문서 작업 상태. 화면이 2초마다 물어본다. 본인 작업만 보인다 (hr_admin·운영 비밀은 전부) — 그 밖은 404.
+// status: queued → running → done(result = 예전 201 응답과 같은 모양) | failed(error = 한국어 사유).
+app.get("/api/doc-jobs/:id", async (c) => {
+  await ensureSeeded(c.env.DB);
+  const caller = await pptxCaller(c);
+  if (!caller) return c.json({ ok: false, error: "로그인이 필요합니다." }, 401);
+  const id = c.req.param("id");
+  const j = /^[\w-]{1,80}$/.test(id) ? await getDocJob(c.env, id, { ownerId: caller.ownerId, admin: caller.who?.role === "hr_admin" }) : null;
+  if (!j) return c.json({ ok: false, error: "작업을 찾을 수 없습니다." }, 404);
+  return c.json({ ok: true, ...j }, 200, { "cache-control": "no-store" });
+});
+
+app.post("/api/pptx/inspect", async (c) => {
+  await ensureSeeded(c.env.DB);
+  const caller = await pptxCaller(c);
+  if (!caller) return c.json({ ok: false, error: "로그인이 필요합니다." }, 401);
+  const body = await c.req.json().catch(() => ({})) as { source?: unknown };
+  const ref = parseSourceRef(body.source);
+  if (!ref) return c.json({ ok: false, error: "source는 \"deck:<id>\" 또는 \"doc:<id>\"여야 합니다." }, 400);
+  const r = await inspectSource(c.env, caller.who, ref, true);
+  if (!r.ok) return c.json({ ok: false, error: r.error, ...(r.code ? { code: r.code } : {}) }, r.status);
+  return c.json(r, 200, { "cache-control": "no-store" });
+});
+
+app.post("/api/pptx/edit", async (c) => {
+  await ensureSeeded(c.env.DB);
+  const caller = await pptxCaller(c);
+  if (!caller) return c.json({ ok: false, error: "로그인이 필요합니다." }, 401);
+  const body = await c.req.json().catch(() => ({})) as { source?: unknown; ops?: unknown; instruction?: unknown; replace?: unknown; title?: unknown };
+  const ref = parseSourceRef(body.source);
+  if (!ref) return c.json({ ok: false, error: "source는 \"deck:<id>\" 또는 \"doc:<id>\"여야 합니다." }, 400);
+  const instruction = typeof body.instruction === "string" ? body.instruction : "";
+  if (instruction.length > MAX_INSTRUCTION) return c.json({ ok: false, error: `지시는 ${MAX_INSTRUCTION}자까지입니다.` }, 400);
+  const title = typeof body.title === "string" ? body.title : "";
+  // 큰 덱 (2026-11-22): ops·replace 편집의 예상 CPU가 2초 이상이면 여기서 편집하지 않고 작업 행 + Queue → 202 (queueDocJob). 작은 덱은 예전 그대로 201.
+  const jobInput: DocJobInput = { kind: "pptx_edit", ref, who: caller.who, ops: body.ops, replace: body.replace, title, adminRead: true };
+  const r = await tryPptxEdit(c.env, caller.who, ref, {
+    ops: body.ops, instruction, replace: body.replace, title, ownerId: caller.ownerId, adminRead: true,
+  }, docJobFits(c.env, jobInput) ? shouldQueueDoc : undefined);
+  if (!r.ok) return c.json({ ok: false, error: r.error, ...(r.code ? { code: r.code } : {}) }, r.status);
+  if ("deferred" in r) return queueDocJob(c, caller.ownerId, jobInput, r.load, { source: ref });
+  logEvent("pptx.edit", { source: `${ref.kind}:${ref.id}`, deckId: r.deck.id, ops: r.ops.length, planned: r.planned, bytes: r.deck.bytes });
+  return c.json(r, 201, { "cache-control": "no-store" });
+});
+
+// 원본 하나의 편집본 목록. 편집본 다운로드는 목록의 url(GET /api/deck/:id, 소유자 게이트 그대로).
+app.get("/api/pptx/versions", async (c) => {
+  await ensureSeeded(c.env.DB);
+  const caller = await pptxCaller(c);
+  if (!caller) return c.json({ ok: false, error: "로그인이 필요합니다." }, 401);
+  const ref = parseSourceRef(c.req.query("source") || "");
+  if (!ref) return c.json({ ok: false, error: "source는 \"deck:<id>\" 또는 \"doc:<id>\"여야 합니다." }, 400);
+  return c.json({ ok: true, source: ref, versions: await listEditVersions(c.env, caller.who, ref) }, 200, { "cache-control": "no-store" });
+});
+
+// ---- 엑셀 편집 (2026-11-21, 업로드한 .xlsx — 편집은 PPTX와 같은 Worker DOC_EDITOR의 XLSX RPC, 흐름은 src/xlsx/edit.ts) ----
+// 원본 문서는 읽기만 한다. 편집본은 새 문서 행 + 새 R2 키(docs/edits/doc_<원본id>/<새 id>.xlsx)로 저장되고 GET /api/documents/:id/download로 받는다.
+// 인증은 /api/pptx/*와 같다 (로그인 필요, 운영 점검용 X-Admin-Secret).
+const XLSX_SOURCE_ERR = "source는 \"doc:<문서 id>\"여야 합니다 (업로드한 .xlsx).";
+app.post("/api/xlsx/inspect", async (c) => {
+  await ensureSeeded(c.env.DB);
+  const caller = await pptxCaller(c);
+  if (!caller) return c.json({ ok: false, error: "로그인이 필요합니다." }, 401);
+  const body = await c.req.json().catch(() => ({})) as { source?: unknown };
+  const docId = parseXlsxSource(body.source);
+  if (!docId) return c.json({ ok: false, error: XLSX_SOURCE_ERR }, 400);
+  const r = await inspectXlsxSource(c.env, caller.who, docId, true);
+  if (!r.ok) return c.json({ ok: false, error: r.error, ...(r.code ? { code: r.code } : {}) }, r.status);
+  return c.json(r, 200, { "cache-control": "no-store" });
+});
+
+app.post("/api/xlsx/edit", async (c) => {
+  await ensureSeeded(c.env.DB);
+  const caller = await pptxCaller(c);
+  if (!caller) return c.json({ ok: false, error: "로그인이 필요합니다." }, 401);
+  const body = await c.req.json().catch(() => ({})) as { source?: unknown; ops?: unknown; instruction?: unknown; replace?: unknown; title?: unknown };
+  const docId = parseXlsxSource(body.source);
+  if (!docId) return c.json({ ok: false, error: XLSX_SOURCE_ERR }, 400);
+  const instruction = typeof body.instruction === "string" ? body.instruction : "";
+  if (instruction.length > MAX_XLSX_INSTRUCTION) return c.json({ ok: false, error: `지시는 ${MAX_XLSX_INSTRUCTION}자까지입니다.` }, 400);
+  const title = typeof body.title === "string" ? body.title : "";
+  // 큰 워크북 (2026-11-22): ops·replace 편집의 예상 CPU가 2초 이상이면 작업 행 + Queue → 202. 작은 워크북은 예전 그대로 201.
+  const jobInput: DocJobInput = { kind: "xlsx_edit", docId, who: caller.who, ops: body.ops, replace: body.replace, title, adminRead: true };
+  const r = await tryXlsxEdit(c.env, caller.who, docId, {
+    ops: body.ops, instruction, replace: body.replace, title, ownerId: caller.ownerId, adminRead: true,
+  }, docJobFits(c.env, jobInput) ? shouldQueueDoc : undefined);
+  if (!r.ok) return c.json({ ok: false, error: r.error, ...(r.code ? { code: r.code } : {}) }, r.status);
+  if ("deferred" in r) return queueDocJob(c, caller.ownerId, jobInput, r.load, { source: { kind: "doc", id: docId } });
+  logEvent("xlsx.edit", { source: `doc:${docId}`, docId: r.doc.id, ops: r.ops.length, planned: r.planned, bytes: r.doc.bytes });
+  return c.json(r, 201, { "cache-control": "no-store" });
+});
+
+app.get("/api/xlsx/versions", async (c) => {
+  await ensureSeeded(c.env.DB);
+  const caller = await pptxCaller(c);
+  if (!caller) return c.json({ ok: false, error: "로그인이 필요합니다." }, 401);
+  const docId = parseXlsxSource(c.req.query("source") || "");
+  if (!docId) return c.json({ ok: false, error: XLSX_SOURCE_ERR }, 400);
+  return c.json({ ok: true, source: { kind: "doc", id: docId }, versions: await listXlsxVersions(c.env, caller.who, docId) }, 200, { "cache-control": "no-store" });
+});
+
+// ---- Word 새 문서 만들기 (2026-11-21, docx 9.16.0 — 본체 Worker에서 생성, 흐름은 src/docx/create.ts) ----
+// 입력: 구조화 정의 {title, subtitle?, sections:[…]} (또는 {definition:{…}}) | {instruction, title?} (Qwen이 구조를 만든다).
+// 저장: documents 새 행 + R2 docs/created/<id>.docx → 기존 GET /api/documents/:id/download로 받는다. 인증은 /api/pptx/*와 같다.
+app.post("/api/docx/create", async (c) => {
+  await ensureSeeded(c.env.DB);
+  const caller = await pptxCaller(c);
+  if (!caller) return c.json({ ok: false, error: "로그인이 필요합니다." }, 401);
+  const body = await c.req.json().catch(() => null) as Record<string, unknown> | null;
+  if (!body || typeof body !== "object" || Array.isArray(body)) return c.json({ ok: false, error: "JSON 객체 본문이 필요합니다." }, 400);
+  const instruction = typeof body.instruction === "string" ? body.instruction : "";
+  const def = body.definition !== undefined ? body.definition : body.sections !== undefined ? body : undefined;
+  // 확장 (2026-11-22): 본문 최상위의 images(이미지 문서 id 목록)·toc·header·footer·differentFirstPage. 지시 경로에서는 AI 계획보다 우선하고,
+  // definition과 함께 주면 정의의 같은 키를 덮어쓴다. 이미지는 호출자가 읽을 수 있는 문서(공용·본인 것, hr_admin은 전체)만 넣는다.
+  const title = typeof body.title === "string" ? body.title : "";
+  const options = { images: body.images, toc: body.toc, header: body.header, footer: body.footer, differentFirstPage: body.differentFirstPage };
+  const imageAdmin = caller.who?.role === "hr_admin";
+  // Queue 이동 (2026-11-22): 자연어 지시(정의 없이 instruction만)는 Qwen 응답이 1~2분 걸려 여기서 기다리지 않는다.
+  // 입력 검사(모양·상한·이미지 권한)만 하고 → 작업 행 + Queue → 202 {job:{id, statusUrl}}. 상태는 GET /api/docx/jobs/:id (src/docx/jobs.ts).
+  // 구조화 입력은 예전 그대로 바로 만들어 201로 돌려준다. 정의와 지시를 함께 준 요청도 아래 동기 경로가 400으로 거절한다.
+  if (instruction.trim() && (def === undefined || def === null)) {
+    const pre = await precheckDocxCreate(c.env, { instruction, title, ownerId: caller.ownerId, options, imageAdmin });
+    if (!pre.ok) return c.json({ ok: false, error: pre.error, ...(pre.code ? { code: pre.code } : {}) }, pre.status);
+    const q = await enqueueDocxJob(c.env, caller.ownerId, { kind: "create", instruction: instruction.trim(), title, options, imageAdmin }, null);
+    if (!q.ok) return c.json({ ok: false, error: q.error, code: q.code }, q.status);
+    return c.json({ ok: true, queued: true, job: q.job }, 202, { "cache-control": "no-store" });
+  }
+  // 큰 문서 (2026-11-22): 구조화 정의라도 이미지가 많아 예상 CPU가 2초 이상이면 작업 행 + Queue → 202 (입력·이미지 검사는 이미 끝난 뒤다). 그 밖은 예전 그대로 201.
+  const jobInput: DocJobInput = { kind: "docx_create", def, title, options, imageAdmin };
+  const r = await tryDocxCreate(c.env, { def, instruction, title, ownerId: caller.ownerId, options, imageAdmin }, docJobFits(c.env, jobInput) ? shouldQueueDoc : undefined);
+  if (!r.ok) return c.json({ ok: false, error: r.error, ...(r.code ? { code: r.code } : {}) }, r.status);
+  if ("deferred" in r) return queueDocJob(c, caller.ownerId, jobInput, r.load, {});
+  logEvent("docx.create", { docId: r.doc.id, planned: r.planned, bytes: r.doc.bytes, sections: r.stats.sections, blocks: r.stats.blocks, ...(r.extras ? { images: r.extras.images, toc: r.extras.toc, header: r.extras.header, footer: r.extras.footer } : {}) });
+  return c.json(r, 201, { "cache-control": "no-store" });
+});
+
+// ---- Word 기존 문서 편집 (2026-11-22, .docx — 편집은 PPTX·XLSX와 같은 Worker DOC_EDITOR의 DOCX RPC, 흐름은 src/docx/edit.ts) ----
+// 원본 문서는 읽기만 한다. 편집본은 새 문서 행 + 새 R2 키(docs/edits/doc_<원본id>/<새 id>.docx)로 저장되고 GET /api/documents/:id/download로 받는다.
+// 인증은 /api/pptx/*와 같다. 상한 초과(ops 수·문서 크기·문단 수)는 413.
+const DOCX_SOURCE_ERR = "source는 \"doc:<문서 id>\"여야 합니다 (.docx 문서).";
+app.post("/api/docx/inspect", async (c) => {
+  await ensureSeeded(c.env.DB);
+  const caller = await pptxCaller(c);
+  if (!caller) return c.json({ ok: false, error: "로그인이 필요합니다." }, 401);
+  const body = await c.req.json().catch(() => ({})) as { source?: unknown };
+  const docId = parseDocxSource(body.source);
+  if (!docId) return c.json({ ok: false, error: DOCX_SOURCE_ERR }, 400);
+  const r = await inspectDocxSource(c.env, caller.who, docId, true);
+  if (!r.ok) return c.json({ ok: false, error: r.error, ...(r.code ? { code: r.code } : {}) }, r.status);
+  return c.json(r, 200, { "cache-control": "no-store" });
+});
+
+app.post("/api/docx/edit", async (c) => {
+  await ensureSeeded(c.env.DB);
+  const caller = await pptxCaller(c);
+  if (!caller) return c.json({ ok: false, error: "로그인이 필요합니다." }, 401);
+  const body = await c.req.json().catch(() => ({})) as { source?: unknown; ops?: unknown; instruction?: unknown; replace?: unknown; title?: unknown };
+  const docId = parseDocxSource(body.source);
+  if (!docId) return c.json({ ok: false, error: DOCX_SOURCE_ERR }, 400);
+  const input = {
+    ops: body.ops, instruction: typeof body.instruction === "string" ? body.instruction : "", replace: body.replace,
+    title: typeof body.title === "string" ? body.title : "", ownerId: caller.ownerId, adminRead: true,
+  };
+  // Queue 이동 (2026-11-22): 자연어 지시만 준 편집은 Qwen 응답(실측 71초)을 여기서 기다리지 않는다 — 입력·원본 검사 → 작업 행 + Queue → 202.
+  // ops·replace(구조화 입력)는 예전 그대로 바로 편집해 201. 지시와 ops·replace를 함께 준 요청도 아래 동기 경로가 400으로 거절한다.
+  const hasOps = body.ops !== undefined && body.ops !== null && !(typeof body.ops === "string" && !body.ops.trim());
+  if (input.instruction.trim() && !hasOps && (body.replace === undefined || body.replace === null)) {
+    const pre = await precheckDocxEdit(c.env, caller.who, docId, input);
+    if (!pre.ok) return c.json({ ok: false, error: pre.error, ...(pre.code ? { code: pre.code } : {}) }, pre.status);
+    const q = await enqueueDocxJob(c.env, caller.ownerId, { kind: "edit", instruction: input.instruction.trim(), title: input.title, who: caller.who, adminRead: true }, docId);
+    if (!q.ok) return c.json({ ok: false, error: q.error, code: q.code }, q.status);
+    return c.json({ ok: true, queued: true, job: q.job, source: { kind: "doc", id: docId } }, 202, { "cache-control": "no-store" });
+  }
+  // 큰 문서 (2026-11-22): ops·replace 편집의 예상 CPU가 2초 이상이면 작업 행 + Queue → 202. 작은 문서는 예전 그대로 201.
+  const jobInput: DocJobInput = { kind: "docx_edit", docId, who: caller.who, ops: body.ops, replace: body.replace, title: input.title, adminRead: true };
+  const r = await tryDocxEdit(c.env, caller.who, docId, input, docJobFits(c.env, jobInput) ? shouldQueueDoc : undefined);
+  if (!r.ok) return c.json({ ok: false, error: r.error, ...(r.code ? { code: r.code } : {}) }, r.status);
+  if ("deferred" in r) return queueDocJob(c, caller.ownerId, jobInput, r.load, { source: { kind: "doc", id: docId } });
+  logEvent("docx.edit", { source: `doc:${docId}`, docId: r.doc.id, ops: r.ops.length, planned: r.planned, planAttempts: r.planAttempts, bytes: r.doc.bytes });
+  return c.json(r, 201, { "cache-control": "no-store" });
+});
+
+// Word AI 지시 작업 상태 (2026-11-22, Queue 이동). 화면이 2초마다 물어본다. 본인 작업만 보인다 (hr_admin·운영 비밀은 전부) — 그 밖은 404.
+// status: queued → running → done(result = 예전 201 응답과 같은 모양) | failed(error = 한국어 사유).
+app.get("/api/docx/jobs/:id", async (c) => {
+  await ensureSeeded(c.env.DB);
+  const caller = await pptxCaller(c);
+  if (!caller) return c.json({ ok: false, error: "로그인이 필요합니다." }, 401);
+  const id = c.req.param("id");
+  const j = /^[\w-]{1,80}$/.test(id) ? await getDocxJob(c.env, id, { ownerId: caller.ownerId, admin: caller.who?.role === "hr_admin" }) : null;
+  if (!j) return c.json({ ok: false, error: "작업을 찾을 수 없습니다." }, 404);
+  return c.json({ ok: true, ...j }, 200, { "cache-control": "no-store" });
+});
+
+app.get("/api/docx/versions", async (c) => {
+  await ensureSeeded(c.env.DB);
+  const caller = await pptxCaller(c);
+  if (!caller) return c.json({ ok: false, error: "로그인이 필요합니다." }, 401);
+  const docId = parseDocxSource(c.req.query("source") || "");
+  if (!docId) return c.json({ ok: false, error: DOCX_SOURCE_ERR }, 400);
+  return c.json({ ok: true, source: { kind: "doc", id: docId }, versions: await listDocxVersions(c.env, caller.who, docId) }, 200, { "cache-control": "no-store" });
+});
+
 // ---- library ----
 app.get("/api/library", async (c) => {
   await ensureSeeded(c.env.DB);
@@ -1625,7 +1893,11 @@ app.get("/api/library", async (c) => {
   const isAdmin = viewer?.role === "hr_admin";
   const { clause, params } = docOwnerClause(viewer, "documents");
   const dcl = docOwnerClause(viewer, "decks");
-  const docCols = "documents.id, documents.title, documents.kind, documents.summary, documents.actions, documents.created_at, documents.extract_status, documents.extract_error, documents.owner_id, documents.is_coaching, u.email AS owner_email, u.name AS owner_name, LENGTH(CAST(documents.content AS BLOB)) AS size, (documents.source_r2_key IS NOT NULL) AS has_source";
+  const docCols = "documents.id, documents.title, documents.kind, documents.summary, documents.actions, documents.created_at, documents.extract_status, documents.extract_error, documents.owner_id, documents.is_coaching, u.email AS owner_email, u.name AS owner_name, LENGTH(CAST(documents.content AS BLOB)) AS size, (documents.source_r2_key IS NOT NULL) AS has_source, " +
+    // 2026-11-21 브라우저 회귀 6번: 편집 버튼을 편집 가능한 형식(PPTX·XLSX)에만 단다. R2 키 자체는 내보내지 않고 형식만.
+    "CASE WHEN documents.source_r2_key IS NULL THEN NULL WHEN LOWER(documents.source_r2_key) LIKE '%.pptx' THEN 'pptx' WHEN LOWER(documents.source_r2_key) LIKE '%.xlsx' THEN 'xlsx' WHEN LOWER(documents.source_r2_key) LIKE '%.docx' THEN 'docx' " +
+    // 2026-11-22 Word 새로 만들기 확장: 문서에 넣을 수 있는 이미지(PNG·JPEG·GIF·BMP)를 화면이 고를 수 있게 'image'로 알려 준다 (그 밖은 그대로 'other').
+    "WHEN LOWER(documents.source_r2_key) LIKE '%.png' OR LOWER(documents.source_r2_key) LIKE '%.jpg' OR LOWER(documents.source_r2_key) LIKE '%.jpeg' OR LOWER(documents.source_r2_key) LIKE '%.gif' OR LOWER(documents.source_r2_key) LIKE '%.bmp' THEN 'image' ELSE 'other' END AS source_kind";
   const docs = isAdmin
     ? await c.env.DB.prepare(`SELECT ${docCols} FROM documents LEFT JOIN users u ON u.id = documents.owner_id ORDER BY documents.created_at DESC LIMIT 100`).all()
     : await c.env.DB.prepare(`SELECT ${docCols} FROM documents LEFT JOIN users u ON u.id = documents.owner_id WHERE ${clause} ORDER BY documents.created_at DESC LIMIT 100`).bind(...params).all();
@@ -1657,7 +1929,7 @@ function attachment(title: string, ext: string) {
 }
 
 // 코칭 전사본 후보 목록 (0020 → 2026-11-16): 전사본 전부(코칭 지정 먼저), 공용 또는 본인 것. hr_admin은 전체. 익명은 공용만.
-// 리플렉션 탭 드롭다운에서 고른 문서로 전사본 칸을 채우므로 content를 함께 돌려준다
+// 성찰 탭 드롭다운에서 고른 문서로 전사본 칸을 채우므로 content를 함께 돌려준다
 // (읽기 범위는 canRead·라이브러리 목록과 같다).
 app.get("/api/documents/coaching", async (c) => {
   await ensureSeeded(c.env.DB);
@@ -1733,8 +2005,9 @@ app.delete("/api/documents/:id", async (c) => {
   return c.json({ ok: true, id, vectorsDeleted, errors });
 });
 
-// 문서 삭제 공통 단계: Vectorize 벡터 → R2(r2_key, source_r2_key) → D1 chunks → recordings.doc_id=NULL → documents 행.
+// 문서 삭제 공통 단계: Vectorize 벡터 → R2(r2_key, source_r2_key) → D1 chunks → D1 doc_nodes(문서 트리) → recordings.doc_id=NULL → documents 행.
 // 문서·녹음 삭제 엔드포인트가 함께 쓴다. 단계별 실패는 errors에 모으고 계속 진행한다.
+// 2026-11-22: doc_nodes 삭제 추가 (전에는 문서를 지워도 트리 행이 고아로 남았다 — 2026-11-21 회귀에서 재현).
 async function purgeDocument(env: Env, id: string, row: { r2_key: string | null; source_r2_key: string | null }, errors: string[]): Promise<number> {
   const chunkRows = await env.DB.prepare("SELECT id FROM chunks WHERE doc_id = ?").bind(id).all<{ id: string }>();
   const ids = (chunkRows.results || []).map((r) => r.id);
@@ -1747,6 +2020,7 @@ async function purgeDocument(env: Env, id: string, row: { r2_key: string | null;
     try { await env.FILES.delete(key); } catch (e) { errors.push(`r2: ${e instanceof Error ? e.message : String(e)}`); }
   }
   await env.DB.prepare("DELETE FROM chunks WHERE doc_id = ?").bind(id).run();
+  await env.DB.prepare("DELETE FROM doc_nodes WHERE doc_id = ?").bind(id).run();
   await env.DB.prepare("UPDATE recordings SET doc_id = NULL WHERE doc_id = ?").bind(id).run();
   await env.DB.prepare("DELETE FROM documents WHERE id = ?").bind(id).run();
   return ids.length;
@@ -2038,6 +2312,7 @@ setPlaudHooks({
 });
 app.route("/api/plaud", plaudApp); // Plaud OAuth + 녹음 목록 + 전사문 가져오기 — 세션 전용 (X-Admin-Secret 불가)
 app.route("/api/workflows", workflowApp); // 워크플로우 WF-1 — 세션 전용 (X-Admin-Secret 불가)
+app.route("/api/agents", agentsApp); // Think T2 어시스턴트 — 세션 전용, 남의 어시스턴트 id는 404. DO는 RPC로만 (routeAgentRequest 안 씀)
 // 화상회의 (RealtimeKit): 세션 + 채팅방 멤버 전용. /api/meet/webhook만 세션 없이 rtk-signature 서명으로 검증한다.
 // 바인딩: CF_ACCOUNT_ID·RTK_APP_ID([vars]) + RTK_API_TOKEN(secret). Env 타입은 src/meet/rtk.ts RtkEnv 참조.
 // V2: 회의 후 전사는 업로드 녹음과 같은 finishTranscript(문서 → recordings ready → PIPELINE)로 들어간다 (메일·Plaud 훅과 같은 방식).
@@ -2206,6 +2481,13 @@ export default {
       ctx.waitUntil(sweepStaleWorkflowRuns(env).catch((e) => console.error("[workflow] sweep failed", e instanceof Error ? e.message : String(e))));
       // 화상회의 V1+V2: 오래된 active 회의 정리 + 웹훅 누락 전사 재조회 (RealtimeKit 미설정이면 아무것도 안 함).
       ctx.waitUntil(sweepMeetings(env as never).catch((e) => console.error("[meet] sweep failed", e instanceof Error ? e.message : String(e))));
+      // Word AI 지시 작업: 15분 넘게 안 끝난 작업을 failed로, 7일 지난 작업 행 삭제 (멱등).
+      ctx.waitUntil(sweepDocxJobs(env).catch((e) => console.error("[docx-job] sweep failed", e instanceof Error ? e.message : String(e))));
+      // 큰 파일 문서 작업: 같은 정리 (15분 상한 → failed, 7일 지난 행 삭제).
+      ctx.waitUntil(sweepDocJobs(env).catch((e) => console.error("[doc-job] sweep failed", e instanceof Error ? e.message : String(e))));
+      // 캘린더 C5·C6 (2026-11-22): 일정 알림 + 구글 연결 일정 대조. 새 크론을 더하지 않고 이 15분 틱에 얹는다
+      // (그래서 다이제스트로 떨어질 일이 없고, 계정의 Cron Trigger 수도 그대로다). 실패는 로그만 — 다른 작업을 막지 않는다.
+      ctx.waitUntil(runCalendarTick(env as never, new Date(event.scheduledTime)).catch((e) => console.error("[calendar] tick failed", e instanceof Error ? e.message : String(e))));
       return;
     }
     ctx.waitUntil(generateDigest(env, new Date(event.scheduledTime)));
@@ -2214,9 +2496,40 @@ export default {
   // 같은 배치의 다른 메시지는 정상 처리한다. throw 대신 msg.retry()를 써서
   // 재시도 횟수를 넘기면 플랫폼이 DLQ로 옮기게 한다.
   async queue(batch: MessageBatch<QueueMessage>, env: Env, ctx: ExecutionContext) {
+    // Word AI 지시 작업(docx-job)은 1번에 1~5분 걸린다. 전용 큐(people-os-docx-jobs, 배치 1개)로 오므로 보통 이 배치에는 그것 하나뿐이다.
+    // 그래도 다른 메시지와 한 배치에 섞여 오면 그 메시지들이 막히지 않게, 먼저 시작만 해 두고 나머지를 예전처럼 차례로 처리한 뒤 모아서 기다린다.
+    const docxJobs: Promise<void>[] = [];
+    for (const msg of batch.messages) {
+      if ((msg.body as { type?: string } | null)?.type === "docx-job") {
+        docxJobs.push((async () => {
+          try {
+            // 계획 실패·AI 호출 실패는 작업 행에 남기고 ack/지연 재전달을 정해 돌려준다. 상태 갱신 D1 오류만 throw → 아래 retry.
+            // 직렬 실행 해결 (2026-11-22): 작업을 실행기 DO(DocJobRunner, 작업당 1개)에 넘기고 바로 ack한다 — 실제 일은 DO 알람에서 돈다.
+            // Queue는 배치가 끝난 뒤에만 소비자를 늘릴지 보므로, 여기서 1~5분을 기다리면 뒤 작업이 그만큼 줄을 선다 (src/docx/job-runner.ts).
+            // 실행기가 없거나 넘기지 못하면 예전처럼 여기서 직접 돌린다.
+            if (await handOffDocxJob(env, msg.body as DocxJobMessage)) { msg.ack(); return; }
+            const r = await processDocxJob(env, msg.body as DocxJobMessage);
+            if (r.action === "retry") msg.retry({ delaySeconds: r.delaySeconds });
+            else msg.ack();
+          } catch (e) {
+            logEvent("queue.message_failed", { messageId: msg.id, type: "docx-job", attempts: msg.attempts, error: (e instanceof Error ? e.message : String(e)).slice(0, 200) });
+            msg.retry({ delaySeconds: 30 });
+          }
+        })());
+      }
+    }
     for (const msg of batch.messages) {
       try {
         const body = msg.body as { type?: string } | null;
+        if (body && body.type === "docx-job") continue; // 위에서 따로 처리한다
+        if (body && body.type === "doc-job") {
+          // 큰 파일 문서 작업 (전용 큐 people-os-doc-jobs, 배치 1개): 편집·생성 실패는 작업 행에 남기고 ack/지연 재전달을 정해 돌려준다.
+          // 상태 갱신 D1 오류만 throw → 아래 catch가 retry.
+          const r = await processDocJob(env, msg.body as DocJobMessage);
+          if (r.action === "retry") msg.retry({ delaySeconds: r.delaySeconds });
+          else msg.ack();
+          continue;
+        }
         if (body && body.type === "eval-item") {
           // S4: 평가 항목 1건 (M4). 멱등 — 재전달돼도 eval_results는 1행. throw하면 재시도.
           await processEvalItem(env, msg.body as EvalItemMessage, { runAsk, traceSink, ctx });
@@ -2229,6 +2542,9 @@ export default {
         } else if (body && body.type === "workflow-step") {
           // WF-3: 워크플로우 단계 1개. 노드 실패는 run failed로 기록하고 ack, 엔진 예외만 throw → retry.
           await processWorkflowStep(env, msg.body as WorkflowStepMessage);
+        } else if (body && body.type === "workflow-action") {
+          // 비동기 승인 P2: 승인된 대기 동작 1개 실행. 노드 실패는 행에 failed로 남기고 ack, 엔진 예외만 throw → retry.
+          await processWorkflowAction(env, msg.body as WorkflowActionMessage);
         } else {
           // 기존 전사 파이프라인 (S1) — 그대로.
           await processPipelineMessage(env, msg.body as PipelineMessage);
@@ -2241,6 +2557,7 @@ export default {
         msg.retry();
       }
     }
+    await Promise.all(docxJobs);
   },
 };
 

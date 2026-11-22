@@ -1,0 +1,228 @@
+{
+  "pass": true,
+  "checks": {
+    "요약!B4 = 25": true,
+    "요약!B6 = SUM(B4:B5) → 55": true,
+    "요약!B7 = MAX(B4:B5) → 30": true,
+    "요약!A7 = 최대": true,
+    "요약!B8 = SUM(데이터!C2:C6) → 30": true,
+    "요약!A1 서식(굵게·배경) 유지": true,
+    "요약!B6 굵게 유지": true,
+    "데이터 행 6 = 정코치/커리어/4": true,
+    "표 코칭세션 A1:C6로 늘어남": true,
+    "메모 시트 추가 (맨 뒤)": true,
+    "메모!A1·B1": true,
+    "대조군 시트 XML 바이트 동일": true,
+    "대조군 값 동일": true,
+    "fullCalcOnLoad": true,
+    "XML well-formed (전 부품)": true,
+    "원본 bytes 그대로": true
+  },
+  "sizes": {
+    "before": 5113,
+    "after": 5529
+  },
+  "parts": {
+    "identicalCount": 5,
+    "changed": [
+      "[Content_Types].xml",
+      "xl/workbook.xml",
+      "xl/_rels/workbook.xml.rels",
+      "xl/worksheets/sheet1.xml",
+      "xl/worksheets/sheet2.xml",
+      "xl/sharedStrings.xml",
+      "xl/tables/table1.xml"
+    ],
+    "removed": [],
+    "added": [
+      "xl/worksheets/sheet4.xml"
+    ],
+    "identicalSheets": [
+      "xl/worksheets/sheet3.xml"
+    ]
+  },
+  "xml": {
+    "checked": 13,
+    "errors": []
+  },
+  "log": [
+    {
+      "i": 6,
+      "op": "sheet",
+      "name": "메모",
+      "part": "xl/worksheets/sheet4.xml"
+    },
+    {
+      "i": 0,
+      "op": "cell",
+      "sheet": "요약",
+      "cell": "B4"
+    },
+    {
+      "i": 1,
+      "op": "formula",
+      "sheet": "요약",
+      "cell": "B6"
+    },
+    {
+      "i": 2,
+      "op": "formula",
+      "sheet": "요약",
+      "cell": "B7"
+    },
+    {
+      "i": 3,
+      "op": "cell",
+      "sheet": "요약",
+      "cell": "A7"
+    },
+    {
+      "i": 4,
+      "op": "row",
+      "sheet": "데이터",
+      "cells": 3
+    },
+    {
+      "i": 5,
+      "op": "formula",
+      "sheet": "요약",
+      "cell": "B8"
+    },
+    {
+      "i": 7,
+      "op": "cell",
+      "sheet": "메모",
+      "cell": "A1"
+    },
+    {
+      "i": 8,
+      "op": "formula",
+      "sheet": "메모",
+      "cell": "B1"
+    }
+  ],
+  "warnings": {
+    "codes": [
+      "XLV_W_FORMULAS_NOT_RECALCULATED"
+    ],
+    "formulasNotRecalculated": true,
+    "fullCalcOnLoad": true
+  },
+  "diff": [
+    {
+      "sheet": "요약",
+      "cell": "B4",
+      "kind": "changed",
+      "before": "24",
+      "after": "25",
+      "formula": false
+    },
+    {
+      "sheet": "요약",
+      "cell": "B6",
+      "kind": "changed",
+      "before": "=SUM(B4:B5) → 54",
+      "after": "=SUM(B4:B5) → 55",
+      "formula": true
+    },
+    {
+      "sheet": "요약",
+      "cell": "A7",
+      "kind": "changed",
+      "before": "평균",
+      "after": "최대",
+      "formula": false
+    },
+    {
+      "sheet": "요약",
+      "cell": "B7",
+      "kind": "changed",
+      "before": "=AVERAGE(B4:B5) → 27",
+      "after": "=MAX(B4:B5) → 30",
+      "formula": true
+    },
+    {
+      "sheet": "요약",
+      "cell": "B8",
+      "kind": "changed",
+      "before": "=SUM(데이터!C2:C5) → 26",
+      "after": "=SUM(데이터!C2:C6) → 30",
+      "formula": true
+    },
+    {
+      "sheet": "데이터",
+      "cell": "A6",
+      "kind": "added",
+      "before": null,
+      "after": "정코치",
+      "formula": false
+    },
+    {
+      "sheet": "데이터",
+      "cell": "B6",
+      "kind": "added",
+      "before": null,
+      "after": "커리어",
+      "formula": false
+    },
+    {
+      "sheet": "데이터",
+      "cell": "C6",
+      "kind": "added",
+      "before": null,
+      "after": "4",
+      "formula": false
+    },
+    {
+      "sheet": "메모",
+      "cell": null,
+      "kind": "sheetAdded",
+      "before": null,
+      "after": "(새 시트, 셀 2개)"
+    },
+    {
+      "sheet": "메모",
+      "cell": "A1",
+      "kind": "added",
+      "before": null,
+      "after": "추가된 시트",
+      "formula": false
+    },
+    {
+      "sheet": "메모",
+      "cell": "B1",
+      "kind": "added",
+      "before": null,
+      "after": "=요약!B6 → 55",
+      "formula": true
+    }
+  ],
+  "readerWarnings": [],
+  "sheets": [
+    {
+      "name": "요약",
+      "part": "/xl/worksheets/sheet1.xml",
+      "sheetId": 1,
+      "cells": 13
+    },
+    {
+      "name": "데이터",
+      "part": "/xl/worksheets/sheet2.xml",
+      "sheetId": 2,
+      "cells": 18
+    },
+    {
+      "name": "대조군",
+      "part": "/xl/worksheets/sheet3.xml",
+      "sheetId": 3,
+      "cells": 4
+    },
+    {
+      "name": "메모",
+      "part": "/xl/worksheets/sheet4.xml",
+      "sheetId": 4,
+      "cells": 2
+    }
+  ],
+  "editedBytes": 5529
+}

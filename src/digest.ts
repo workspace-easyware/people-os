@@ -1,6 +1,6 @@
 // 아침 다이제스트 (C9, Cron Triggers) — src/index.ts에서만 호출되는 순수 모듈.
 // 매일 07:00 KST Cron(scheduled 핸들러)이 generateDigest()를 부르면,
-// 전날(KST 기준) 문서·리플렉션과 현재 열린 할 일·녹음 현황을 D1에서 모아
+// 전날(KST 기준) 문서·성찰과 현재 열린 할 일·녹음 현황을 D1에서 모아
 // Workers AI로 아침 브리핑 문장을 만들고 digest_runs에 저장한다.
 // GET /api/digest는 getLatestDigest()로 최신 저장본을 반환한다.
 //
@@ -26,7 +26,7 @@ export type DigestCounts = {
   documents: number; // 전날(KST) 새 문서 수
   summaries: number; // 그중 요약이 달린 문서 수
   openTasks: number; // 현재 열린 할 일 수
-  reflections: number; // 전날(KST) 새 리플렉션 수
+  reflections: number; // 전날(KST) 새 성찰 수
   recordingsReady: number; // 전사 준비 완료 녹음 수 (현재)
   recordingsPending: number; // 전사 대기·진행 중 녹음 수 (현재)
 };
@@ -179,7 +179,7 @@ async function collectSnapshot(db: D1Database, windowStart: string, windowEnd: s
   };
 }
 
-/** 리플렉션 patterns JSON의 첫 항목을 짧게 뽑는다 (없으면 null). */
+/** 성찰 patterns JSON의 첫 항목을 짧게 뽑는다 (없으면 null). */
 function firstPattern(reflection: DigestReflection | undefined): string | null {
   if (!reflection?.patterns) return null;
   try {
@@ -207,15 +207,15 @@ export function buildTemplateBody(runDate: string, s: DigestSnapshot): string {
   }
   if (c.openTasks > 0) {
     const titles = s.tasks.slice(0, 5).map((t) => `「${t.title}」`).join(", ");
-    lines.push(titles ? `열린 할 일 ${c.openTasks}건 (담당자 미지정: ${titles}${s.tasks.length > 5 ? " 외" : ""}).` : `열린 할 일 ${c.openTasks}건.`);
+    lines.push(titles ? `해야 할 일 ${c.openTasks}건 (담당자 미지정: ${titles}${s.tasks.length > 5 ? " 외" : ""}).` : `해야 할 일 ${c.openTasks}건.`);
   } else {
-    lines.push("열린 할 일이 없습니다.");
+    lines.push("해야 할 일이 없습니다.");
   }
   if (c.reflections > 0) {
     const first = firstPattern(s.reflections[0]);
-    lines.push(`새 리플렉션 ${c.reflections}건${first ? `: ${first}` : ""}.`);
+    lines.push(`새 성찰 ${c.reflections}건${first ? `: ${first}` : ""}.`);
   } else {
-    lines.push("어제 새 리플렉션이 없습니다.");
+    lines.push("어제 새 성찰이 없습니다.");
   }
   if (c.recordingsReady + c.recordingsPending > 0) {
     lines.push(`녹음 전사: 준비 완료 ${c.recordingsReady}건, 대기 중 ${c.recordingsPending}건.`);
@@ -230,10 +230,10 @@ function factsBlock(runDate: string, s: DigestSnapshot): string {
     `전날 새 문서: ${c.documents}건${s.documents.length ? ` (그중 공용 문서 제목: ${s.documents.map((d) => d.title).join(", ")})` : ""}`
   );
   lines.push(`그중 요약 완료: ${c.summaries}건`);
-  lines.push(`열린 할 일: ${c.openTasks}건${s.tasks.length ? ` (그중 담당자 미지정: ${s.tasks.slice(0, 5).map((t) => t.title).join(", ")})` : ""}`);
-  lines.push(`전날 새 리플렉션: ${c.reflections}건`);
+  lines.push(`해야 할 일: ${c.openTasks}건${s.tasks.length ? ` (그중 담당자 미지정: ${s.tasks.slice(0, 5).map((t) => t.title).join(", ")})` : ""}`);
+  lines.push(`전날 새 성찰: ${c.reflections}건`);
   const first = firstPattern(s.reflections[0]);
-  if (first) lines.push(`리플렉션 핵심 패턴: ${first}`);
+  if (first) lines.push(`성찰 핵심 패턴: ${first}`);
   lines.push(`녹음 전사: 준비 완료 ${c.recordingsReady}건, 대기 중 ${c.recordingsPending}건`);
   return lines.join("\n");
 }

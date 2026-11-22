@@ -9,23 +9,27 @@
 .email-row:last-child{border-bottom:0}
 .email-row:hover{background:var(--color-surface-soft)}
 .email-row.unread{background:var(--color-primary-soft)}
-.email-row.unread .email-from{font-weight:700;color:var(--color-primary)}
+.email-row.unread .email-from{font-weight:600;color:var(--color-primary)}
 .email-from{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;display:flex;align-items:center;gap:6px}
 .email-subj{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}
 .email-subj .small{margin-left:6px}
 .email-meta{white-space:nowrap;color:var(--color-muted);font-size:12px}
 .email-dot{width:8px;height:8px;border-radius:50%;background:var(--color-primary);flex:none}
-.email-star{border:0;background:none;font-size:18px;line-height:1;color:var(--color-text-3);padding:0;margin:0}
+/* unslop 2026-11-22: ★/☆ 글자 대신 Lucide star. 켜짐은 .on 클래스가 채움으로 표시한다 (JS는 클래스만 바꾼다). */
+.email-star{display:grid;place-items:center;width:24px;height:24px;border:0;border-radius:4px;background:none;color:var(--color-text-3);padding:0;margin:0}
+.email-star:hover{color:var(--color-text-2);background:var(--color-surface-code)}
 .email-star.on{color:var(--cat-amber)}
+.email-star.on svg{fill:currentColor}
+.email-clip{width:14px;height:14px;vertical-align:-2px;margin-right:4px}
 .email-hdr{display:grid;grid-template-columns:80px 1fr;gap:4px 12px;margin:8px 0 16px;font-size:13px}
 .email-hdr dt{color:var(--color-muted)}
 .email-hdr dd{margin:0;word-break:break-all}
 .email-text{white-space:pre-wrap;word-break:break-word;font:inherit;background:var(--color-surface-soft);border:1px solid var(--color-line);border-radius:8px;padding:12px;margin:0}
 .email-html{width:100%;min-height:200px;border:1px solid var(--color-line);border-radius:8px;background:#fff}
 .email-thread{list-style:none;padding-left:0}
-.email-thread li.cur a{font-weight:700;color:var(--color-primary)}
+.email-thread li.cur a{font-weight:600;color:var(--color-primary)}
 .email-draft{margin-top:var(--space-4);border-top:1px dashed var(--color-line-strong);padding-top:var(--space-3)}
 #emailComposeCard input[type=text]{margin:0 0 8px}
 #emailComposeCard textarea{min-height:220px}
-.nav-count{margin-left:auto;background:var(--color-primary);color:#fff;border-radius:999px;font-size:11px;line-height:16px;padding:0 6px}
+.nav-count{margin-left:auto;background:var(--color-primary);color:#fff;border-radius:999px;font-size:11px;line-height:16px;padding:0 6px;font-variant-numeric:tabular-nums}
 @media (max-width:720px){.email-row{grid-template-columns:28px 1fr;}.email-subj,.email-meta{grid-column:2}}

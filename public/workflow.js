@@ -8,8 +8,8 @@ const WF_NODES = {
   ask_personal: { label: '내 문서 질문', fields: [['question', 'textarea', '질문', true]] },
   transcribe: { label: '전사 확인', hint: '이미 전사가 끝난 문서만 사용할 수 있습니다.', fields: [['docId', 'text', '문서 ID', true]] },
   summarize: { label: '문서 요약', fields: [['docId', 'text', '문서 ID', true]] },
-  reflect_coach: { label: '코치 리플렉션', fields: [['docId', 'text', '문서 ID', true]] },
-  reflect_coachee: { label: '코칭 대상 리플렉션', fields: [['docId', 'text', '문서 ID', true]] },
+  reflect_coach: { label: '코치 성찰', fields: [['docId', 'text', '문서 ID', true]] },
+  reflect_coachee: { label: '코칭 대상 성찰', fields: [['docId', 'text', '문서 ID', true]] },
   draft_pptx: { label: 'PPTX 초안', fields: [['title', 'text', '제목', true], ['bullets', 'textarea', '내용 (비우면 앞 단계 요약 사용)', false]] },
   email_draft: { label: '메일 초안', fields: [['to', 'text', '받는 사람', true], ['context', 'textarea', '메일 내용·맥락', true]] },
   send_email: { label: '메일 발송 (승인 필요)', approval: true, fields: [['to', 'text', '받는 사람', true], ['subject', 'text', '제목', true], ['body', 'textarea', '본문', true]] },
@@ -20,6 +20,11 @@ const WF_NODES = {
   condition: { label: '조건 분기', hint: '연산자: contains, not_contains, equals, not_equals, exists, not_exists. 갈림길(참/거짓 다음 단계) 지정은 "캔버스 보기"에서 합니다 — 지정 전에는 순서대로 진행됩니다.', fields: [['source', 'textarea', '검사할 값 (예: {{steps.s1.output.text}})', true], ['operator', 'text', '연산자', true], ['value', 'text', '비교 값 (exists/not_exists는 비움)', false]] },
   // WF-9 웹훅. 필드 종류: select(5번째 원소=선택지), headers(키/값 행), json(본문 JSON 텍스트). 저장 시 서버 검증 오류를 그대로 보여준다.
   webhook: { label: '웹훅 호출 (승인 필요)', approval: true, hint: '외부 주소를 호출합니다. localhost·사설 IP·내부 주소는 차단되고, 10초 안에 응답이 없거나 응답이 256KB를 넘으면 실패합니다. URL·헤더 값·본문에 {{input.x}} 같은 변수를 쓸 수 있습니다.', fields: [['url', 'text', 'URL (https://…)', true], ['method', 'select', '메서드', false, ['POST', 'GET', 'PUT', 'PATCH', 'DELETE']], ['headers', 'headers', '헤더 (이름 / 값)', false], ['body', 'json', '본문 (JSON, GET·DELETE는 비움)', false]] },
+  // PPTX 편집 (2026-11-21): 원본은 그대로 두고 편집본을 새 덱으로 저장. ops(JSON 배열)나 자연어 지시 중 하나. 승인 게이트는 단계 편집기의 "승인 필요"로 켠다.
+  pptx_edit: { label: 'PPTX 편집본 만들기', hint: '덱 ID(또는 업로드한 .pptx의 문서 ID)와, 자연어 지시 또는 ops JSON 중 하나를 넣습니다. 원본은 바뀌지 않고 편집본이 새 덱으로 저장됩니다.', fields: [['deckId', 'text', '덱 ID', false], ['docId', 'text', '문서 ID (업로드한 .pptx)', false], ['instruction', 'textarea', '자연어 지시 (예: 제목을 ○○로 바꿔 줘)', false], ['ops', 'json', 'ops JSON 배열 (지시 대신)', false], ['title', 'text', '편집본 이름 (선택)', false]] },
+  docx_create: { label: 'Word 새 문서 만들기', hint: '제목과 자연어 지시(AI가 문서 구조를 씁니다), 또는 문서 정의 JSON({title, sections:[{heading, level, paragraphs, bullets, numbered, table:{header, rows}}]}) 중 하나를 넣습니다. 새 .docx 문서로 저장됩니다. 선택으로 이미지(라이브러리에 올린 PNG·JPEG·GIF·BMP 문서 ID)·목차·머리말·바닥글을 넣을 수 있습니다.', fields: [['title', 'text', '문서 제목 (지시에서는 선택)', false], ['instruction', 'textarea', '자연어 지시 (예: {{input.coach}} 코치의 분기 코칭 보고서를 개요·성과·다음 단계로 써 줘)', false], ['definition', 'json', '문서 정의 JSON (지시 대신)', false], ['images', 'csv', '넣을 이미지 문서 ID (쉼표로 구분, 선택)', false], ['toc', 'checkbox', '목차 넣기', false], ['header', 'text', '머리말 문구 (선택)', false], ['footer', 'text', '바닥글 문구 (선택)', false], ['pageNumber', 'checkbox', '바닥글에 쪽 번호 넣기', false]] },
+  docx_edit: { label: 'Word 편집본 만들기', hint: '.docx 문서 ID와, 자연어 지시 또는 ops JSON(replace·paragraph·cell·insert·delete) 중 하나를 넣습니다. 원본은 바뀌지 않고 편집본이 새 문서로 저장됩니다.', fields: [['docId', 'text', '문서 ID (.docx)', true], ['instruction', 'textarea', '자연어 지시 (예: 문서 전체에서 {{input.oldName}}을 {{input.newName}}으로 바꿔 줘)', false], ['ops', 'json', 'ops JSON 배열 (지시 대신)', false], ['title', 'text', '편집본 이름 (선택)', false]] },
+  xlsx_edit: { label: '엑셀 편집본 만들기', hint: '업로드한 .xlsx의 문서 ID와, 자연어 지시 또는 ops JSON(cell·formula·row·sheet) 중 하나를 넣습니다. 원본은 바뀌지 않고 편집본이 새 문서로 저장됩니다. 수식은 Excel이 열 때 다시 계산합니다.', fields: [['docId', 'text', '문서 ID (업로드한 .xlsx)', true], ['instruction', 'textarea', '자연어 지시 (예: 요약 시트 B4를 25로 바꾸고 합계를 고쳐 줘)', false], ['ops', 'json', 'ops JSON 배열 (지시 대신)', false], ['title', 'text', '편집본 이름 (선택)', false]] },
   // WF-6 에이전트 (최소 폼 — 디자인은 WF-11). tools는 쉼표 구분 노드 이름, 비우면 send_email 뺀 11개.
   agent: { label: '에이전트 (목표만 주기)', hint: '도구 예: ask_rag, create_task. 비우면 메일 발송을 뺀 모든 도구. 메일 발송을 고르면 실행 중 승인이 필요합니다.', fields: [['goal', 'textarea', '목표', true], ['tools', 'csv', '쓸 수 있는 도구 (쉼표 구분)', false], ['maxSteps', 'number', '최대 단계 수 (1~10, 기본 10)', false]] },
 };
@@ -104,8 +109,10 @@ function wfUtcToLocal(v) {
 // ---------- 해시 ----------
 function wfParseSub(sub) {
   const [id, q] = String(sub || '').split('?');
-  const run = q ? new URLSearchParams(q).get('run') : null;
-  return { id: id || null, run };
+  const p = q ? new URLSearchParams(q) : null;
+  const run = p ? p.get('run') : null;
+  // actions=1: 그 run의 대기 동작 섹션을 열고 그리로 이동 (에이전트 상세 "대기 동작 N개" 링크, 2026-11-21)
+  return { id: id || null, run, actions: !!(p && p.get('actions') === '1') };
 }
 function wfSetHash(id, run) {
   const h = '#workflow' + (id ? '/' + id + (run ? '?run=' + run : '') : '');
@@ -118,14 +125,16 @@ async function workflowOpen(mountEl, sub) {
   if (!root) return;
   const seq = ++wfSeq;
   if (!root.dataset.ready) { wfBuildShell(root); root.dataset.ready = '1'; }
-  const { id, run } = wfParseSub(sub);
+  const { id, run, actions } = wfParseSub(sub);
   await wfLoadList();
   await wfLoadSharedList();
   await wfLoadPending();
+  await wfPaLoad();
   await wfLoadTemplates();
   if (seq !== wfSeq) return;
   if (id) {
     await wfSelect(id, run, true);
+    if (actions && run && seq === wfSeq) wfPaShowRun(run);
   } else if (!wfCur) {
     wfRender();
   }
@@ -133,6 +142,7 @@ async function workflowOpen(mountEl, sub) {
 function workflowLeave() {
   wfSeq++;
   if (wfPoll) { clearTimeout(wfPoll); wfPoll = null; }
+  wfPaStopTimers();
 }
 
 function wfBuildShell(root) {
@@ -143,6 +153,7 @@ function wfBuildShell(root) {
       wfEl('p', { class: 'small', text: '단계를 쌓아 업무를 자동화합니다. 메일 발송 단계는 실행 중 사람의 승인을 거칩니다.' }),
       wfEl('div', { id: 'wfMsg', class: 'wf-msg', role: 'status' }),
       wfEl('div', { id: 'wfPending', class: 'wf-pending' }),
+      wfEl('div', { id: 'wfActions', class: 'wf-pa' }), // 비동기 승인 P3: 대기 동작 (지연 승인)
       wfEl('div', { class: 'wf-layout' },
         wfEl('aside', { class: 'wf-side' },
           wfBtn('+ 새 워크플로우', 'primary', wfNew),
@@ -215,9 +226,288 @@ async function wfLoadPending() {
   }
 }
 
+// ---------- 대기 동작 (비동기 승인 P3, 2026-11-21) ----------
+// 지연 승인(approvalMode: "deferred") 단계·에이전트가 쌓은 메일 발송·웹훅 호출. 위의 "승인 대기"(동기식, run이 멈춘 것)와 별개다.
+// API: GET /api/workflows/pending-actions?status=&run_id=&limit= · POST /api/workflows/pending-actions/decide {ids, action}
+// 헤더 값·메일 본문 전문은 API가 주지 않는다 (요약 args만). hr_admin은 남의 행을 볼 수 있지만 결정은 본인 행만 (남의 id는 404).
+const WF_PA_KO = { queued: '승인 대기', approved: '승인됨 (실행 대기)', executing: '실행 중(확인 필요)', executed: '실행됨', rejected: '거절됨', failed: '실패', expired: '만료' };
+const WF_PA_FILTERS = ['queued', 'approved', 'executing', 'executed', 'rejected', 'failed', 'expired', ''];
+const WF_PA_MAX_IDS = 50; // 결정 API 한 번에 최대 50개
+const WF_PA_POLL_MAX = 40; // approved·executing 폴링 상한 (3초 × 40 = 2분). executing에 멈춘 행이 있어도 무한히 돌지 않게 한다.
+let wfPa = [] /* 목록 (필터 결과) */, wfPaRecentRows = [] /* 필터 밖으로 나간 "방금 결정한" 행 */;
+let wfPaFilter = 'queued', wfPaRunId = null, wfPaLoadErr = '', wfPaBusy = false, wfPaPollN = 0;
+let wfPaSel = new Set(), wfPaRecent = new Set(), wfPaOpen = new Set(), wfPaErr = {}, wfPaRunCache = {};
+let wfPaPollT = null, wfPaAfterT = null, wfRunPending = 0 /* 열린 run의 queued 대기 동작 수 (run 상세 응답 pendingActions) */;
+
+function wfPaStopTimers() {
+  if (wfPaPollT) { clearTimeout(wfPaPollT); wfPaPollT = null; }
+  if (wfPaAfterT) { clearTimeout(wfPaAfterT); wfPaAfterT = null; }
+}
+function wfPaCls(s) { return s === 'executed' ? 'ok' : (s === 'failed' || s === 'rejected' || s === 'expired') ? 'err' : (s === 'queued' || s === 'executing') ? 'warn' : ''; }
+// owner_id는 hr_admin 응답에만 있다. 없으면 본인 행(일반 사용자는 본인 것만 받는다).
+function wfPaMine(a) {
+  if (a.owner_id === undefined || a.owner_id === null) return true;
+  return typeof currentUser !== 'undefined' && !!currentUser && a.owner_id === currentUser.id;
+}
+function wfPaTypeLabel(t) { const d = WF_NODES[t]; return d ? d.label.replace(' (승인 필요)', '') : t; }
+function wfPaSummary(a) {
+  const g = a.args || {};
+  if (a.node_type === 'send_email') {
+    const to = Array.isArray(g.to) ? g.to.join(', ') : (g.to == null ? '' : String(g.to));
+    return `받는 사람: ${to || '-'} · 제목: ${g.subject || '-'}`;
+  }
+  if (a.node_type === 'webhook') return `${g.method || 'POST'} ${g.url || '-'}`;
+  return '';
+}
+function wfPaAll() { return wfPa.concat(wfPaRecentRows); }
+// 확인 대화상자: 페이지 내 대화상자(public/ui-dialog.js). 스크립트가 없을 때만 네이티브 confirm으로 물러난다.
+function wfAsk(msg, opts) { return window.uiConfirm ? window.uiConfirm(msg, opts) : Promise.resolve(confirm(msg)); }
+// 대기 동작 막대 바로 아래 상태 줄 (다시 그려도 남도록 상태로 들고 있다)
+let wfPaNoteText = '', wfPaNoteErr = false;
+function wfPaNote(text, isErr) {
+  wfPaNoteText = text || ''; wfPaNoteErr = !!isErr;
+  const el = $('wfPaNote');
+  if (el) { el.textContent = wfPaNoteText; el.className = 'wf-msg' + (wfPaNoteErr ? ' err' : ''); }
+}
+
+async function wfPaLoad() {
+  const box = $('wfActions');
+  if (!box) return;
+  const seq = wfSeq;
+  if (wfPaPollT) { clearTimeout(wfPaPollT); wfPaPollT = null; }
+  const base = (st) => '/api/workflows/pending-actions?' + (st ? 'status=' + encodeURIComponent(st) + '&' : '') + (wfPaRunId ? 'run_id=' + encodeURIComponent(wfPaRunId) + '&' : '') + 'limit=100';
+  try {
+    wfPa = (await wfApi(base(wfPaFilter))).actions || [];
+    wfPaLoadErr = '';
+    // 필터(예: queued)에서 빠져 나간 "방금 결정한" 행도 상태 변화(approved → executed/failed)를 볼 수 있게 함께 보여준다.
+    wfPaRecentRows = [];
+    if (wfPaFilter && wfPaRecent.size) {
+      const shown = new Set(wfPa.map((a) => a.id));
+      const all = (await wfApi(base(''))).actions || [];
+      wfPaRecentRows = all.filter((a) => wfPaRecent.has(a.id) && !shown.has(a.id));
+    }
+  } catch (e) {
+    wfPa = []; wfPaRecentRows = [];
+    wfPaLoadErr = (e && e.message) || '오류';
+    wfFail(e, '대기 동작을 불러오지 못했습니다');
+  }
+  if (seq !== wfSeq) return;
+  const ids = new Set(wfPaAll().filter((a) => a.status === 'queued').map((a) => a.id));
+  for (const id of [...wfPaSel]) if (!ids.has(id)) wfPaSel.delete(id);
+  wfPaRender();
+  // approved·executing이 남아 있으면 3초 뒤 다시 (전부 최종 상태가 되거나 상한에 닿으면 멈춘다)
+  if (wfPaAll().some((a) => a.status === 'approved' || a.status === 'executing') && wfPaPollN < WF_PA_POLL_MAX) {
+    wfPaPollN++;
+    wfPaPollT = setTimeout(() => { wfPaPollT = null; if (seq === wfSeq) wfPaLoad(); }, 3000);
+  }
+}
+// 사용자가 직접 다시 불러올 때 (필터 변경·새로고침·run 필터) — 폴링 상한을 초기화한다.
+function wfPaReload() { wfPaPollN = 0; return wfPaLoad(); }
+
+function wfPaRender() {
+  const box = $('wfActions');
+  if (!box) return;
+  box.textContent = '';
+  const filterSel = wfEl('select', { id: 'wfPaFilter', 'aria-label': '대기 동작 상태 필터' },
+    WF_PA_FILTERS.map((v) => wfEl('option', { value: v, text: v ? WF_PA_KO[v] : '전체' })));
+  filterSel.value = wfPaFilter;
+  filterSel.onchange = () => { wfPaFilter = filterSel.value; wfPaSel.clear(); wfPaRecent.clear(); wfPaReload(); };
+  const allCb = wfEl('input', { type: 'checkbox', id: 'wfPaAll' });
+  allCb.onchange = () => {
+    const sel = wfPaSelectable();
+    if (allCb.checked) for (const a of sel) wfPaSel.add(a.id); else wfPaSel.clear();
+    for (const cb of box.querySelectorAll('input[data-pa]')) cb.checked = wfPaSel.has(cb.getAttribute('data-pa'));
+    wfPaSyncBar();
+  };
+  const list = wfEl('ul', { class: 'wf-pa-list', id: 'wfPaList' });
+  if (!wfPa.length) {
+    list.append(wfEl('li', { class: 'small wf-pa-empty', text: wfPaLoadErr ? '대기 동작을 불러오지 못했습니다.' : wfPaFilter === 'queued' ? '대기 중인 동작이 없습니다.' : '조건에 맞는 동작이 없습니다.' }));
+  }
+  for (const a of wfPa) list.append(wfPaRow(a));
+  if (wfPaRecentRows.length) {
+    list.append(wfEl('li', { class: 'small wf-pa-sub', text: '방금 결정한 동작' }));
+    for (const a of wfPaRecentRows) list.append(wfPaRow(a));
+  }
+  box.append(
+    wfEl('h3', { text: '대기 동작' + (wfPaFilter === 'queued' && wfPa.length ? ` (${wfPa.length})` : '') }),
+    wfEl('p', { class: 'small', text: '지연 승인으로 쌓인 메일 발송·웹훅 호출입니다. 워크플로우 실행은 이미 계속됐고, 여기서 승인해야 실제로 실행됩니다.' }),
+    wfEl('div', { class: 'wf-actions wf-pa-bar' },
+      filterSel,
+      wfPaRunId ? wfEl('span', { class: 'small wf-pa-runf' }, '실행 ', wfEl('code', { text: wfPaRunId }), '만 보는 중 ') : '',
+      wfPaRunId ? wfBtn('실행 필터 해제', 'secondary', () => { wfPaRunId = null; wfPaSel.clear(); wfPaReload(); }) : '',
+      wfEl('label', { class: 'wf-pa-alllbl', for: 'wfPaAll' }, allCb, ' 전체 선택'),
+      wfBtn('일괄 승인', 'primary', () => wfPaDecide('approve'), { id: 'wfPaApproveBtn' }),
+      wfBtn('일괄 거절', 'secondary wf-danger', () => wfPaDecide('reject'), { id: 'wfPaRejectBtn' }),
+      wfBtn('새로고침', 'secondary', wfPaReload, { id: 'wfPaReloadBtn' })),
+    wfEl('div', { id: 'wfPaNote', class: 'wf-msg' + (wfPaNoteErr ? ' err' : ''), role: 'status', text: wfPaNoteText }),
+    list);
+  wfPaSyncBar();
+}
+// 결정할 수 있는 행: 본인 행 + queued
+function wfPaSelectable() { return wfPaAll().filter((a) => a.status === 'queued' && wfPaMine(a)); }
+function wfPaSyncBar() {
+  const n = wfPaSel.size;
+  const sel = wfPaSelectable();
+  const allCb = $('wfPaAll');
+  if (allCb) { allCb.disabled = wfPaBusy || !sel.length; allCb.checked = sel.length > 0 && sel.every((a) => wfPaSel.has(a.id)); }
+  const ap = $('wfPaApproveBtn'), rj = $('wfPaRejectBtn');
+  if (ap) { ap.disabled = wfPaBusy || !n; ap.textContent = n ? `일괄 승인 (${n})` : '일괄 승인'; }
+  if (rj) { rj.disabled = wfPaBusy || !n; rj.textContent = n ? `일괄 거절 (${n})` : '일괄 거절'; }
+  const box = $('wfActions');
+  if (box) for (const cb of box.querySelectorAll('input[data-pa]')) cb.disabled = wfPaBusy;
+}
+
+function wfPaRow(a) {
+  const mine = wfPaMine(a);
+  const canDecide = mine && a.status === 'queued';
+  let cb = '';
+  if (canDecide) {
+    cb = wfEl('input', { type: 'checkbox', 'data-pa': a.id, 'aria-label': '선택: ' + wfPaSummary(a) });
+    cb.checked = wfPaSel.has(a.id);
+    cb.onchange = () => { if (cb.checked) wfPaSel.add(a.id); else wfPaSel.delete(a.id); wfPaSyncBar(); };
+  }
+  const open = wfPaOpen.has(a.id);
+  const wfName = a.workflow_name || a.workflow_id || '(삭제된 워크플로우)';
+  // 남의 run은 열 수 없다 (run 상세가 소유자 전용) — 본인 행만 링크로 둔다.
+  const runRef = mine && a.workflow_id
+    ? wfBtn(`${wfName} · ${a.run_id}`, 'wf-pa-link', () => wfSelect(a.workflow_id, a.run_id), { title: '실행 상세 열기' })
+    : wfEl('span', { class: 'small', text: `${wfName} · ${a.run_id}` });
+  const errText = wfPaErr[a.id];
+  return wfEl('li', { class: 'wf-pa-row' + (open ? ' open' : ''), 'data-paid': a.id },
+    wfEl('div', { class: 'wf-pa-main' },
+      wfEl('span', { class: 'wf-pa-cb' }, cb),
+      wfEl('div', { class: 'wf-pa-body' },
+        wfEl('div', { class: 'wf-pa-line' },
+          wfBadge(wfPaTypeLabel(a.node_type)), ' ',
+          wfBadge(WF_PA_KO[a.status] || a.status, wfPaCls(a.status)), ' ',
+          a.turn != null ? wfBadge('에이전트') : '', ' ',
+          wfEl('span', { class: 'wf-pa-sum', text: wfPaSummary(a) })),
+        wfEl('div', { class: 'small wf-pa-meta' },
+          runRef, wfEl('span', { text: ` · 만든 시각 ${wfFmtTime(a.created_at)}` }),
+          !mine ? wfEl('span', { class: 'wf-pa-owner', text: ` · 소유자 ${a.owner_id} (본인만 결정할 수 있습니다)` }) : ''),
+        a.status === 'failed' && a.error ? wfEl('div', { class: 'err small', text: a.error }) : '',
+        errText ? wfEl('div', { class: 'err small wf-pa-err', text: errText }) : ''),
+      wfBtn(open ? '접기' : '상세', 'secondary wf-pa-more', () => wfPaToggle(a))),
+    open ? wfPaDetail(a, mine) : '');
+}
+
+function wfPaToggle(a) {
+  if (wfPaOpen.has(a.id)) wfPaOpen.delete(a.id);
+  else {
+    wfPaOpen.add(a.id);
+    if (a.status === 'rejected' && wfPaMine(a)) { delete wfPaRunCache[a.run_id]; wfPaFetchRun(a.run_id); }
+  }
+  wfPaRender();
+}
+async function wfPaFetchRun(runId) {
+  wfPaRunCache[runId] = 'loading';
+  try { wfPaRunCache[runId] = (await wfApi('/api/workflows/runs/' + encodeURIComponent(runId))).run || { error: '실행을 찾을 수 없습니다.' }; }
+  catch (e) { wfPaRunCache[runId] = { error: e.status === 404 ? '실행을 찾을 수 없습니다.' : ((e && e.message) || '실행을 불러오지 못했습니다.') }; }
+  wfPaRender();
+}
+
+function wfPaDetail(a, mine) {
+  const d = wfEl('div', { class: 'wf-pa-detail small' });
+  const g = a.args || {};
+  if (a.node_type === 'send_email' && g.bodyPreview) d.append(wfEl('div', { text: `본문 미리보기 (${g.bodyLength ?? '?'}자 중 앞부분): ${g.bodyPreview}` }));
+  if (a.node_type === 'webhook') {
+    if (Array.isArray(g.headerKeys) && g.headerKeys.length) d.append(wfEl('div', { text: '헤더 이름: ' + g.headerKeys.join(', ') + ' (값은 표시하지 않습니다)' }));
+    if (g.bodyPreview) d.append(wfEl('div', { text: '본문 미리보기: ' + g.bodyPreview }));
+  }
+  if (a.simulated_output != null) d.append(wfEl('div', { class: 'wf-out', text: '시뮬레이션 출력 (run이 계속 진행할 때 쓴 값): ' + wfOutSummary(a.simulated_output) }));
+  if (a.status === 'queued' && mine && a.workflow_id) {
+    d.append(wfEl('div', {}, wfBtn('이 동작을 만든 실행 상세로 이동', 'secondary', () => wfSelect(a.workflow_id, a.run_id))));
+  }
+  if (a.decided_at) d.append(wfEl('div', { text: '결정 ' + wfFmtTime(a.decided_at) + (a.executed_at ? ' · 실행 ' + wfFmtTime(a.executed_at) : '') }));
+  if (a.result != null) d.append(wfEl('div', { class: 'wf-out', text: '실행 결과: ' + wfOutSummary(a.result) }));
+  if (a.status === 'executing') d.append(wfEl('p', { class: 'wf-note', text: '실행을 시작했지만 결과가 기록되지 않았습니다. 메일·웹훅이 실제로 나갔는지 받는 쪽에서 확인하세요. 다시 실행하지 않습니다.' }));
+  if (a.status === 'rejected') {
+    d.append(wfEl('p', { class: 'wf-note', text: '이 동작을 거절해도 뒤에 이미 실행된 단계는 되돌려지지 않습니다.' }));
+    if (!mine) { d.append(wfEl('div', { text: '다른 사용자의 실행이라 단계 목록을 볼 수 없습니다.' })); return d; }
+    const run = wfPaRunCache[a.run_id];
+    if (!run || run === 'loading') { d.append(wfEl('div', { text: '실행 단계를 불러오는 중…' })); return d; }
+    if (run.error) { d.append(wfEl('div', { class: 'err', text: run.error })); return d; }
+    const after = (run.steps || []).filter((s) => s.step_index > a.step_index && s.status === 'succeeded');
+    d.append(wfEl('b', { text: '이 동작 뒤에 이미 실행된 단계' }));
+    if (!after.length) d.append(wfEl('div', { text: '없습니다.' }));
+    else d.append(wfEl('ul', { class: 'wf-pa-after' }, after.map((s) => wfEl('li', {},
+      wfEl('b', { text: s.node_name }), ' ', wfBadge(wfPaTypeLabel(s.node_type)), wfEl('span', { text: ' 종료 ' + wfFmtTime(s.finished_at) })))));
+  }
+  return d;
+}
+
+async function wfPaDecide(action) {
+  const rows = wfPaSelectable().filter((a) => wfPaSel.has(a.id));
+  const ids = rows.map((a) => a.id);
+  if (!ids.length) { wfPaNote('결정할 동작을 선택하세요.', true); return; }
+  if (wfPaBusy) return;
+  const label = action === 'approve' ? '승인' : '거절';
+  const nMail = rows.filter((a) => a.node_type === 'send_email').length, nHook = rows.filter((a) => a.node_type === 'webhook').length;
+  // 2026-11-21 브라우저 회귀: 네이티브 confirm()은 자동화·내장 브라우저에서 확인창 없이 false를 돌려줘 버튼이 조용히 무반응이었다 → 페이지 내 대화상자.
+  const ask = action === 'approve'
+    ? `선택한 ${ids.length}개 동작(메일 ${nMail}개 · 웹훅 ${nHook}개)을 승인할까요?\n승인하면 메일이 실제로 발송되고 웹훅이 실제로 호출됩니다. 되돌릴 수 없습니다.`
+    : `선택한 ${ids.length}개 동작을 거절할까요? 거절한 동작은 실행되지 않습니다.\n이 동작 뒤에 이미 실행된 단계는 되돌려지지 않습니다.`;
+  wfPaBusy = true; wfPaSyncBar(); // 대화상자가 떠 있는 동안 버튼을 다시 눌러 대화상자가 겹치지 않게
+  const yes = await wfAsk(ask, { title: `대기 동작 일괄 ${label}`, okText: `${ids.length}개 ${label}`, danger: true });
+  if (!yes) { wfPaBusy = false; wfPaSyncBar(); wfPaNote(`${label}을 취소했습니다.`); return; }
+  wfPaErr = {};
+  wfPaNote(`${ids.length}개 ${label} 중…`);
+  const results = [];
+  let reqErr = null;
+  try {
+    for (let i = 0; i < ids.length; i += WF_PA_MAX_IDS) {
+      const j = await wfApi('/api/workflows/pending-actions/decide', { method: 'POST', body: JSON.stringify({ ids: ids.slice(i, i + WF_PA_MAX_IDS), action }) });
+      results.push(...(j.results || []));
+    }
+  } catch (e) { reqErr = e; wfFail(e, label + '하지 못했습니다'); }
+  wfPaBusy = false;
+  if (reqErr) {
+    const m = (reqErr.status === 401 ? '로그인이 필요합니다. 로그인 후 다시 시도하세요.' : (reqErr.message || '오류가 발생했습니다.'));
+    wfPaNote(`${label}하지 못했습니다: ${m}`, true);
+    if (window.uiToast) uiToast(`${label}하지 못했습니다: ${m}`, true);
+  }
+  let ok = 0;
+  const failed = [];
+  for (const r of results) {
+    wfPaSel.delete(r.id);
+    if (r.code === 200) { ok++; wfPaRecent.add(r.id); continue; }
+    const why = r.code === 404 ? '대기 동작을 찾을 수 없습니다 (본인 동작이 아니거나 없는 동작).'
+      : r.code === 409 ? (r.error || `이미 결정된 동작입니다 (${r.status}).`)
+      : (r.error || '처리하지 못했습니다. 다시 시도하세요.');
+    wfPaErr[r.id] = why;
+    failed.push(why);
+  }
+  wfPaPollN = 0;
+  await wfPaLoad();
+  if (results.length) {
+    // 목록에서 사라진 행(예: 409로 상태가 바뀜)의 사유도 놓치지 않게 메시지에 함께 적는다.
+    const shown = new Set(wfPaAll().map((a) => a.id));
+    const hidden = results.filter((r) => r.code !== 200 && !shown.has(r.id)).map((r) => wfPaErr[r.id]);
+    const msg = `${ok}개 ${label}했습니다.` + (failed.length ? ` ${failed.length}개는 처리하지 못했습니다` + (hidden.length ? ': ' + [...new Set(hidden)].join(' / ') : ' (목록에 사유 표시).') : '') + (action === 'approve' && ok ? ' 실행 결과는 몇 초 안에 목록에 반영됩니다.' : '');
+    wfMsg(msg, failed.length > 0);
+    wfPaNote(msg, failed.length > 0); // 위쪽 메시지 줄은 화면 밖일 수 있다 — 대기 동작 막대 바로 아래에도 남긴다
+    if (window.uiToast) uiToast(msg, failed.length > 0);
+  } else if (!reqErr) {
+    wfPaNote('서버가 결과를 돌려주지 않았습니다. 새로고침으로 상태를 확인하세요.', true);
+  }
+  // 승인된 행은 approved → 수 초 안에 executed/failed. 4초 뒤 한 번 더 불러온다 (폴링과 별개로 1회).
+  if (action === 'approve' && ok) {
+    const seq = wfSeq;
+    if (wfPaAfterT) clearTimeout(wfPaAfterT);
+    wfPaAfterT = setTimeout(() => { wfPaAfterT = null; if (seq === wfSeq) wfPaLoad(); }, 4000);
+  }
+  // 열린 run의 "대기 동작 N개" 배지 갱신
+  if (wfRun && rows.some((a) => a.run_id === wfRun.id) && wfCur && wfCur.id) await wfOpenRun(wfRun.id);
+}
+// run 상세의 "대기 동작 N개" 배지 → 그 run의 queued 동작만 보여 주고 섹션으로 이동
+function wfPaShowRun(runId) {
+  wfPaRunId = runId; wfPaFilter = 'queued'; wfPaSel.clear(); wfPaRecent.clear();
+  wfPaReload().then(() => { const b = $('wfActions'); if (b && b.scrollIntoView) b.scrollIntoView({ behavior: 'smooth', block: 'start' }); });
+}
+
 // ---------- 선택 / 새로 만들기 ----------
-function wfNew() {
-  if (!wfConfirmLeave()) return;
+async function wfNew() {
+  if (!(await wfConfirmLeave())) return;
   wfCur = { id: null, name: '', description: '', status: 'draft', steps: [] };
   wfRuns = []; wfRun = null; wfEditIdx = null; wfDirty = false; wfShares = [];
   wfSetHash(null);
@@ -225,12 +515,13 @@ function wfNew() {
 }
 // ---------- 기업용 템플릿 (2026-11-19) ----------
 const WF_APPROVAL_TYPES = ['send_email', 'webhook'];
+const WF_DEFERRABLE_TYPES = ['send_email', 'webhook', 'agent']; // 비동기 승인: approvalMode "deferred"를 쓸 수 있는 단계 (서버 validateDefinition과 같음)
 async function wfLoadTemplates() {
   try { wfTemplates = (await wfApi('/api/workflows/templates')).templates || []; }
   catch (e) { wfTemplates = []; if (e.status === 401) wfFail(e); }
 }
-function wfShowIntro() {
-  if (!wfConfirmLeave()) return;
+async function wfShowIntro() {
+  if (!(await wfConfirmLeave())) return;
   wfCur = null; wfRuns = []; wfRun = null; wfEditIdx = null; wfDirty = false;
   wfSetHash(null);
   wfRender();
@@ -274,10 +565,15 @@ async function wfUseTemplate(tplId) {
     wfMsg(`"${t.name}" 템플릿으로 만들었습니다. 이름을 바꾸고, 각 단계의 설정을 바꾼 뒤 저장하세요. 실행 입력 예시는 "고급 입력"에 채워져 있습니다.`);
   } catch (e) { wfFail(e, '템플릿으로 만들지 못했습니다'); for (const b of btns()) b.disabled = false; }
 }
-function wfConfirmLeave() { return !wfDirty || confirm('저장하지 않은 변경이 있습니다. 버리고 이동할까요?'); }
+// 2026-11-22: 네이티브 confirm() → 페이지 내 대화상자. 이 확인은 페이지를 떠날 때(beforeunload)가 아니라 화면 안에서
+// 다른 워크플로우·새 워크플로우·템플릿 화면으로 옮길 때만 불린다 (부르는 곳 3곳 모두 버튼 클릭) → Promise로 바꿀 수 있다.
+function wfConfirmLeave() {
+  if (!wfDirty) return Promise.resolve(true);
+  return wfAsk('저장하지 않은 변경이 있습니다. 버리고 이동할까요?', { title: '저장하지 않은 변경', okText: '버리고 이동', cancelText: '계속 편집', danger: true });
+}
 
 async function wfSelect(id, runId, force) {
-  if (!force && !wfConfirmLeave()) return;
+  if (!force && !(await wfConfirmLeave())) return;
   const seq = wfSeq;
   try {
     const j = await wfApi('/api/workflows/' + encodeURIComponent(id));
@@ -513,7 +809,7 @@ async function wfScheduleToggle(sid, cb) {
   finally { cb.disabled = false; }
 }
 async function wfScheduleDelete(sid) {
-  if (!confirm('이 스케줄을 삭제할까요?')) return;
+  if (!(await wfAsk('이 스케줄을 삭제할까요?', { title: '스케줄 삭제', okText: '삭제', danger: true }))) return;
   try {
     await wfApi(`/api/workflows/${encodeURIComponent(wfCur.id)}/schedules/${encodeURIComponent(sid)}`, { method: 'DELETE' });
     await wfLoadSchedules();
@@ -537,8 +833,9 @@ async function wfHomeCard(box) {
       for (const x of n) { const m = x.type === 'WORKFLOW_APPROVAL' && /\?run=(.+)$/.exec(x.link || ''); if (m) waiting.add(m[1]); }
     } catch { /* 알림 조회 실패는 무시 */ }
     box.textContent = '';
-    box.append(wfEl('div', { class: 'small', text: `내 워크플로우 ${list.length}개` }),
-      waiting.size ? wfEl('div', {}, wfBadge(`승인 대기 ${waiting.size}`, 'err')) : null);
+    box.append(wfEl('div', { class: 'small', text: `내 워크플로우 ${list.length}개` }));
+    // Element.append(null)은 글자 "null"을 붙인다 — 승인 대기 배지는 있을 때만 붙인다.
+    if (waiting.size) box.append(wfEl('div', {}, wfBadge(`승인 대기 ${waiting.size}`, 'err')));
     if (!runs.length) box.append(wfEl('p', { class: 'empty', text: '최근 실행이 없습니다.' }));
     for (const r of runs) {
       box.append(wfEl('div', { class: 'taskrow', style: 'cursor:pointer', onclick: () => switchTab('workflow/' + r.workflow_id + '?run=' + r.id) },
@@ -598,7 +895,8 @@ function wfRenderSteps() {
           wfEl('b', { text: s.name }), ' ',
           wfBadge(def.label), ' ',
           wfEl('span', { class: 'small', text: s.id }),
-          s.type === 'send_email' || s.requiresApproval ? wfBadge('승인 필요', 'warn') : null),
+          s.type === 'send_email' || s.requiresApproval ? wfBadge('승인 필요', 'warn') : null,
+          s.approvalMode === 'deferred' ? wfBadge('지연 승인', 'warn') : null),
         wfEl('div', { class: 'small wf-step-sum', text: wfSummary(s) }),
         wfEl('div', { class: 'small wf-step-next', text: wfcNextLabel(wfCur.steps, i) })), // WF-10: 간선 1줄
       wfEl('div', { class: 'wf-step-ctl' },
@@ -614,8 +912,13 @@ function wfMove(i, d) {
   [wfCur.steps[i], wfCur.steps[j]] = [wfCur.steps[j], wfCur.steps[i]];
   wfEditIdx = null; wfDirty = true; wfRenderSteps(); wfRenderStepForm();
 }
-function wfRemove(i) {
-  if (!confirm(`"${wfCur.steps[i].name}" 단계를 삭제할까요?`)) return;
+async function wfRemove(i) {
+  const cur = wfCur, step = cur && cur.steps[i];
+  if (!step) return;
+  if (!(await wfAsk(`"${step.name}" 단계를 삭제할까요?`, { title: '단계 삭제', okText: '삭제', danger: true }))) return;
+  if (wfCur !== cur) return; // 대화상자가 떠 있는 동안 다른 워크플로우로 바뀌었으면 하지 않는다
+  i = cur.steps.indexOf(step);
+  if (i < 0) return;
   const removed = wfCur.steps.splice(i, 1)[0]; // id는 다시 부여하지 않는다
   wfCleanupEdgesAfterDelete(removed.id); // WF-10: 삭제된 단계를 가리키던 next 정리 (폼·캔버스 공용) + 1줄 알림
   wfEditIdx = null; wfDirty = true; wfRender();
@@ -684,6 +987,28 @@ function wfRenderStepForm() {
       }
       fieldsBox.append(wfEl('label', { class: 'wf-label', for: id, text: label + (req ? ' *' : '') }), inp);
     }
+    // 비동기 승인 P3: 승인 방식 (send_email·webhook·agent). 동기식 = approvalMode 없음(기본), 지연 = approvalMode: "deferred".
+    if (WF_DEFERRABLE_TYPES.includes(t)) {
+      const am = wfEl('select', { id: 'wff__approvalMode' },
+        wfEl('option', { value: '', text: '동기식 (실행 중 멈추고 승인 대기)' }),
+        wfEl('option', { value: 'deferred', text: '지연 (대기열에 쌓고 실행은 계속)' }));
+      am.value = editing && editing.approvalMode === 'deferred' ? 'deferred' : '';
+      const amHint = wfEl('p', { class: 'small wf-hint', id: 'wfAmHint' });
+      const syncHint = () => {
+        amHint.textContent = am.value !== 'deferred' ? ''
+          : t === 'agent' ? '지연은 에이전트가 고른 메일 발송·웹훅에만 적용됩니다. 그 동작은 "대기 동작"에 쌓이고, 에이전트는 실행된 것으로 보지 않고 계속합니다.'
+          : '이 단계는 실제로 실행되지 않고 "대기 동작"에 쌓이며, 실행은 다음 단계로 계속됩니다. 승인해야 실제로 실행됩니다. 뒤 단계에서 이 단계의 출력을 참조할 수 없습니다' + (t === 'webhook' ? ' (GET 웹훅은 지연할 수 없습니다).' : '.');
+      };
+      am.onchange = syncHint;
+      syncHint();
+      fieldsBox.append(wfEl('label', { class: 'wf-label', for: 'wff__approvalMode', text: '승인 방식' }), am, amHint);
+    }
+    // PPTX 편집 (2026-11-21): 선택 승인 게이트 — 켜면 엔진이 이 단계 앞에서 멈추고 승인 뒤에만 편집·저장한다 (requiresApproval: true).
+    if (t === 'pptx_edit' || t === 'xlsx_edit' || t === 'docx_create' || t === 'docx_edit') { // xlsx_edit·docx_create (2026-11-21)·docx_edit (2026-11-22)도 같은 선택 승인 게이트
+      const ra = wfEl('input', { type: 'checkbox', id: 'wff__requiresApproval' });
+      ra.checked = !!(editing && editing.requiresApproval === true);
+      fieldsBox.append(wfEl('label', { class: 'wf-label', for: 'wff__requiresApproval' }, ra, t === 'docx_create' ? ' 승인 뒤에 만들기 (실행 중 멈추고 승인 대기)' : ' 승인 뒤에 편집 (실행 중 멈추고 승인 대기)'));
+    }
   };
   typeSel.onchange = drawFields;
 
@@ -722,6 +1047,14 @@ function wfRenderStepForm() {
     }
     const step = { id: editing ? editing.id : wfNextId(), type: t, name, config };
     if (def.approval) step.requiresApproval = true;
+    else if (t === 'pptx_edit' || t === 'xlsx_edit' || t === 'docx_create' || t === 'docx_edit') { if ($('wff__requiresApproval') && $('wff__requiresApproval').checked) step.requiresApproval = true; }
+    else if (editing && editing.requiresApproval !== undefined) step.requiresApproval = editing.requiresApproval; // agent 등: JSON으로 준 값을 편집 때 잃지 않는다
+    const amSel = $('wff__approvalMode');
+    if (amSel && amSel.value === 'deferred') {
+      if (t === 'webhook' && config.method === 'GET') { err.textContent = 'GET 웹훅은 지연 승인할 수 없습니다 (읽기 결과를 미리 알 수 없음). 승인 방식을 동기식으로 바꾸거나 메서드를 바꾸세요.'; return; }
+      if (t === 'agent' && step.requiresApproval === true) { err.textContent = '모든 도구 승인(requiresApproval: true)인 에이전트는 지연 승인할 수 없습니다.'; return; }
+      step.approvalMode = 'deferred';
+    }
     if (editing && editing.next !== undefined) step.next = editing.next; // WF-7: 캔버스에서 만든 간선을 편집 때 잃지 않는다
     if (editing) wfCur.steps[wfEditIdx] = step; else wfCur.steps.push(step);
     wfEditIdx = null; wfDirty = true; wfRender();
@@ -767,14 +1100,28 @@ async function wfSave() {
     await wfLoadShares(); wfRenderShareArea();
     await wfLoadSchedules(); wfRenderScheduleArea();
     wfMsg('저장했습니다.');
-  } catch (e) { wfFail(e, '저장하지 못했습니다'); }
+  } catch (e) {
+    wfFail(e, '저장하지 못했습니다');
+    // 비동기 승인 P3: 서버 검증 400(지연 단계 출력 참조·GET 웹훅 지연·모든 도구 승인 agent 지연 등)은 해당 단계 편집기를 열어 메시지를 그대로 보여준다.
+    if (e && e.status === 400) {
+      const m = /steps\[(\d+)\]/.exec(e.message || '');
+      const i = m ? Number(m[1]) : -1;
+      if (wfCur && i >= 0 && i < wfCur.steps.length) {
+        wfEditIdx = i; wfRenderStepForm();
+        const se = $('wfStepErr');
+        if (se) se.textContent = e.message;
+      }
+    }
+  }
   finally { const b = $('wfSaveBtn'); if (b) b.disabled = false; }
 }
 async function wfDelete() {
   if (!wfCur || !wfCur.id) return;
-  if (!confirm(`"${wfCur.name}" 워크플로우와 실행 기록을 삭제할까요? 되돌릴 수 없습니다.`)) return;
+  const cur = wfCur;
+  if (!(await wfAsk(`"${cur.name}" 워크플로우와 실행 기록을 삭제할까요? 되돌릴 수 없습니다.`, { title: '워크플로우 삭제', okText: '삭제', danger: true }))) return;
+  if (wfCur !== cur) return; // 대화상자가 떠 있는 동안 다른 워크플로우로 바뀌었으면 하지 않는다
   try {
-    await wfApi('/api/workflows/' + encodeURIComponent(wfCur.id), { method: 'DELETE' });
+    await wfApi('/api/workflows/' + encodeURIComponent(cur.id), { method: 'DELETE' });
     wfCur = null; wfRuns = []; wfRun = null; wfDirty = false;
     wfSetHash(null);
     await wfLoadList();
@@ -853,6 +1200,7 @@ async function wfOpenRun(runId) {
     const j = await wfApi('/api/workflows/runs/' + encodeURIComponent(runId));
     if (seq !== wfSeq) return;
     wfRun = j.run;
+    wfRunPending = Number(j.pendingActions) || 0; // 비동기 승인 P1: 이 run이 쌓은 queued 대기 동작 수
     if (wfCur && wfCur.id) wfSetHash(wfCur.id, runId);
     // 목록의 같은 run 상태도 갱신
     const i = wfRuns.findIndex((r) => r.id === runId);
@@ -861,6 +1209,7 @@ async function wfOpenRun(runId) {
     wfRenderRunDetail();
     if (wfRun.status === 'queued' || wfRun.status === 'running') wfPoll = setTimeout(() => { if (seq === wfSeq && wfRun && wfRun.id === runId) wfOpenRun(runId); }, 3000);
     if (wfRun.status === 'waiting_approval' || wfRun.status === 'succeeded' || wfRun.status === 'failed') wfLoadPending();
+    if (wfRun.status === 'succeeded' && wfRunPending > 0) wfPaLoad(); // 지연 동작이 쌓인 채 끝난 run → 대기 동작 섹션도 갱신
   } catch (e) { wfFail(e, '실행을 불러오지 못했습니다'); }
 }
 
@@ -880,7 +1229,8 @@ function wfRenderRunDetail() {
   const r = wfRun;
   box.append(wfEl('h3', { text: '실행 상세' }),
     wfEl('div', { class: 'wf-run-head' }, wfBadge(WF_RUN_KO[r.status] || r.status, wfRunCls(r.status)),
-      wfEl('span', { class: 'small', text: ` 시작 ${wfFmtTime(r.started_at)}${r.finished_at ? ' · 종료 ' + wfFmtTime(r.finished_at) : ''}` })));
+      wfEl('span', { class: 'small', text: ` 시작 ${wfFmtTime(r.started_at)}${r.finished_at ? ' · 종료 ' + wfFmtTime(r.finished_at) : ''}` }),
+      wfRunPending > 0 ? wfBtn(`대기 동작 ${wfRunPending}개`, 'badge warn wf-pa-jump', () => wfPaShowRun(r.id), { id: 'wfRunPendingBtn', title: '이 실행이 쌓은 승인 대기 동작 보기' }) : ''));
   if (r.error) box.append(wfEl('div', { class: 'err', text: r.error }));
   if (r.status === 'waiting_approval') {
     box.append(wfEl('div', { class: 'wf-approve' },
@@ -893,9 +1243,12 @@ function wfRenderRunDetail() {
   const tl = wfEl('ol', { class: 'wf-timeline' });
   steps.forEach((s) => {
     const def = WF_NODES[s.node_type];
+    // 비동기 승인 P3: 지연 승인 단계는 시뮬레이션 출력(simulated: true)으로 끝난다 — 실제 실행은 "대기 동작"에서 승인해야 한다.
+    const simulated = !!(s.output && typeof s.output === 'object' && s.output.simulated === true);
     tl.append(wfEl('li', { class: 'wf-tl wf-tl-' + s.status },
       wfEl('div', {}, wfEl('b', { text: s.node_name }), ' ', wfBadge(def ? def.label : s.node_type), ' ',
         wfBadge(WF_STEP_KO[s.status] || s.status, wfRunCls(s.status)),
+        simulated ? ' ' : '', simulated ? wfEl('span', { class: 'badge warn', text: '승인 대기', title: '시뮬레이션된 단계입니다. 실제 실행은 "대기 동작"에서 승인해야 합니다.' }) : '',
         wfEl('span', { class: 'small', text: ' ' + wfDuration(s.started_at, s.finished_at) })),
       s.output != null ? wfEl('div', { class: 'small wf-out', text: wfOutSummary(s.output) }) : null,
       s.error ? wfEl('div', { class: 'err', text: s.error }) : null));
@@ -907,16 +1260,19 @@ function wfRenderRunDetail() {
 async function wfDecide(action) {
   if (!wfRun) return;
   const label = action === 'approve' ? '승인' : '거절';
-  if (action === 'approve' && !confirm('승인하면 메일 발송 등 다음 단계가 실제로 실행됩니다. 승인할까요?')) return;
+  // 동기식 승인도 같은 이유로 페이지 내 대화상자 (2026-11-21 브라우저 회귀 — 네이티브 confirm이 자동 거절되면 무반응)
+  if (action === 'approve' && !(await wfAsk('승인하면 메일 발송 등 다음 단계가 실제로 실행됩니다. 승인할까요?', { title: '실행 승인', okText: '승인', danger: true }))) { wfMsg('승인을 취소했습니다.'); return; }
   for (const id of ['wfApproveBtn', 'wfRejectBtn']) { const b = $(id); if (b) b.disabled = true; }
   const runId = wfRun.id;
   try {
     await wfApi(`/api/workflows/runs/${encodeURIComponent(runId)}/${action}`, { method: 'POST' });
     wfMsg(label + '했습니다.');
+    if (window.uiToast) uiToast(label + '했습니다.');
   } catch (e) {
     if (e.status === 409) wfMsg('이미 처리됐거나 승인 대기 상태가 아닙니다: ' + e.message, true);
     else if (e.status === 404) wfMsg('실행을 찾을 수 없습니다.', true);
     else wfFail(e, label + '하지 못했습니다');
+    if (window.uiToast) uiToast(label + '하지 못했습니다: ' + ((e && e.message) || '오류'), true);
   }
   await wfOpenRun(runId);
   await wfLoadPending();

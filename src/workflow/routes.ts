@@ -17,6 +17,8 @@
 //   GET    /runs/:runId       run 상세 + steps
 //   POST   /runs/:runId/approve  승인 대기 run 재개 (WF-4). 없음/타인 404, 대기 아님 409. 본문 불필요
 //   POST   /runs/:runId/reject   승인 대기 run 취소 (WF-4). 같은 규칙
+//   GET    /pending-actions      비동기 승인 P2: 대기 동작 목록 (본인 것, hr_admin은 전부)
+//   POST   /pending-actions/decide  {ids, action: approve|reject} — 승인하면 workflow-action 큐 메시지로 실행
 //   POST   /:id/schedules             스케줄·이벤트 트리거 생성 (WF-8). {trigger_type:"schedule",cron} | {trigger_type:"event",event:"transcript_completed"}
 //   GET    /:id/schedules             목록
 //   PATCH  /:id/schedules/:sid        {enabled} 토글만
@@ -37,6 +39,7 @@ import {
 } from "./sharing";
 import { cancelWorkflowRun, checkWorkflowRateLimit, resumeWorkflowRun, stepMessage } from "./engine";
 import { WORKFLOW_TEMPLATES } from "./templates";
+import { DECIDE_MAX_IDS, PENDING_ACTION_STATUSES, decidePendingActions, listPendingActions } from "./pending-actions";
 import { validateDefinition, WORKFLOW_STATUSES, type Env, type WorkflowDefinition, type WorkflowStatus } from "./types";
 
 export const workflowApp = new Hono<{ Bindings: Env }>();
@@ -128,6 +131,33 @@ workflowApp.get("/templates", async (c) => {
   return c.json({ templates: WORKFLOW_TEMPLATES });
 });
 
+// ---- 비동기 승인 P2: 대기 동작 승인함 (/:id보다 먼저 등록) ----
+// GET  /pending-actions?status=&run_id=&limit=   본인 것만 (hr_admin은 전부 + owner_id). 최신순. 헤더 값·메일 본문 전문은 싣지 않는다.
+// POST /pending-actions/decide {ids, action}     id마다 { id, status, code }. 남의 id·없는 id 404, queued 아님 409.
+workflowApp.get("/pending-actions", async (c) => {
+  const u = await requireUser(c);
+  const status = c.req.query("status") || undefined;
+  if (status && !(PENDING_ACTION_STATUSES as readonly string[]).includes(status)) {
+    throw new WfError(400, `상태(status)는 ${PENDING_ACTION_STATUSES.join(" | ")} 중 하나여야 합니다.`);
+  }
+  const runId = c.req.query("run_id") || undefined;
+  const lim = Number(c.req.query("limit") ?? "100");
+  const actions = await listPendingActions(c.env, u, { status, runId, limit: Number.isFinite(lim) ? Math.trunc(lim) : 100 });
+  return c.json({ actions });
+});
+
+workflowApp.post("/pending-actions/decide", async (c) => {
+  const u = await requireUser(c, true);
+  const b = await readJson(c, 16 * 1024);
+  if (b.action !== "approve" && b.action !== "reject") throw new WfError(400, "action은 approve | reject 중 하나여야 합니다.");
+  const ids = b.ids;
+  if (!Array.isArray(ids) || ids.length < 1 || ids.length > DECIDE_MAX_IDS || !ids.every((x) => typeof x === "string" && x.length > 0 && x.length <= 200)) {
+    throw new WfError(400, `ids는 1~${DECIDE_MAX_IDS}개의 대기 동작 id(문자열) 배열이어야 합니다.`);
+  }
+  const results = await decidePendingActions(c.env, u.id, [...new Set(ids as string[])], b.action);
+  return c.json({ results });
+});
+
 workflowApp.post("/", async (c) => {
   const u = await requireUser(c, true);
   const b = await readJson(c);
@@ -143,7 +173,14 @@ workflowApp.get("/runs/:runId", async (c) => {
   const u = await requireUser(c);
   const run = await getRun(c.env.DB, u.id, c.req.param("runId"));
   if (!run) throw new WfError(404, "실행을 찾을 수 없습니다.");
-  return c.json({ run });
+  // 비동기 승인 P1: 이 run이 쌓은 승인 대기 동작(queued) 수. 테이블이 없으면(0042 미적용) 0 — 기존 응답을 깨지 않는다.
+  let pendingActions = 0;
+  try {
+    const row = await c.env.DB.prepare("SELECT COUNT(*) AS n FROM workflow_pending_actions WHERE run_id = ? AND owner_id = ? AND status = 'queued'")
+      .bind(c.req.param("runId"), u.id).first<{ n: number }>();
+    pendingActions = row?.n ?? 0;
+  } catch { /* 0042 미적용 */ }
+  return c.json({ run, pendingActions });
 });
 
 // 전체 점검(2026-11-18) P1: 공유·템플릿·복사로 남에게 나가는 정의에서는 웹훅 헤더 **값**을 비운다 (키는 유지).

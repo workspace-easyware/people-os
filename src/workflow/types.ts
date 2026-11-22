@@ -10,6 +10,12 @@ export type Env = {
   AGENT_SESSION: DurableObjectNamespace;
   /** WF-6 에이전트 루프 DO (WorkflowAgent). id = idFromName(`agent:<runId>:<stepIndex>`). */
   WORKFLOW_AGENT: DurableObjectNamespace;
+  /** Think T1: agent 단계의 Think 런타임 DO (ThinkAgent, wrangler.toml 마이그레이션 v4). 이름 = `think:<runId>:<stepIndex>`. */
+  ThinkAgent?: DurableObjectNamespace<import("./think-agent").ThinkAgent>;
+  /** Think T1: 새로 시작하는 agent 단계의 런타임. "think"가 아니면 전부 legacy (WorkflowAgent). [vars]에서 설정. */
+  AGENT_RUNTIME?: string;
+  /** Think T2: 사용자당 어시스턴트 DO (AssistantAgent, wrangler.toml 마이그레이션 v5). 이름 = `assistant:<userId>`. 워크플로 agent 단계(ThinkAgent)와 클래스가 다르다. */
+  ASSISTANT_AGENT?: DurableObjectNamespace<import("../assistant/agent").AssistantAgent>;
   /** DO-2 알림 허브 (선택 — 없으면 푸시는 건너뛰고 폴링이 폴백). */
   NOTIFICATION_HUB?: DurableObjectNamespace;
   ASSETS: Fetcher;
@@ -21,16 +27,19 @@ export type Env = {
   RESEND_API_KEY?: string;
   CF_ACCOUNT_ID?: string;
   AIG_LOGS_TOKEN?: string;
+  /** 문서 편집 PPTX·XLSX·DOCX (2026-11-21, 2026-11-22 개명·DOCX 추가): 별도 Worker people-os-doc-editor 서비스 바인딩 (src/pptx/types.ts PptxEditorRpc, src/xlsx/types.ts XlsxEditorRpc, src/docx/edit-types.ts DocxEditorRpc). */
+  DOC_EDITOR?: Fetcher;
 };
 
-export const NODE_TYPES = ['ask_rag','ask_personal','transcribe','summarize','reflect_coach','reflect_coachee','draft_pptx','email_draft','send_email','create_task','llm','create_calendar_event','agent','condition','webhook'] as const;
+export const NODE_TYPES = ['ask_rag','ask_personal','transcribe','summarize','reflect_coach','reflect_coachee','draft_pptx','email_draft','send_email','create_task','llm','create_calendar_event','agent','condition','webhook','pptx_edit','xlsx_edit','docx_create','docx_edit'] as const;
 export type NodeType = typeof NODE_TYPES[number];
 /** 레지스트리에서 실행되는 도구 노드. agent 자신은 도구가 아니다 — 엔진이 루프를 몬다 (WF-6). */
 export type ToolNodeType = Exclude<NodeType, 'agent'>;
 /** condition(WF-7)은 레지스트리에서 실행되는 노드지만 흐름 제어용이라 에이전트의 도구 목록에서는 뺀다 (에이전트는 스스로 판단한다). */
 export const TOOL_NODE_TYPES: ToolNodeType[] = NODE_TYPES.filter((t): t is ToolNodeType => t !== 'agent' && t !== 'condition');
 /** agent 노드가 config.tools를 생략했을 때 쓸 수 있는 도구: 외부로 나가는 send_email·webhook(WF-9)을 뺀 나머지. 둘은 tools에 명시해야만 쓸 수 있다. */
-export const AGENT_DEFAULT_TOOLS: ToolNodeType[] = TOOL_NODE_TYPES.filter((t) => t !== 'send_email' && t !== 'webhook');
+/** pptx_edit·xlsx_edit·docx_create(2026-11-21)·docx_edit(2026-11-22)도 기본 목록에서 뺀다 — 기존 agent 단계의 도구 목록·동작이 바뀌지 않게 하고, 쓰려면 tools에 명시한다. */
+export const AGENT_DEFAULT_TOOLS: ToolNodeType[] = TOOL_NODE_TYPES.filter((t) => t !== 'send_email' && t !== 'webhook' && t !== 'pptx_edit' && t !== 'xlsx_edit' && t !== 'docx_create' && t !== 'docx_edit');
 export const AGENT_MAX_STEPS = 10;
 export const AGENT_GOAL_MAX = 2000;
 /** agent 노드 config (WF-6). */
@@ -54,15 +63,34 @@ export type StepStatus = 'pending' | 'running' | 'succeeded' | 'failed' | 'skipp
  * 루프는 만들지 않는다: 반복이 필요하면 스케줄(WF-8)을 쓴다.
  */
 export type StepNext = string | null | { true: string | null; false: string | null };
-export interface WorkflowStepDef { id: string; type: NodeType; name: string; config: Record<string, unknown>; requiresApproval?: boolean; next?: StepNext; }
+/**
+ * 비동기 승인 P1 (2026-11-21): `approvalMode: "deferred"`면 승인 단계(send_email·webhook)에서 run이 멈추지 않는다.
+ * 노드는 검증만 하고 실제 동작 대신 대기 동작(workflow_pending_actions)을 1개 쌓고 시뮬레이션 출력으로 성공한다.
+ * 생략하면 지금의 동기식(waiting_approval로 멈춤). P1에서는 send_email·webhook에만 허용한다 (agent 지연은 P2).
+ */
+export type ApprovalMode = 'deferred';
+export const DEFERRABLE_NODES: NodeType[] = ['send_email', 'webhook'];
+export interface WorkflowStepDef { id: string; type: NodeType; name: string; config: Record<string, unknown>; requiresApproval?: boolean; approvalMode?: ApprovalMode; next?: StepNext; }
 export interface WorkflowDefinition { version: 1; steps: WorkflowStepDef[]; }
-export interface NodeContext { env: Env; user: { id: string; email: string; role: string; coaching_role?: string }; runId: string; workflowId: string; stepIndex: number; input: Record<string, unknown>; stepOutputs: Record<string, unknown>; /** 승인 게이트(WF-4)를 통과한 실행이면 true. send_email은 이 값이 true일 때만 실행된다 (WF-2 추가). */ approved?: boolean; }
+export interface NodeContext { env: Env; user: { id: string; email: string; role: string; coaching_role?: string }; runId: string; workflowId: string; stepIndex: number; input: Record<string, unknown>; stepOutputs: Record<string, unknown>; /** 승인 게이트(WF-4)를 통과한 실행이면 true. send_email은 이 값이 true일 때만 실행된다 (WF-2 추가). */ approved?: boolean;
+  /** 비동기 승인 P1: approved !== true일 때 send_email·webhook이 멈추는 대신 대기 동작을 쌓고 시뮬레이션 출력으로 성공한다. approved === true가 우선(실제 실행). */
+  deferActions?: boolean;
+  /** 비동기 승인 P2: agent 단계의 지연 동작이면 그 턴 번호. 대기 동작 id가 `wfpa_<runId>_<stepIndex>_t<turn>`이 된다 (없으면 P1의 단계 id). */
+  deferTurn?: number; }
+/** 비동기 승인 P2: 결정 API가 승인한 대기 동작 1개를 실행하라는 큐 메시지 (workflow-step과 별개 — processWorkflowStep을 부르지 않는다). */
+export type WorkflowActionMessage = { type: "workflow-action"; pendingActionId: string; enqueuedAt?: string };
+/** 비동기 승인 P2: approvalMode "deferred"인 agent 단계인가 (에이전트가 고른 send_email·webhook을 멈추지 않고 대기열에 넣는다). */
+export function isDeferredAgentStep(step: { type: string; approvalMode?: ApprovalMode }): boolean {
+  return step.type === 'agent' && step.approvalMode === 'deferred';
+}
 export interface NodeResult { status: 'succeeded' | 'failed' | 'waiting_approval'; output?: unknown; error?: string; }
 /** 큐 메시지 1개 = 워크플로우 단계 1개 (WF-3). index.ts QueueMessage 유니온에 들어간다. */
 export type WorkflowStepMessage = {
   type: "workflow-step"; runId: string; stepIndex: number; approved?: boolean; enqueuedAt: string;
   /** agent 단계 전용 (WF-6): 이 메시지가 진행할 턴 번호(0부터). DO가 이 번호로 중복 전달을 가드한다. 다른 단계 메시지에는 없다. */
   agentTurn?: number;
+  /** Think T1 전용: ThinkAgent DO가 턴을 끝내고 엔진을 깨우는 메시지. 이 제출의 결과(workflow_agent_steps)를 읽어 단계를 진행한다. */
+  thinkSubmissionId?: string;
 };
 /** turn은 agent 단계 전용 (WF-6): 한 agent 단계 안에서 승인이 여러 번 필요할 수 있어 알림 id를 턴별로 나눈다. */
 export interface ApprovalRequest { runId: string; workflowId: string; stepIndex: number; nodeType: NodeType; nodeName: string; summary: string; turn?: number; }
@@ -147,6 +175,18 @@ export function validateDefinition(def: unknown): { ok: true; def: WorkflowDefin
     }
     const step: WorkflowStepDef = { id: s.id, type, name: s.name, config: s.config as Record<string, unknown> };
     if (requiresApproval !== undefined) step.requiresApproval = requiresApproval;
+    if (s.approvalMode !== undefined) {
+      // 비동기 승인 P1: deferred만, send_email·webhook에만. P2: agent도 허용 (에이전트가 고른 send_email·webhook만 대기열로).
+      if (s.approvalMode !== 'deferred') return { ok: false, error: `${at}.approvalMode는 "deferred"만 쓸 수 있습니다 (생략하면 동기식 승인).` };
+      if (!DEFERRABLE_NODES.includes(type) && type !== 'agent') return { ok: false, error: `${at}: approvalMode는 ${DEFERRABLE_NODES.join('·')}·agent 단계에만 쓸 수 있습니다 (${type}).` };
+      // P2: requiresApproval:true인 agent는 "모든 도구 승인"이라 지연(send_email·webhook만 시뮬레이션 가능)과 섞을 수 없다.
+      if (type === 'agent' && requiresApproval === true) return { ok: false, error: `${at}: 모든 도구 승인(requiresApproval: true)인 agent는 지연 승인할 수 없습니다.` };
+      // GET 웹훅은 읽기라 결과를 시뮬레이션할 수 없다. method 생략은 POST 기본값이라 허용.
+      if (type === 'webhook' && (s.config as Record<string, unknown>).method === 'GET') {
+        return { ok: false, error: `${at}: GET 웹훅은 지연 승인할 수 없습니다 (읽기 결과를 미리 알 수 없음).` };
+      }
+      step.approvalMode = 'deferred';
+    }
     if (s.next !== undefined) {
       if (type === 'condition') {
         const n = s.next as Record<string, unknown> | null;
@@ -172,6 +212,20 @@ export function validateDefinition(def: unknown): { ok: true; def: WorkflowDefin
   }
   const cyc = findCycle(steps);
   if (cyc) return { ok: false, error: `순환 참조: ${cyc}` };
+  // 비동기 승인 P1: 지연 단계의 실제 결과에 기대는 단계가 있으면 거부한다. 지연 단계의 출력은 시뮬레이션(providerId·status null)이라
+  // 뒤 단계가 그것을 참조하면 잘못된 값으로 돈다. 보수적으로: 다른 단계 config 어디든 {{steps.<id>.…}} / {{steps.<id>}}가 있으면 거부.
+  // (resolveVars는 steps.<id>.output.x와 steps.<id>.x 둘 다 풀므로 output 경로만이 아니라 전체를 잡는다.)
+  for (let i = 0; i < steps.length; i++) {
+    if (steps[i].approvalMode !== 'deferred') continue;
+    const id = steps[i].id.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const re = new RegExp(`\\{\\{\\s*steps\\.${id}(?:\\.|\\s*\\}\\})`);
+    for (let j = 0; j < steps.length; j++) {
+      if (j === i) continue;
+      if (re.test(JSON.stringify(steps[j].config ?? {}))) {
+        return { ok: false, error: `steps[${j}]가 지연 승인 단계(${steps[i].id})의 출력을 참조합니다 — 지연 단계의 결과는 승인 전까지 없으므로 지연할 수 없습니다.` };
+      }
+    }
+  }
   return { ok: true, def: { version: 1, steps } };
 }
 

@@ -25,10 +25,24 @@ const GOOGLE_REVOKE_URL = "https://oauth2.googleapis.com/revoke";
 
 export const READ_SCOPE = "https://www.googleapis.com/auth/calendar.events.readonly";
 export const REQUEST_SCOPES = ["openid", "email", READ_SCOPE];
+/**
+ * C6 (2026-11-22): 쓰기 스코프. 사용자가 "구글에도 저장"을 쓰겠다고 할 때만 추가로 요청한다 (connect { write: true }).
+ * 더 좁은 calendar.events.owned / calendar.app.created 는 이 세션에서 구글 문서를 열 수 없어(웹 접근 거부) 이름·동작을 확인하지 못했다.
+ * 확인되지 않은 스코프 이름을 요청하면 동의 화면이 invalid_scope로 막히므로, 계획서가 정한 calendar.events를 쓴다.
+ * 좁은 스코프가 확인되면 이 상수만 바꾸면 된다 (WRITE_CAPABLE에는 이미 들어 있다).
+ */
+export const WRITE_SCOPE = "https://www.googleapis.com/auth/calendar.events";
+/** 일정 쓰기(insert·patch·delete)에 충분한 스코프. */
+const WRITE_CAPABLE = [
+  WRITE_SCOPE,
+  "https://www.googleapis.com/auth/calendar.events.owned",
+  "https://www.googleapis.com/auth/calendar",
+];
 /** 일정 읽기에 충분한 스코프 (include_granted_scopes로 더 넓은 권한이 합쳐져 와도 읽기는 된다). */
 const READ_CAPABLE = [
   READ_SCOPE,
   "https://www.googleapis.com/auth/calendar.events",
+  "https://www.googleapis.com/auth/calendar.events.owned",
   "https://www.googleapis.com/auth/calendar.readonly",
   "https://www.googleapis.com/auth/calendar",
 ];
@@ -110,12 +124,12 @@ export async function pkceChallenge(verifier: string): Promise<string> {
   return b64urlEncode(new Uint8Array(d));
 }
 
-export function buildAuthUrl(env: GoogleEnv, p: { redirectUri: string; state: string; challenge: string }): string {
+export function buildAuthUrl(env: GoogleEnv, p: { redirectUri: string; state: string; challenge: string; write?: boolean }): string {
   const q = new URLSearchParams({
     response_type: "code",
     client_id: env.GOOGLE_CLIENT_ID || "",
     redirect_uri: p.redirectUri,
-    scope: REQUEST_SCOPES.join(" "),
+    scope: (p.write ? [...REQUEST_SCOPES, WRITE_SCOPE] : REQUEST_SCOPES).join(" "),
     state: p.state,
     access_type: "offline",
     prompt: "consent",
@@ -221,6 +235,12 @@ export async function revokeToken(env: GoogleEnv, token: string): Promise<boolea
 export function scopeSufficient(scope: string): boolean {
   const granted = scope.split(/\s+/).filter(Boolean);
   return READ_CAPABLE.some((s) => granted.includes(s));
+}
+
+/** C6: 부여된 스코프로 구글에 일정을 쓸 수 있는가. */
+export function writeCapable(scope: string | null | undefined): boolean {
+  const granted = (scope || "").split(/\s+/).filter(Boolean);
+  return WRITE_CAPABLE.some((s) => granted.includes(s));
 }
 
 /**
@@ -379,6 +399,8 @@ export async function disconnect(env: GoogleEnv, userId: string): Promise<{ exis
   await env.DB.batch([
     env.DB.prepare("DELETE FROM calendar_google_accounts WHERE user_id = ?").bind(userId),
     env.DB.prepare("DELETE FROM calendar_oauth_states WHERE user_id = ?").bind(userId),
+    // C6: 연결 행만 지운다. 구글에 이미 저장된 일정은 구글에 남고, People OS 일정도 그대로 남는다 (계획 3.4).
+    env.DB.prepare("DELETE FROM calendar_event_links WHERE user_id = ?").bind(userId),
   ]);
   return { existed: !!row, revoked };
 }

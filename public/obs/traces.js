@@ -41,7 +41,7 @@
       '<label>출처<select name="origin"><option value="user">HR 규정</option><option value="personal">개인 RAG</option><option value="metadata">메타데이터 생성</option><option value="eval">평가</option><option value="all">전체</option></select></label>' +
       (isAdmin ? '<label>사용자<select name="user"><option value="">전체 사용자</option><option value="anon">익명·평가 (기록 없음)</option></select></label>' : '') +
       '<label>상태<select name="status"><option value="">전체</option><option value="grounded">근거 있음</option><option value="no_evidence">근거 없음</option><option value="off_topic">업무 외</option><option value="error">오류</option></select></label>' +
-      '<label>피드백<select name="feedback"><option value="">전체</option><option value="down">👎만</option><option value="up">👍만</option><option value="none">없음</option></select></label>' +
+      '<label>피드백<select name="feedback"><option value="">전체</option><option value="down">아쉬움만</option><option value="up">도움 됨만</option><option value="none">없음</option></select></label>' +
       '<label class="obs-check"><input type="checkbox" name="risk"> 판정 위험(환각 의심)</label>' +
       '<label>질문 검색<input type="search" name="q" placeholder="질문에 포함된 말"></label>' +
       '<button type="submit" class="secondary">적용</button>' +
@@ -70,7 +70,7 @@
       var src = t.sources || {};
       var srcTxt = src.count ? src.count + (src.topScore != null ? ' · ' + O.fmtScore(src.topScore) : '') : '0';
       var gap = t.gapId ? ' ' + O.badge('공백 큐 등록', 'warn', t.gapId) : '';
-      var fb = t.feedback === 'up' ? '👍' : t.feedback === 'down' ? '👎' : '—';
+      var fb = t.feedback === 'up' ? '도움 됨' : t.feedback === 'down' ? '아쉬움' : '—';
       return '<tr class="obs-row-link" tabindex="0" data-id="' + escAttr(t.id) + '">' +
         '<td class="obs-num">' + esc(O.kst(t.createdAt)) + '</td>' +
         // 0021: 질문한 사용자 — 툴팁이 아니라 칸에 굵게 바로 보인다 (기록 없음: 평가/익명).
@@ -117,7 +117,7 @@
           ['지연 p50 / p95', O.fmtMs(s.latency && s.latency.p50) + ' / ' + O.fmtMs(s.latency && s.latency.p95)],
           ['토큰', O.fmtTokens(s.tokens)],
           ['비용', O.fmtUsd(cost.usd, cost.estimated)],
-          ['👍 / 👎', (s.feedback ? s.feedback.up + ' / ' + s.feedback.down : '—')]
+          ['도움 됨 / 아쉬움',(s.feedback ? s.feedback.up + ' / ' + s.feedback.down : '—')]
         ];
         box.innerHTML = k.map(function (x) { return '<div class="obs-kpi"><div class="obs-kpi-label">' + esc(x[0]) + '</div><div class="obs-kpi-value">' + esc(x[1]) + '</div></div>'; }).join('');
       }).catch(function () { box.innerHTML = ''; });
@@ -355,7 +355,7 @@
         ['지연', esc(O.fmtMs(t.latencyMs))],
         ['토큰 (입력 / 출력)', esc(O.fmtTokens(tk.prompt)) + ' / ' + esc(O.fmtTokens(tk.completion))],
         ['비용', esc(costTxt) + (cost.usd != null && cost.estimated ? ' ' + O.badge('추정', 'est', cost.source === 'pricing' ? '토큰 × 단가표(pricing.ts) 추정' : '게이트웨이 로그에 cost가 없어 추정') : '')],
-        ['피드백', t.feedback ? (t.feedback.rating === 'up' ? '👍' : '👎') + (t.feedback.comment ? ' ' + esc(t.feedback.comment) : '') : '—']
+        ['피드백', t.feedback ? (t.feedback.rating === 'up' ? '도움 됨' : '아쉬움') + (t.feedback.comment ? ' ' + esc(t.feedback.comment) : '') : '—']
       ];
       body.innerHTML =
         '<div class="obs-section obs-head">' +

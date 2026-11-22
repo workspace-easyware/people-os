@@ -997,7 +997,7 @@ export async function runAsk(env: AskEnv, input: AskInput, opts: AskOptions = {}
         { role: "user", content: `질문: ${question}\n근거:\n${context}` },
       ];
       const out = await env.AI.run(LLM_MODEL, {
-        reasoning_effort: "medium",
+        reasoning_effort: "low",
         messages: promptMessages,
       }, aiGatewayOptionsWithMeta({ skipCache: gatewaySkipCache, tag: origin === "eval" ? "eval-ask" : "ask", metadata: gwMeta(origin === "eval" ? "eval-ask" : "ask") }));
       takeAigLogId();

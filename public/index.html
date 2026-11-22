@@ -17,6 +17,7 @@
 <link rel="stylesheet" href="/workflow.css" />
 <link rel="stylesheet" href="/chat.css" />
 <link rel="stylesheet" href="/workflow-canvas.css" />
+<link rel="stylesheet" href="/agents.css" />
 <style>
   /* S4 관측 탭의 하위 탭 바 (M6). 기존 토큰만 쓴다. */
   .obs-subtabs{display:flex;gap:var(--space-2,8px);flex-wrap:wrap;margin:0 0 var(--space-4,16px);border-bottom:1px solid var(--obs-line,#e4e4e7)}
@@ -26,26 +27,35 @@
   /* 로그인 (2026-11-15): 전체 화면 오버레이 + 사용자 관리 표. 기존 토큰만 쓴다. */
   #authOverlay{position:fixed;inset:0;z-index:50;display:none;align-items:center;justify-content:center;background:var(--color-bg,#f6f6f7);padding:16px}
   #authOverlay.show{display:flex}
-  .auth-box{width:100%;max-width:380px;background:#fff;border:1px solid var(--line,#e4e4e7);border-radius:8px;padding:24px}
-  .auth-box h2{font-size:20px;margin:0 0 4px}
+  .auth-box{width:100%;max-width:380px;background:#fff;border:1px solid var(--line,#e4e4e7);border-radius:12px;padding:32px}
+  .auth-box .auth-brand{display:flex;margin:0 0 24px;cursor:default}
+  .auth-box h2{font-size:20px;font-weight:600;margin:0 0 4px}
   .auth-box p.muted{color:var(--color-muted,#71717a);font-size:13px;margin:0 0 16px}
   .auth-box label{display:block;font-size:13px;font-weight:500;margin:12px 0 4px}
   .auth-box input{width:100%;height:32px;padding:0 10px;border:1px solid var(--color-line-strong,#d4d4d8);border-radius:6px;font:inherit;box-sizing:border-box}
-  .auth-box .primary{width:100%;height:34px;margin-top:18px;border:0;border-radius:6px;background:var(--color-primary,#123863);color:#fff;font-weight:600;cursor:pointer}
+  .auth-box .primary{width:100%;height:36px;margin-top:16px;border:0;border-radius:6px;background:var(--color-primary,#123863);color:#fff;font-weight:500;cursor:pointer}
+  .auth-box .primary:hover{background:var(--color-primary-700,#0d2c4f)}
   .auth-box .primary:disabled{opacity:.6;cursor:default}
-  .auth-box .err{color:#b91c1c;font-size:13px;margin-top:12px;min-height:18px}
+  .auth-box .err{color:var(--color-err,#b3261e);font-size:13px;margin-top:12px;min-height:18px}
   .auth-box .err:empty,.auth-box .ok:empty{display:none}
-  .auth-box .ok{color:#166534;font-size:13px;margin-top:12px;min-height:18px;word-break:break-all}
-  .user-chip{display:flex;align-items:center;gap:8px;padding:10px 8px;border-top:1px solid var(--line,#e4e4e7);font-size:13px}
+  .auth-box .ok{color:var(--color-ok,#0e7a4d);font-size:13px;margin-top:12px;min-height:18px;word-break:break-all}
+  .user-chip{display:flex;align-items:center;gap:8px;padding:12px 8px;border-top:1px solid var(--line,#e4e4e7);font-size:13px}
   .user-chip .who{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   .user-chip .who b{display:block;font-size:13px}
   .user-chip .who span{color:var(--color-muted,#71717a);font-size:12px}
   .user-chip button{border:1px solid var(--line,#e4e4e7);background:#fff;border-radius:6px;padding:4px 8px;font-size:12px;cursor:pointer;flex:none}
+  /* 사용자 메뉴 (2026-11-22): 아바타 위에 뜨는 작은 메뉴. 위치는 JS가 fixed로 잡는다 (접힌 사이드바에서도 안 잘림). */
+  .user-menu{position:fixed;z-index:900;min-width:170px;padding:4px;background:var(--color-surface,#fff);border:1px solid var(--line,#e4e4e7);border-radius:8px;box-shadow:0 8px 24px rgba(20,35,58,.18)}
+  .user-menu button{display:block;width:100%;margin:0;padding:8px 12px;border:0;border-radius:6px;background:transparent;color:var(--color-text,#18181b);font:inherit;font-size:13px;text-align:left;cursor:pointer}
+  .user-menu button:hover,.user-menu button:focus-visible{background:var(--color-surface-sunken,#f4f4f5);outline:none}
+  #pwDlg label{display:block;font-size:13px;font-weight:500;margin:12px 0 4px}
+  #pwDlg .pw-wrap input{width:100%;height:36px;padding:0 56px 0 10px;border:1px solid var(--color-line-strong,#d4d4d8);border-radius:6px;font:inherit;box-sizing:border-box}
   .admin-table{width:100%;border-collapse:collapse;font-size:13px}
-  .admin-table th,.admin-table td{border-bottom:1px solid var(--line,#e4e4e7);padding:8px 6px;text-align:left;vertical-align:top}
+  .admin-table th,.admin-table td{border-bottom:1px solid var(--line,#e4e4e7);padding:8px;text-align:left;vertical-align:top}
   .admin-table th{color:var(--color-muted,#71717a);font-weight:500}
   .admin-table .rowbtns{display:flex;gap:4px;flex-wrap:wrap}
-  .admin-table .rowbtns button{border:1px solid var(--line,#e4e4e7);background:#fff;border-radius:6px;padding:3px 7px;font-size:12px;cursor:pointer}
+  .admin-table .rowbtns button{border:1px solid var(--line,#e4e4e7);background:#fff;border-radius:6px;padding:2px 8px;font-size:12px;cursor:pointer}
+  .admin-table .rowbtns button:hover{border-color:var(--color-line-strong,#d4d4d8);background:var(--color-surface-soft,#fafafa)}
   .admin-form{display:flex;gap:8px;flex-wrap:wrap;align-items:end;margin:12px 0}
   .admin-form label{font-size:13px;font-weight:500}
   .admin-form input,.admin-form select{height:32px;padding:0 8px;border:1px solid var(--color-line-strong,#d4d4d8);border-radius:6px;font:inherit}
@@ -56,15 +66,16 @@
   .pw-toggle{position:absolute;top:0;right:0;height:100%;min-width:48px;min-height:32px;padding:0 10px;border:0;border-radius:0 6px 6px 0;background:transparent;color:var(--color-muted,#71717a);font-size:12px;cursor:pointer}
   .pw-toggle:hover{color:var(--color-primary,#123863)}
   .pw-toggle:focus-visible{outline:2px solid var(--color-accent,#2d7dde);outline-offset:-2px}
-  .admin-form .primary{height:32px;border:0;border-radius:6px;background:var(--color-primary,#123863);color:#fff;font-weight:600;padding:0 14px;cursor:pointer}
+  .admin-form .primary{height:32px;border:0;border-radius:6px;background:var(--color-primary,#123863);color:#fff;font-weight:500;padding:0 12px;cursor:pointer}
 </style>
 </head>
 <body>
 <!-- 로그인 (2026-11-15): 로그인 안 된 상태면 이 오버레이만 보인다. 설정 링크(#setup=토큰)면 비밀번호 설정 폼을 보인다. -->
 <div id="authOverlay" class="show">
   <div class="auth-box" id="loginBox">
-    <h2>일잇 People OS</h2>
-    <p class="muted">등록된 이메일과 비밀번호로 로그인합니다.</p>
+    <span class="logo auth-brand"><b>일</b><span>일잇 <i>People OS</i></span></span>
+    <h2>로그인</h2>
+    <p class="muted">등록된 이메일과 비밀번호로 로그인합니다</p>
     <form id="loginForm">
       <label for="loginEmail">이메일</label>
       <input id="loginEmail" type="email" autocomplete="username" required />
@@ -73,10 +84,11 @@
       <div class="err" id="loginErr"></div>
       <button class="primary" type="submit" id="loginBtn">로그인</button>
     </form>
-    <p class="muted" style="margin-top:14px">처음 접속하거나 비밀번호를 잊으셨다면 HR 관리자에게 설정 링크를 요청하세요.</p>
+    <p class="muted" style="margin-top:16px">처음 접속하거나 비밀번호를 잊으셨다면 HR 관리자에게 설정 링크를 요청하세요.</p>
     <p class="muted"><a href="/pitch.html">로그인 없이 발표자료 보기 →</a></p>
   </div>
   <div class="auth-box" id="setupBox" style="display:none">
+    <span class="logo auth-brand"><b>일</b><span>일잇 <i>People OS</i></span></span>
     <h2>내 비밀번호 설정</h2>
     <p class="muted">받은 설정 링크는 한 번만 사용할 수 있습니다. 12~128자의 비밀번호를 사용하세요.</p>
     <form id="setupForm">
@@ -88,7 +100,7 @@
       <div class="ok" id="setupOk"></div>
       <button class="primary" type="submit" id="setupBtn">비밀번호 설정하고 시작</button>
     </form>
-    <p class="muted" style="margin-top:14px"><a href="/">로그인 화면으로 →</a></p>
+    <p class="muted" style="margin-top:16px"><a href="/">로그인 화면으로 →</a></p>
   </div>
 </div>
 <div class="shell">
@@ -101,9 +113,10 @@
     <button data-tab="calendar"><span class="nav-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg></span><span class="nav-label">캘린더</span></button>
     <button data-tab="tasks"><span class="nav-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 11 12 14 22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg></span><span class="nav-label">할 일</span></button>
     <button data-tab="upload"><span class="nav-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="2" width="6" height="12" rx="3"/><path d="M5 10v1a7 7 0 0 0 14 0v-1"/><line x1="12" y1="19" x2="12" y2="23"/><line x1="8" y1="23" x2="16" y2="23"/></svg></span><span class="nav-label">녹음전사·문서저장</span></button>
-    <button data-tab="coaching"><span class="nav-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polygon points="16.24 7.76 14.12 14.12 7.76 16.24 9.88 9.88 16.24 7.76"/></svg></span><span class="nav-label">코칭 리플렉션</span></button>
+    <button data-tab="coaching"><span class="nav-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polygon points="16.24 7.76 14.12 14.12 7.76 16.24 9.88 9.88 16.24 7.76"/></svg></span><span class="nav-label">코칭 성찰</span></button>
     <button data-tab="lms"><span class="nav-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="4" width="20" height="14" rx="2"/><polygon points="10 8 15 11 10 14"/><line x1="8" y1="21" x2="16" y2="21"/></svg></span><span class="nav-label">강의실</span></button>
     <button data-tab="workflow"><span class="nav-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="6" y1="3" x2="6" y2="15"/><circle cx="18" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><path d="M18 9a9 9 0 0 1-9 9"/></svg></span><span class="nav-label">워크플로우</span></button>
+    <button data-tab="agents"><span class="nav-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="7" width="16" height="12" rx="2"/><line x1="12" y1="3" x2="12" y2="7"/><circle cx="9" cy="13" r="1"/><circle cx="15" cy="13" r="1"/><line x1="2" y1="12" x2="4" y2="12"/><line x1="20" y1="12" x2="22" y2="12"/></svg></span><span class="nav-label">에이전트</span></button>
     <button data-tab="personal"><span class="nav-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg></span><span class="nav-label">개인 업무 검색</span></button>
     <button data-tab="ask"><span class="nav-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg></span><span class="nav-label">HR 규정 검색</span></button>
     <button data-tab="library"><span class="nav-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/></svg></span><span class="nav-label">라이브러리</span></button>
@@ -115,17 +128,41 @@
   </nav>
   <button class="collapse-btn" id="collapseBtn" type="button" onclick="toggleSidebar()">« 접기</button>
   <div class="user-chip" id="userChip" style="display:none">
-    <div class="who"><b id="userChipName"></b><span id="userChipMeta"></span></div>
-    <button type="button" onclick="doLogout()">로그아웃</button>
-    <button class="user-avatar" id="userAvatar" type="button" onclick="doLogout()" title=""></button>
+    <!-- 2026-11-22: 아바타를 누르면 사용자 메뉴(비밀번호 변경·로그아웃)가 열린다. 어느 역할이든 쓴다. -->
+    <button class="user-avatar" id="userAvatar" type="button" onclick="toggleUserMenu(event)" aria-haspopup="menu" aria-expanded="false" aria-controls="userMenu" title=""></button>
+    <div class="who" onclick="toggleUserMenu(event)" style="cursor:pointer"><b id="userChipName"></b><span id="userChipMeta"></span></div>
+  </div>
+  <div class="user-menu" id="userMenu" role="menu" aria-label="사용자 메뉴" style="display:none">
+    <button type="button" role="menuitem" onclick="openPwDialog()">비밀번호 변경</button>
+    <button type="button" role="menuitem" onclick="closeUserMenu();doLogout()">로그아웃</button>
   </div>
 </aside>
+<!-- 내 비밀번호 변경 대화상자 (2026-11-22): 사용자 메뉴에서 연다. 이전에는 사용자 관리 탭(hr_admin 전용) 안에만 있었다. -->
+<div class="ui-dlg-back" id="pwDlg" style="display:none">
+  <div class="ui-dlg" role="dialog" aria-modal="true" aria-labelledby="pwDlgTitle">
+    <h3 class="ui-dlg-title" id="pwDlgTitle">내 비밀번호 변경</h3>
+    <form id="changePwForm">
+      <label for="pwCurrent">현재 비밀번호</label>
+      <span class="pw-wrap"><input id="pwCurrent" type="password" autocomplete="current-password" required /><button type="button" class="pw-toggle" data-pw-toggle="pwCurrent" aria-label="현재 비밀번호 표시" aria-pressed="false">보기</button></span>
+      <label for="pwNew">새 비밀번호 (12~128자)</label>
+      <span class="pw-wrap"><input id="pwNew" type="password" autocomplete="new-password" minlength="12" maxlength="128" required /><button type="button" class="pw-toggle" data-pw-toggle="pwNew" aria-label="새 비밀번호 표시" aria-pressed="false">보기</button></span>
+      <label for="pwNew2">새 비밀번호 확인</label>
+      <span class="pw-wrap"><input id="pwNew2" type="password" autocomplete="new-password" minlength="12" maxlength="128" required /><button type="button" class="pw-toggle" data-pw-toggle="pwNew2" aria-label="새 비밀번호 확인 표시" aria-pressed="false">보기</button></span>
+      <p class="muted" style="font-size:12px;margin:8px 0 0">변경하면 다른 기기의 로그인은 모두 해제됩니다.</p>
+      <div id="pwMsg" role="status" style="font-size:13px;min-height:18px;margin-top:8px"></div>
+      <div class="ui-dlg-btns">
+        <button type="button" class="secondary" onclick="closePwDialog()">닫기</button>
+        <button type="submit" class="primary" id="pwSubmitBtn">변경</button>
+      </div>
+    </form>
+  </div>
+</div>
 <div class="content">
 <main>
   <div class="hero">
     <h1>일잇 People OS</h1>
-    <p class="sub">HR·코칭 인텔리전스 플랫폼 <span id="health" class="badge">health 확인 중…</span></p>
-    <button class="ntf-bell" id="ntfBell" type="button" aria-label="알림" title="알림" style="display:none" onclick="ntfToggle(event)">🔔<span class="ntf-count" id="ntfCount" style="display:none"></span></button>
+    <p class="sub">HR·코칭 인텔리전스 플랫폼 <span id="health" class="badge">상태 확인 중…</span></p>
+    <button class="ntf-bell" id="ntfBell" type="button" aria-label="알림" title="알림" style="display:none" onclick="ntfToggle(event)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/></svg><span class="ntf-count" id="ntfCount" style="display:none"></span></button>
     <div class="ntf-panel" id="ntfPanel" role="dialog" aria-label="알림">
       <header><b>알림</b><button type="button" onclick="ntfReadAll()">모두 읽음</button></header>
       <div class="ntf-list" id="ntfList"></div>
@@ -137,53 +174,53 @@
     <div class="card home-card">
       <h2>메일함</h2>
       <div id="homeEmail"></div>
-      <div class="btnrow"><button class="secondary" onclick="switchTab('email')">메일함 열기 →</button></div>
+      <div class="btnrow"><button class="secondary" onclick="switchTab('email')">메일함 열기</button></div>
     </div>
     <div class="card home-card">
       <h2>결재</h2>
       <div id="homeApproval"></div>
-      <div class="btnrow"><button class="secondary" onclick="apvGo('PENDING')">결재함 열기 →</button></div>
+      <div class="btnrow"><button class="secondary" onclick="apvGo('PENDING')">결재함 열기</button></div>
     </div>
     <div class="card home-card">
-      <h2>열린 할 일</h2>
+      <h2>해야 할 일</h2>
       <div id="homeTasks"></div>
-      <div class="btnrow"><button class="secondary" onclick="switchTab('tasks')">할 일 전체 보기 →</button></div>
+      <div class="btnrow"><button class="secondary" onclick="switchTab('tasks')">할 일 전체 보기</button></div>
     </div>
     <div class="card home-card">
       <h2>최근 문서</h2>
       <div id="homeDocs"></div>
-      <div class="btnrow"><button class="secondary" onclick="switchTab('upload');setUpPane('doc')">새 문서 업로드 →</button></div>
+      <div class="btnrow"><button class="secondary" onclick="switchTab('upload');setUpPane('doc')">새 문서 업로드</button></div>
     </div>
     <div class="card home-card">
-      <h2>최근 리플렉션</h2>
+      <h2>최근 성찰</h2>
       <div id="homeRefl"></div>
     </div>
-    <div class="card home-card" id="homeLmsCard" style="display:none">
+    <div class="card home-card home-wide" id="homeLmsCard" style="display:none">
       <h2>이어서 듣기</h2>
       <div id="homeLms"></div>
     </div>
     <div class="card home-card" id="homeWorkflowCard">
       <h2>내 워크플로우</h2>
       <div id="homeWorkflow"></div>
-      <div class="btnrow"><button class="secondary" onclick="switchTab('workflow')">워크플로우 열기 →</button></div>
+      <div class="btnrow"><button class="secondary" onclick="switchTab('workflow')">워크플로우 열기</button></div>
     </div>
     <div class="card home-card">
       <h2>빠른 검색</h2>
-      <div class="btnrow"><button class="secondary" onclick="switchTab('personal')">개인 업무 검색 →</button><button class="secondary" onclick="switchTab('ask')">HR 규정 검색 →</button></div>
+      <div class="btnrow"><button class="secondary" onclick="switchTab('personal')">개인 업무 검색</button><button class="secondary" onclick="switchTab('ask')">HR 규정 검색</button></div>
     </div>
     <div class="card home-card">
       <h2>라이브러리</h2>
-      <p class="small">파일 목록, 규정, 리플렉션, 답변 대기 질문을 한곳에서 봅니다.</p>
-      <div class="btnrow"><button class="secondary" onclick="switchTab('library')">라이브러리 열기 →</button></div>
+      <p class="small">파일 목록, 규정, 성찰, 답변 대기 질문을 한곳에서 봅니다.</p>
+      <div class="btnrow"><button class="secondary" onclick="switchTab('library')">라이브러리 열기</button></div>
     </div>
-    <div class="card home-card"><h2>에이전트 활동</h2><div id="homeAgentActivity"></div></div>
-    <div class="card home-card">
+    <div class="card home-card home-wide"><h2>에이전트 활동</h2><div id="homeAgentActivity"></div></div>
+    <div class="card home-card home-wide">
       <h2>아침 브리핑</h2>
       <div id="homeDigest"></div>
     </div>
-    <div class="card home-card" id="homeByUserCard" style="display:none">
+    <div class="card home-card home-wide" id="homeByUserCard" style="display:none">
       <h2>사용자별</h2>
-      <p class="small">HR 관리자 전용 — 사용자마다 소유 문서·할 일, 코치 또는 코칭 대상으로 참여한 리플렉션 수입니다.</p>
+      <p class="small">HR 관리자 전용 — 사용자마다 소유 문서·할 일, 코치 또는 코칭 대상으로 참여한 성찰 수입니다.</p>
       <div id="homeByUser"></div>
     </div>
   </section>
@@ -208,7 +245,7 @@
       <p class="small">음성 파일(mp3/m4a/wav 등, 최대 25MB)을 올리면 전사본이 문서 업로드 탭의 텍스트 칸에 채워집니다.</p>
       <div class="btnrow">
         <input type="file" id="audioFile" accept="audio/*,.mp3,.m4a,.wav,.ogg,.webm,.flac" />
-        <label><input type="checkbox" id="audioIsCoaching" /> 코칭 세션으로 표시 — 코칭 리플렉션 전사본 목록 맨 위에 [코칭]으로 나타납니다</label>
+        <label><input type="checkbox" id="audioIsCoaching" /> 코칭 세션으로 표시 — 코칭 성찰 전사본 목록 맨 위에 [코칭]으로 나타납니다</label>
         <button class="primary" id="transcribeBtn">전사하기</button>
       </div>
       <div id="audioResult"></div>
@@ -226,7 +263,7 @@
       <input type="text" id="docTitle" placeholder="제목 (예: 11월 팀 회의 전사본)" />
       <p></p>
       <textarea id="docContent" placeholder="회의 전사본 / 문서 텍스트를 붙여넣으세요"></textarea>
-      <p><label><input type="checkbox" id="docIsCoaching" /> 코칭 세션으로 표시 — 코칭 리플렉션 전사본 목록 맨 위에 [코칭]으로 나타납니다</label></p>
+      <p><label><input type="checkbox" id="docIsCoaching" /> 코칭 세션으로 표시 — 코칭 성찰 전사본 목록 맨 위에 [코칭]으로 나타납니다</label></p>
       <div class="btnrow">
         <button class="primary" id="uploadBtn">업로드</button>
         <button class="primary" id="summarizeBtn" disabled>요약하기</button>
@@ -235,7 +272,7 @@
       <p class="small" style="margin-top:12px">또는 파일로 올리기 — PDF, DOCX, XLSX, HWPX, 이미지, 텍스트 (최대 10MB). HWP 5.0은 HWPX·PDF로 저장해 올려 주세요.</p>
       <div class="btnrow">
         <input type="file" id="docFile" accept=".pdf,.docx,.xlsx,.xls,.hwpx,.hwp,.txt,.md,.csv,.png,.jpg,.jpeg,.webp,.gif,.bmp,.svg,.html,.htm,.xml,.odt,.ods,.numbers" />
-        <label><input type="checkbox" id="docFileIsCoaching" /> 코칭 세션으로 표시 — 코칭 리플렉션 전사본 목록 맨 위에 [코칭]으로 나타납니다</label>
+        <label><input type="checkbox" id="docFileIsCoaching" /> 코칭 세션으로 표시 — 코칭 성찰 전사본 목록 맨 위에 [코칭]으로 나타납니다</label>
         <button class="primary" id="docFileBtn">파일로 업로드</button>
       </div>
       <div id="docFileResult"></div>
@@ -293,7 +330,7 @@
 
   <section id="tab-coaching">
     <div class="card">
-      <h2 id="coachingTitle">코칭 리플렉션</h2>
+      <h2 id="coachingTitle">코칭 성찰</h2>
       <p class="muted" id="coachingModeDesc">코치용: 세션 전사본에서 핵심 질문·반복 패턴·다음 세션 질문을 뽑습니다.</p>
       <p><span class="badge warn">데모용 샘플</span> <button class="secondary" id="loadCoaching">데모용 샘플 코칭 전사본 불러오기</button> <span class="small">데모용 샘플입니다. 실제로는 업로드되지 않고 텍스트만 채워집니다.</span></p>
       <div class="btnrow">
@@ -301,7 +338,7 @@
         <span><label for="coachingCounterpart" id="coachingCounterpartLabel">상대방</label><br><select id="coachingCounterpart"><option value="">지정 안 함</option></select></span>
       </div>
       <textarea id="coachingText" placeholder="코칭 세션 전사본을 붙여넣으세요"></textarea>
-      <div class="btnrow"><button class="primary" id="reflectBtn">리플렉션 생성</button></div>
+      <div class="btnrow"><button class="primary" id="reflectBtn">성찰 생성</button></div>
       <div id="coachingResult"></div>
     </div>
   </section>
@@ -367,6 +404,9 @@
   <!-- 워크플로우 빌더 (2026-11-17, WF-5). 해시: #workflow · #workflow/<id>?run=<runId>. 본문은 public/workflow.js. -->
   <section id="tab-workflow"><div id="workflowMount"></div></section>
 
+  <!-- 에이전트 (Think T3, 2026-11-20). 내 어시스턴트 + 워크플로 agent 실행. 해시: #agents. 본문은 public/agents.js. -->
+  <section id="tab-agents"><div id="agentsMount"></div></section>
+
   <!-- 결재함 (2026-11-17). 해시: #approval · #approval/<docId> (알림 메일 링크). 본문은 public/approval.js. -->
   <section id="tab-approval">
     <div class="card perspective-bar apv-head" id="apvListHead">
@@ -403,6 +443,7 @@
         <button type="button" role="tab" id="obsTab-traces" data-obs-sub="traces" aria-controls="obsMount" aria-selected="false" tabindex="-1">트레이스</button>
         <button type="button" role="tab" id="obsTab-evals" data-obs-sub="evals" aria-controls="obsMount" aria-selected="false" tabindex="-1">평가</button>
         <button type="button" role="tab" id="obsTab-workflows" data-obs-sub="workflows" aria-controls="obsMount" aria-selected="false" tabindex="-1">워크플로우</button>
+        <button type="button" role="tab" id="obsTab-assistant" data-obs-sub="assistant" aria-controls="obsMount" aria-selected="false" tabindex="-1">어시스턴트</button>
         <button type="button" role="tab" id="obsTab-gaps" data-obs-sub="gaps" aria-controls="obsMount" aria-selected="false" tabindex="-1">개선 루프 <span id="obsGapCount"></span></button>
       </div>
       <div id="obsMount" role="tabpanel"></div>
@@ -444,12 +485,8 @@
     </div>
     <div class="card" id="adminPwCard">
       <h2>내 비밀번호 변경</h2>
-      <form class="admin-form" id="changePwForm">
-        <span><label for="pwCurrent">현재 비밀번호</label><br><span class="pw-wrap"><input id="pwCurrent" type="password" autocomplete="current-password" required /><button type="button" class="pw-toggle" data-pw-toggle="pwCurrent" aria-label="현재 비밀번호 표시" aria-pressed="false">보기</button></span></span>
-        <span><label for="pwNew">새 비밀번호 (12~128자)</label><br><span class="pw-wrap"><input id="pwNew" type="password" autocomplete="new-password" minlength="12" maxlength="128" required /><button type="button" class="pw-toggle" data-pw-toggle="pwNew" aria-label="새 비밀번호 표시" aria-pressed="false">보기</button></span></span>
-        <button class="primary" type="submit">변경</button>
-      </form>
-      <div class="ok" id="pwMsg" style="font-size:13px;min-height:18px"></div>
+      <p class="muted">내 비밀번호는 화면 왼쪽 아래 사용자 메뉴(아바타)에서 바꿉니다. 어느 역할이든 같은 창을 씁니다.</p>
+      <button class="primary" type="button" onclick="openPwDialog()">비밀번호 변경 열기</button>
     </div>
   </section>
 
@@ -458,10 +495,10 @@
 
   <section id="tab-about">
     <div class="about-hero">
-      <h2>회의에서 코칭까지,<br>일이 스스로 이어집니다.</h2>
+      <h2>회의에서 코칭까지,<br>일이 스스로 이어집니다</h2>
       <p>녹음을 올리면 전사·요약·색인이 알아서 끝나고, 규정 질문에는 근거를 붙여 답합니다. 사람은 확인하고 결정하는 일만 합니다.</p>
       <p class="small">서버 없이 Cloudflare Worker 하나로 돌아갑니다 · Cloudflare Developer Day Seoul 2026 Use Case 출품작</p>
-      <p style="margin-top:18px"><button type="button" class="primary" onclick="switchTab('pitch')">발표자료 보기 →</button> <button type="button" onclick="switchTab('upload')">데모 따라 하기 →</button></p>
+      <div class="about-cta"><button type="button" class="primary" onclick="switchTab('pitch')">발표자료 보기</button><button type="button" class="secondary" onclick="switchTab('upload')">데모 따라 하기</button></div>
     </div>
     <div class="card">
       <h2>People OS는 무엇인가요</h2>
@@ -485,18 +522,18 @@
     <div class="card">
       <h2>무엇을 할 수 있나요</h2>
       <ul>
-        <li><b>홈</b> — 안 읽은 메일, 열린 할 일, 최근 문서와 리플렉션, 아침 브리핑을 한 화면에서 봅니다. 아침 브리핑은 매일 07:00에 전날 기록을 모아 자동으로 만들어집니다.</li>
+        <li><b>홈</b> — 안 읽은 메일, 해야 할 일, 최근 문서와 성찰, 아침 브리핑을 한 화면에서 봅니다. 아침 브리핑은 매일 07:00에 전날 기록을 모아 자동으로 만들어집니다.</li>
         <li><b>메일함</b> — <code>@peopleos.site</code> 주소로 온 메일이 내 메일함에 들어옵니다. AI 답장 초안을 받아 고쳐서 보낼 수 있고, 메일을 개인 업무 검색에 넣을 수 있습니다.</li>
         <li><b>결재함</b> — 기안하면 부서장과 HR 관리자 순서로 결재선이 자동으로 잡힙니다. 승인·반려·회수의 모든 기록이 감사 이력으로 남습니다.</li>
         <li><b>캘린더</b> — 일정을 보고 만듭니다. 구글 캘린더 연동은 선택입니다.</li>
         <li><b>할 일</b> — 요약에서 나온 액션을 한 번 눌러 할 일로 옮기고 체크합니다.</li>
         <li><b>녹음전사 · 문서저장</b> — 음성 파일(최대 25MB)을 전사합니다. 긴 녹음은 구간으로 나눠 처리하고 진행 단계를 보여 줍니다. PDF, DOCX, XLSX, HWPX, 이미지 문서(최대 10MB)도 올려 색인합니다.</li>
-        <li><b>코칭 리플렉션</b> — 코치에게는 핵심 질문·반복 패턴·다음 세션 질문을, 코칭 대상에게는 자기 성찰 포인트와 기한이 붙은 액션 플랜을 만들어 줍니다. 같은 전사본에서 역할에 따라 다른 결과가 나옵니다.</li>
+        <li><b>코칭 성찰</b> — 코치에게는 핵심 질문·반복 패턴·다음 세션 질문을, 코칭 대상에게는 자기 성찰 포인트와 기한이 붙은 액션 플랜을 만들어 줍니다. 같은 전사본에서 역할에 따라 다른 결과가 나옵니다.</li>
         <li><b>강의실</b> — 유튜브 강의와 사내 영상을 과정으로 묶어 수강하고 진도를 기록합니다. 사내 영상은 로그인한 사람에게만 스트리밍됩니다.</li>
         <li><b>워크플로우</b> — 전사·요약·메일 초안·메일 발송 같은 단계를 이어 붙여 업무 흐름을 만듭니다. 큐가 단계를 순서대로 실행하고, 밖으로 나가는 메일·웹훅은 승인 대기에서 멈춥니다. 목표만 적으면 도구를 골라 쓰는 에이전트 단계, 조건 분기, 스케줄 실행, 캔버스 보기를 지원합니다.</li>
         <li><b>개인 업무 검색</b> — 내가 올린 전사본·문서·메일에서만 답을 찾습니다. 다른 사람의 자료는 검색되지 않습니다.</li>
         <li><b>HR 규정 검색</b> — 사내 규정을 근거로 답합니다. 조문 단위로 출처를 보여 줍니다.</li>
-        <li><b>라이브러리</b> — 문서, 규정, 리플렉션, 답변 대기 질문을 모아 봅니다. 요약으로 PPTX 초안을 만들어 내려받습니다.</li>
+        <li><b>라이브러리</b> — 문서, 규정, 성찰, 답변 대기 질문을 모아 봅니다. 요약으로 PPTX 초안을 만들어 내려받습니다.</li>
         <li><b>관측 · 평가</b> (HR 관리자) — AI가 답한 과정을 단계별로 추적하고, 골든 질문 세트로 품질을 새벽에 자동 평가하고(설정이 바뀌었거나 7일이 지났을 때), 낮은 점수와 회귀를 개선 목록으로 모읍니다.</li>
         <li><b>사용자 관리</b> (HR 관리자) — 계정을 만들고 역할(HR 관리자 / 일반, 코치 / 코칭 대상)을 정합니다.</li>
         <li><b>조직관리</b> (HR 관리자) — 부서와 부서장을 정하고 구성원의 소속·이름을 관리합니다.</li>
@@ -508,7 +545,7 @@
       <h3>HR 담당자의 하루</h3>
       <div class="pt-flow"><span>아침 브리핑 확인</span><span>문의 메일의 AI 답장 초안을 고쳐 발송</span><span>답변 대기 질문에 답을 달아 사내 지식으로 게시</span><span>관측·평가에서 어제 낮은 점수를 받은 답 확인</span></div>
       <h3>코치의 하루</h3>
-      <div class="pt-flow"><span>코칭 세션 녹음 업로드("코칭 세션으로 표시")</span><span>전사·요약이 끝나면 코칭 리플렉션 생성</span><span>다음 세션 질문 3개 확인</span><span>요약으로 PPTX 초안 생성</span></div>
+      <div class="pt-flow"><span>코칭 세션 녹음 업로드("코칭 세션으로 표시")</span><span>전사·요약이 끝나면 코칭 성찰 생성</span><span>다음 세션 질문 3개 확인</span><span>요약으로 PPTX 초안 생성</span></div>
       <h3>코칭 대상의 하루</h3>
       <div class="pt-flow"><span>같은 세션 전사본으로 자기 성찰 포인트와 액션 플랜 받기</span><span>액션을 할 일로 저장</span><span>"지난 코칭에서 뭐라고 했지?"를 개인 업무 검색으로 확인</span><span>규정이 궁금하면 HR 규정 검색</span></div>
     </div>
@@ -547,11 +584,13 @@
 
 <!-- S4 관측 · 평가 모듈: common.js가 먼저 (PeopleOSObs 네임스페이스·obsFetch). 아래 인라인
      스크립트가 첫 switchTab(location.hash)에서 바로 mount하므로 defer 없이 그 앞에 둔다. -->
+<script src="/ui-dialog.js"></script><!-- 페이지 내 확인 대화상자·토스트 (2026-11-21): 아래 화면 스크립트 전부가 쓴다 (2026-11-22 confirm() 전부 교체) -->
 <script src="/obs/common.js"></script>
 <script src="/obs/traces.js"></script>
 <script src="/obs/evals.js"></script>
 <script src="/obs/gaps.js"></script>
 <script src="/obs/workflows.js"></script>
+<script src="/obs/assistant.js"></script>
 <script src="/obs/datasets.js"></script>
 <script src="/email.js"></script>
 <script src="/pitch.js"></script>
@@ -563,23 +602,28 @@
 <script src="/workflow.js"></script>
 <script src="/chat.js"></script>
 <script src="/workflow-canvas.js"></script>
+<script src="/agents.js"></script>
 <script src="/calendar.js"></script>
 <script src="/plaud.js"></script>
+<script src="/pptx-edit.js"></script>
+<script src="/xlsx-edit.js"></script>
+<script src="/docx-create.js"></script>
+<script src="/docx-edit.js"></script>
 <script>
 let docServerText = null; // 서버에 올라가 있는 문서(docId)에 해당하는 입력칸 텍스트
 let docId = null, sessionId = null, lastSummaryText = '', lastSummary = [], lastActions = [], lastDocTitle = '';
 let lastAnswer = '', lastQuestion = '', turnstileToken = null, turnstileWidgetId = null;
 let personalSessionId = null, lastPersonalAnswer = '', lastPersonalQuestion = '';
 const $ = (id) => document.getElementById(id);
-const TABS = ['home','email','approval','calendar','tasks','upload','coaching','lms','workflow','personal','ask','library','obs','admin','org','about','pitch'];
+const TABS = ['home','email','approval','calendar','tasks','upload','coaching','lms','workflow','agents','personal','ask','library','obs','admin','org','about','pitch'];
 // 로그인 (2026-11-15): 현재 사용자. null이면 미로그인. 역할이 'user'면 obs·admin 탭을 숨긴다.
 let currentUser = null;
 const ADMIN_TABS = ['obs', 'admin', 'org'];
 // 코치 / 코칭 대상 (2026-11-16): 코칭 대상도 회사 직원이라 본인 업무 문서가 있다
 // (예: 영업부 Mercer의 업무 문서). 그래서 코칭 대상도 코치와 같은 일반 메뉴를 본다.
-// 메뉴 차이는 코칭 리플렉션 모드(코치용 vs 코칭 대상 자기 성찰+액션 플랜)이다.
+// 메뉴 차이는 코칭 성찰 모드(코치용 vs 코칭 대상 자기 성찰+액션 플랜)이다.
 // hr_admin의 관리자 탭(obs·admin)은 coaching_role과 무관하게 보인다.
-const COACHEE_TABS = ['home', 'email', 'approval', 'calendar', 'tasks', 'upload', 'coaching', 'lms', 'workflow', 'personal', 'ask', 'library', 'about', 'pitch'];
+const COACHEE_TABS = ['home', 'email', 'approval', 'calendar', 'tasks', 'upload', 'coaching', 'lms', 'workflow', 'agents', 'personal', 'ask', 'library', 'about', 'pitch'];
 function isCoachee() { return !!currentUser && currentUser.coaching_role !== 'coach'; }
 function tabAllowed(name) {
   if (!currentUser) return true;
@@ -630,17 +674,19 @@ function switchTab(name, fromHash) {
   if (name === 'org') orgOpen();
   if (name === 'calendar') calendarOpen(sub); else if (window.calendarLeave) calendarLeave();
   if (name === 'workflow') workflowOpen($('workflowMount'), sub); else if (window.workflowLeave) workflowLeave();
+  if (name === 'agents') { if (window.agentsOpen) agentsOpen($('agentsMount')); } else if (window.agentsLeave) agentsLeave();
   if (name === 'obs') renderObs(sub); else unmountObs();
   if (name === 'pitch') pitchOpen($('pitchMount'), sub); else if (window.pitchLeave) pitchLeave();
 }
 // ---- S4 관측 · 평가 하위 탭 라우터 (public/obs/*.js의 mount 계약) ----
 // traces.js: 'traces' | 'trace/<id>' · evals.js: 'evals' | 'run/<id>' · gaps.js: 'gaps'
-const OBS_SUBS = ['traces', 'evals', 'workflows', 'gaps'];
+const OBS_SUBS = ['traces', 'evals', 'workflows', 'assistant', 'gaps'];
 let obsView = null, obsDsView = null, obsRoute = null;
 function obsSubOf(route) {
   if (/^trace(s$|\/)/.test(route)) return 'traces';
   if (/^(evals$|run\/)/.test(route)) return 'evals';
   if (route === 'gaps') return 'gaps';
+  if (route === 'assistant') return 'assistant'; // Think T3 어시스턴트 턴
   if (route === 'workflows' || /^workflow-run\//.test(route)) return 'workflows'; // WF-11
   return null;
 }
@@ -740,10 +786,12 @@ async function loadRecordings() {
   }).join('') : '<p class="empty">아직 음성 파일이 없습니다.</p>';
 }
 async function deleteRecording(id) {
-  if (!confirm('이 녹음과 전사본(문서·색인 포함)을 삭제합니다. 되돌릴 수 없습니다.')) return;
+  // 2026-11-22: 네이티브 confirm()·alert() → 페이지 내 대화상자·토스트 (ui-dialog.js)
+  if (!(await uiConfirm('이 녹음과 전사본(문서·색인 포함)을 삭제합니다. 되돌릴 수 없습니다.', { title: '녹음 삭제', okText: '삭제', danger: true }))) return;
   const j = await api('/api/recordings/' + id, { method: 'DELETE' });
-  if (!j.ok) { alert('삭제하지 못했습니다. ' + (j.error || '')); return; }
-  if (j.errors && j.errors.length) alert('삭제했지만 일부 단계에서 오류가 있었습니다: ' + j.errors.join(', '));
+  if (!j.ok) { uiToast('삭제하지 못했습니다. ' + (j.error || ''), true); return; }
+  if (j.errors && j.errors.length) uiToast('삭제했지만 일부 단계에서 오류가 있었습니다: ' + j.errors.join(', '), true);
+  else uiToast('녹음을 삭제했습니다.');
   loadRecordings();
 }
 // S1 파이프라인 단계 표시: 전사 → 요약 → 색인 → 완료. 전사 대기(pending) 행은
@@ -766,11 +814,12 @@ function pipelineSteps(r) {
     : stage === 'queued' && r.transcript_status === 'ready' ? '요약 대기 중'
     : stage === 'queued' ? '전사 대기 중' : '전사 중';
   const parts = steps.map((s, i) => {
-    if (i < idx) return `<span class="done">✓ ${s}</span>`;
-    if (i === idx) return `<span class="now">… ${s}</span>`;
+    // unslop 2026-11-22: 단계 사이 글자(✓ … →)를 빼고 점·선은 CSS(.steps span)가 그린다. 상태는 title로도 남긴다.
+    if (i < idx) return `<span class="done" title="끝남">${s}</span>`;
+    if (i === idx) return `<span class="now" title="진행 중">${s}</span>`;
     return `<span>${s}</span>`;
-  }).join(' → ');
-  return `<div class="steps">${parts} · ${label}</div>`;
+  }).join('');
+  return `<div class="steps">${parts}<b class="steps-label">${label}</b></div>`;
 }
 async function pipelineRetryRecording(id) {
   const j = await api('/api/recordings/' + id + '/pipeline-retry', { method: 'POST' });
@@ -940,7 +989,7 @@ function applyRole() {
     b.style.display = isAdmin ? '' : 'none';
   });
   // 개인 업무 검색·메일함은 로그인 사용자만 (익명은 탭을 숨긴다).
-  document.querySelectorAll('.tabs button[data-tab="personal"], .tabs button[data-tab="email"], .tabs button[data-tab="approval"], .tabs button[data-tab="calendar"], .tabs button[data-tab="workflow"], .tabs button[data-tab="lms"]').forEach(b => {
+  document.querySelectorAll('.tabs button[data-tab="personal"], .tabs button[data-tab="email"], .tabs button[data-tab="approval"], .tabs button[data-tab="calendar"], .tabs button[data-tab="workflow"], .tabs button[data-tab="agents"], .tabs button[data-tab="lms"]').forEach(b => {
     b.style.display = currentUser ? '' : 'none';
   });
   // 플로팅 웹챗 (2026-11-18): 로그인 사용자만 FAB가 보인다. 로그아웃·사용자 변경 시 패널을 닫고 소켓을 정리한다.
@@ -965,7 +1014,7 @@ function applyRole() {
   if (currentUser) {
     $('userChipName').textContent = currentUser.name;
     $('userAvatar').textContent = (currentUser.name || '?').trim().charAt(0) || '?';
-    $('userAvatar').title = (currentUser.name || '') + ' · 로그아웃';
+    $('userAvatar').title = (currentUser.name || '') + ' · 사용자 메뉴 (비밀번호 변경 · 로그아웃)';
     $('userChipMeta').textContent = currentUser.email + (isAdmin ? ' · HR 관리자' : ' · 일반 사용자') + (isCoachee() ? ' · 코칭 대상' : ' · 코치');
     chip.style.display = 'flex';
   } else {
@@ -1036,6 +1085,8 @@ async function doLogout() {
   applyRole();
   unmountObs();
   showAuthOverlay('login');
+  // 2026-11-22: 이전 사용자 화면 상태가 남지 않게 새로고침한다. API가 실패해 서버 세션이 살아 있으면 다시 로그인 상태로 보인다 (정직한 동작).
+  location.reload();
 }
 async function doSetup(e) {
   e.preventDefault();
@@ -1115,9 +1166,9 @@ async function issueUserLink(id) {
   prompt('설정 링크 (1회용, 24시간) — 복사해서 전달하세요:', location.origin + j.setupPath);
 }
 async function resetUser(id) {
-  if (!confirm('이 계정의 비밀번호를 초기화하고 새 설정 링크를 발급할까요? 기존 세션은 모두 로그아웃됩니다.')) return;
+  if (!(await uiConfirm('이 계정의 비밀번호를 초기화하고 새 설정 링크를 발급할까요? 기존 세션은 모두 로그아웃됩니다.', { title: '비밀번호 초기화', okText: '초기화', danger: true }))) return;
   const j = await api('/api/admin/users/' + id + '/reset', { method: 'POST' });
-  if (!j.ok) { alert('초기화하지 못했습니다. ' + (j.error || '')); return; }
+  if (!j.ok) { uiToast('초기화하지 못했습니다. ' + (j.error || ''), true); return; }
   prompt('새 설정 링크 (1회용, 24시간) — 복사해서 전달하세요:', location.origin + j.setupPath);
   loadAdminUsers();
 }
@@ -1136,14 +1187,64 @@ async function setUserStatus(id, status) {
   if (!j.ok) { alert('상태를 바꾸지 못했습니다. ' + (j.error || '')); return; }
   loadAdminUsers();
 }
+// ---- 사용자 메뉴 + 내 비밀번호 변경 대화상자 (2026-11-22): 어느 역할이든 아바타 메뉴에서 연다 ----
+function closeUserMenu() {
+  $('userMenu').style.display = 'none';
+  $('userAvatar').setAttribute('aria-expanded', 'false');
+}
+function toggleUserMenu(ev) {
+  if (ev) ev.stopPropagation();
+  const m = $('userMenu');
+  if (m.style.display !== 'none') { closeUserMenu(); return; }
+  // 사이드바가 접혀 있어도 잘리지 않게 화면 기준(fixed)으로 아바타 바로 위에 띄운다.
+  const r = $('userAvatar').getBoundingClientRect();
+  m.style.left = Math.max(8, r.left) + 'px';
+  m.style.bottom = (window.innerHeight - r.top + 6) + 'px';
+  m.style.display = 'block';
+  $('userAvatar').setAttribute('aria-expanded', 'true');
+  const first = m.querySelector('button');
+  if (first) first.focus();
+}
+document.addEventListener('click', (ev) => {
+  if ($('userMenu').style.display !== 'none' && !$('userMenu').contains(ev.target)) closeUserMenu();
+});
+function pwSetMsg(text, isErr) {
+  $('pwMsg').textContent = text;
+  $('pwMsg').style.color = isErr ? '#b91c1c' : '#166534';
+}
+function openPwDialog() {
+  closeUserMenu();
+  if (!currentUser) return;
+  $('changePwForm').reset();
+  pwSetMsg('', false);
+  $('pwDlg').style.display = 'flex';
+  $('pwCurrent').focus();
+}
+function closePwDialog() {
+  $('pwDlg').style.display = 'none';
+  $('changePwForm').reset(); // 입력한 비밀번호를 화면에 남기지 않는다
+  ['pwCurrent', 'pwNew', 'pwNew2'].forEach(id => { $(id).type = 'password'; });
+  document.querySelectorAll('#pwDlg [data-pw-toggle]').forEach(b => { b.textContent = '보기'; b.setAttribute('aria-pressed', 'false'); });
+}
+$('pwDlg').addEventListener('mousedown', (ev) => { if (ev.target === $('pwDlg')) closePwDialog(); });
+document.addEventListener('keydown', (ev) => {
+  if (ev.key !== 'Escape') return;
+  if ($('pwDlg').style.display !== 'none') closePwDialog();
+  else if ($('userMenu').style.display !== 'none') { closeUserMenu(); $('userAvatar').focus(); }
+});
 async function changeMyPassword(e) {
   e.preventDefault();
-  $('pwMsg').textContent = '';
-  const j = await api('/api/auth/change-password', { method: 'POST', body: JSON.stringify({ currentPassword: $('pwCurrent').value, newPassword: $('pwNew').value }) });
-  if (!j.ok) { $('pwMsg').textContent = '변경하지 못했습니다. ' + (j.error || ''); $('pwMsg').style.color = '#b91c1c'; return; }
-  $('pwMsg').textContent = '비밀번호를 변경했습니다.';
-  $('pwMsg').style.color = '#166534';
-  $('pwCurrent').value = ''; $('pwNew').value = '';
+  pwSetMsg('', false);
+  if ($('pwNew').value !== $('pwNew2').value) { pwSetMsg('새 비밀번호와 확인이 일치하지 않습니다.', true); return; }
+  if ($('pwNew').value === $('pwCurrent').value) { pwSetMsg('새 비밀번호가 현재 비밀번호와 같습니다.', true); return; }
+  $('pwSubmitBtn').disabled = true;
+  let j;
+  try { j = await api('/api/auth/change-password', { method: 'POST', body: JSON.stringify({ currentPassword: $('pwCurrent').value, newPassword: $('pwNew').value }) }); }
+  catch (err) { j = { ok: false, error: err && err.message }; }
+  finally { $('pwSubmitBtn').disabled = false; }
+  if (!j.ok) { pwSetMsg('변경하지 못했습니다. ' + (j.error || ''), true); return; }
+  closePwDialog();
+  uiToast('비밀번호를 변경했습니다. 다음 로그인부터 새 비밀번호를 사용하세요.');
 }
 $('loginForm').addEventListener('submit', doLogin);
 $('setupForm').addEventListener('submit', doSetup);
@@ -1239,18 +1340,40 @@ function fmtDate(s) {
 function taskRow(t) {
   // 0021: 담당자 이름 (owner_id NULL → "미지정").
   const owner = `<span class="badge${t.owner_id ? '' : ' warn'}" title="담당자">${esc(t.owner_name || '미지정')}</span>`;
-  return `<div class="taskrow${t.done ? ' done' : ''}"><input type="checkbox" ${t.done ? 'checked' : ''} onchange="toggleTask('${t.id}')" />${owner}<span class="t-title">${esc(t.title)}</span>${t.source ? `<span class="t-src">${esc(t.source)}</span>` : ''}<button class="iconbtn" title="삭제" onclick="deleteTask('${t.id}')">×</button></div>`;
+  return `<div class="taskrow${t.done ? ' done' : ''}"><input type="checkbox" ${t.done ? 'checked' : ''} onchange="toggleTask('${t.id}')" />${owner}<span class="t-title">${esc(t.title)}</span>${taskSrcHtml(t.source)}<button class="iconbtn" title="삭제" onclick="deleteTask('${t.id}')">×</button></div>`;
+}
+// 할 일 출처 표시: 내부 식별자(`workflow:<id>` 등 "종류:영숫자 id" 꼴)는 그대로 보여주지 않는다.
+// 워크플로우는 이름을 알아내면 이름으로 바꾸고(taskSrcResolve), 모르면 출처를 숨긴 채 둔다. 사람이 쓴 출처(문서 제목 등)는 그대로다.
+const TASK_SRC_INTERNAL = /^([a-z][a-z0-9_]*):([A-Za-z0-9_-]+)$/;
+function taskSrcHtml(source) {
+  if (!source) return '';
+  const m = TASK_SRC_INTERNAL.exec(String(source).trim());
+  if (!m) return `<span class="t-src">${esc(source)}</span>`;
+  if (m[1] === 'workflow' && m[2] === 'assistant') return '<span class="t-src">AI 어시스턴트</span>';
+  if (m[1] === 'workflow') return `<span class="t-src" data-wf-src="${escAttr(m[2])}" hidden></span>`;
+  return '';
+}
+// 방금 그린 할 일 목록(box) 안의 워크플로우 출처 칸을 이름으로 채운다. 실패하거나 이름을 모르면 숨긴 채 둔다 (fail-soft).
+async function taskSrcResolve(box) {
+  const els = box ? [...box.querySelectorAll('[data-wf-src]')] : [];
+  if (!els.length) return;
+  let names = {};
+  try { for (const w of ((await api('/api/workflows')).workflows || [])) names[w.id] = w.name; } catch { return; }
+  for (const el of els) {
+    const name = names[el.dataset.wfSrc];
+    if (name) { el.textContent = name; el.title = '워크플로우'; el.hidden = false; }
+  }
 }
 let homeSeq = 0, homeCounts = null, homeEm = null;
 function renderHomeStats() {
   if (!homeCounts) return;
   const c = homeCounts, em = homeEm;
-  // 홈 통계도 메뉴 순서에 맞춘다: 안 읽은 메일 → 열린 할 일 → 문서 → 리플렉션.
+  // 홈 통계도 메뉴 순서에 맞춘다: 안 읽은 메일 → 해야 할 일 → 문서 → 성찰.
   $('homeStats').innerHTML =
     `<div class="stat"><b>${em && em.ok ? em.unread : '—'}</b><span>안 읽은 메일</span></div>` +
-    `<div class="stat"><b>${c.openTasks}</b><span>열린 할 일</span></div>` +
+    `<div class="stat"><b>${c.openTasks}</b><span>해야 할 일</span></div>` +
     `<div class="stat"><b>${c.documents}</b><span>문서</span></div>` +
-    `<div class="stat"><b>${c.reflections}</b><span>리플렉션</span></div>`;
+    `<div class="stat"><b>${c.reflections}</b><span>성찰</span></div>`;
 }
 // 메일함 카드 (최근 5건, 안 읽은 것부터 — 클릭하면 해당 메일 상세로).
 function renderHomeEmail(em) {
@@ -1264,7 +1387,7 @@ function renderHomeEmail(em) {
     $('homeEmail').innerHTML = em.emails.map(m => {
       const unread = m.direction === 'in' && !m.is_read;
       const who = m.direction === 'out' ? '나 → ' + emailName(m.to_addr) : emailName(m.from_addr);
-      return `<div class="taskrow" style="cursor:pointer" onclick="switchTab('email');emailView('${escAttr(m.id)}')"><span class="t-title">${unread ? '<b>● </b>' : ''}${esc(m.subject || '(제목 없음)')}</span><span class="badge">${esc(who)}</span><span class="t-src">${fmtDate(m.received_at)}</span></div>`;
+      return `<div class="taskrow" style="cursor:pointer" onclick="switchTab('email');emailView('${escAttr(m.id)}')"><span class="t-title">${unread ? '<span class="email-dot" title="안 읽음"></span>' : ''}${esc(m.subject || '(제목 없음)')}</span><span class="badge">${esc(who)}</span><span class="t-src">${fmtDate(m.received_at)}</span></div>`;
     }).join('');
   }
 }
@@ -1291,29 +1414,30 @@ async function loadHome() {
   $('homeByUserCard').style.display = j.byUser ? '' : 'none';
   if (j.byUser) {
     $('homeByUser').innerHTML = j.byUser.length
-      ? '<table class="obs-table"><thead><tr><th>사용자</th><th>문서</th><th>할 일</th><th>리플렉션</th></tr></thead><tbody>' +
+      ? '<table class="obs-table"><thead><tr><th>사용자</th><th>문서</th><th>할 일</th><th>성찰</th></tr></thead><tbody>' +
         j.byUser.map(u => `<tr><td><b>${esc(u.name || u.email)}</b> <span class="small">${esc(u.email)}</span></td><td>${u.documents}</td><td>${u.tasks}</td><td>${u.reflections}</td></tr>`).join('') +
         '</tbody></table>'
       : '<p class="empty">활성 사용자가 없습니다.</p>';
   }
   $('homeTasks').innerHTML = j.openTasks.length
     ? j.openTasks.map(taskRow).join('')
-    : '<p class="empty">열린 할 일이 없습니다.</p>';
+    : '<p class="empty">해야 할 일이 없습니다.</p>';
+  taskSrcResolve($('homeTasks'));
   $('homeRefl').innerHTML = j.recentReflections.length
     ? j.recentReflections.map(r => {
         let pats = [];
         try { pats = JSON.parse(r.patterns || '[]'); } catch { pats = []; }
         const who = adminHome ? `<span class="badge" title="코치 → 코칭 대상">${esc(r.coach_name || '미지정')} → ${esc(r.coachee_name || '미지정')}</span>` : '';
-        return `<div class="taskrow"><span class="t-title">${esc(pats[0] || '리플렉션')}</span>${who}<span class="t-src">${fmtDate(r.created_at)}</span></div>`;
+        return `<div class="taskrow"><span class="t-title">${esc(pats[0] || '성찰')}</span>${who}<span class="t-src">${fmtDate(r.created_at)}</span></div>`;
       }).join('')
-    : '<p class="empty">아직 리플렉션이 없습니다.</p>';
+    : '<p class="empty">아직 성찰이 없습니다.</p>';
   lmsHomeCard();
   if (window.wfHomeCard) wfHomeCard($('homeWorkflow')); // WF-11 (fail-soft: 실패하면 카드를 비운다)
   if (window.agentActivityCard) agentActivityCard($('homeAgentActivity'));
   try {
     const dg = await api('/api/digest');
     $('homeDigest').innerHTML = dg.ok && dg.digest
-      ? `<p class="small">${esc(dg.digest.runDate)} · ${dg.digest.engine === 'workers-ai' ? 'AI 생성' : '템플릿 생성'}</p>${renderDigestBody(dg.digest.body)}<p class="small">새 문서 ${dg.digest.counts.documents}건 · 열린 할 일 ${dg.digest.counts.openTasks}건 · 새 리플렉션 ${dg.digest.counts.reflections}건</p>`
+      ? `<p class="small">${esc(dg.digest.runDate)} · ${dg.digest.engine === 'workers-ai' ? 'AI 생성' : '템플릿 생성'}</p>${renderDigestBody(dg.digest.body)}<p class="small">새 문서 ${dg.digest.counts.documents}건 · 해야 할 일 ${dg.digest.counts.openTasks}건 · 새 성찰 ${dg.digest.counts.reflections}건</p>`
       : '<p class="empty">아직 브리핑이 없습니다.</p>';
   } catch { $('homeDigest').innerHTML = '<p class="empty">다이제스트를 불러오지 못했습니다.</p>'; }
 }
@@ -1335,6 +1459,7 @@ async function loadTasks() {
   $('taskList').innerHTML = j.tasks.length
     ? j.tasks.map(taskRow).join('')
     : '<p class="empty">할 일이 없습니다.</p>';
+  taskSrcResolve($('taskList'));
 }
 $('taskOwnerFilter').onchange = () => loadTasks();
 async function addTask() {
@@ -1451,12 +1576,16 @@ function gapsSection(gaps) {
   if (!gaps.length) return '<h3>답변 대기 질문</h3><p class="empty">답변 대기 중인 질문이 없습니다.</p>';
   const openN = gaps.filter(g => g.status === 'open').length;
   const cards = gaps.map(gap => {
-    const srcBadge = gap.source === 'downvote' ? '<span class="badge">👎 피드백</span>' : '<span class="badge warn">근거 없음</span>';
+    const srcBadge = gap.source === 'downvote' ? '<span class="badge">아쉬움 피드백</span>' : '<span class="badge warn">근거 없음</span>';
     const meta = `<div class="meta">${srcBadge} ${fmtMs(gap.asked_at)} · ${gap.count}회 질문됨 · 질문자: <b>${esc(gap.asker_name || '익명')}</b></div>`;
     if (gap.status === 'open') {
+      // 2026-11-22 사용자 결정: 암묵지 게시는 hr_admin 전용 (서버도 403으로 막는다). 일반 사용자에게는 폼 대신 안내만 보인다.
+      if (!currentUser || currentUser.role !== 'hr_admin') {
+        return `<div class="libcard"><h3>${esc(gap.question)}</h3>${meta}<p class="small">답변 대기 중입니다. hr_admin만 게시할 수 있습니다 — HR 관리자가 답을 게시하면 같은 질문에 암묵지 출처로 답변합니다.</p></div>`;
+      }
       return `<div class="libcard"><h3>${esc(gap.question)}</h3><p class="small">담당자가 답을 달면 같은 질문에 암묵지 출처로 답변합니다.</p>${meta}<textarea id="gap-answer-${gap.id}" placeholder="이유와 예외 조건을 포함해 주세요" style="min-height:90px;margin-top:8px"></textarea><div class="btnrow"><input type="text" id="gap-author-${gap.id}" value="인사팀" style="width:140px" /><button class="primary" onclick="publishGap('${gap.id}')">게시하기</button></div><div id="gap-result-${gap.id}"></div></div>`;
     }
-    const badge = gap.status === 'resolved' ? '<span class="badge ok">해결됨 ✓</span>' : '<span class="badge">답변 게시됨</span>';
+    const badge = gap.status === 'resolved' ? '<span class="badge ok">해결됨</span>' : '<span class="badge">답변 게시됨</span>';
     const note = gap.status === 'resolved' ? '같은 질문에 암묵지 출처로 답변합니다.' : '검증 중 — 근거가 잡히면 해결됨으로 바뀝니다.';
     return `<div class="libcard"><h3>${esc(gap.question)}</h3>${meta}<p>${badge} ${esc(gap.doc_title || '')}</p><p class="small">${note}</p></div>`;
   }).join('');
@@ -1512,30 +1641,30 @@ async function refreshLib() {
     if (g.ok) { gaps = g.gaps || []; gapsHtml = gapsSection(gaps); }
   } catch { gapsHtml = ''; }
   // 파일 목록(리스트 뷰): 문서 + 덱을 한 목록으로 합쳐 유형 필터·날짜 정렬로 보여준다.
-  // 기존 문서 카드 뷰는 이 리스트로 대체했다 (규정·리플렉션 카드는 그대로).
+  // 기존 문서 카드 뷰는 이 리스트로 대체했다 (규정·성찰 카드는 그대로).
   libItems = [
-    ...j.documents.map(d => ({ id: d.id, title: d.title, type: d.kind === 'transcript' ? 'transcript' : 'upload', created_at: d.created_at, size: d.size, canDelete: d.canDelete, owner: d.owner, failed: d.extract_status === 'failed', err: d.extract_error, isCoaching: !!d.is_coaching })),
+    ...j.documents.map(d => ({ id: d.id, title: d.title, type: d.kind === 'transcript' ? 'transcript' : 'upload', created_at: d.created_at, size: d.size, canDelete: d.canDelete, owner: d.owner, failed: d.extract_status === 'failed', err: d.extract_error, isCoaching: !!d.is_coaching, hasSource: !!d.has_source, sourceKind: d.source_kind || null })),
     ...(j.decks || []).map(d => ({ id: d.id, title: d.title, type: 'deck', created_at: d.created_at, size: d.size, canDelete: d.canDelete, owner: d.owner })),
   ];
   const pols = j.policies.map(p => `<div class="libcard"><h3>${esc(p.title)}</h3><p>${esc(p.section)}</p><div class="meta">HR 규정</div></div>`).join('');
   const refls = j.reflections.map(r => {
     let pats = [];
     try { pats = JSON.parse(r.patterns || '[]'); } catch { pats = []; }
-    // 참여자 (0020): 둘 다 NULL(기존·익명 리플렉션)이면 날짜만.
+    // 참여자 (0020): 둘 다 NULL(기존·익명 성찰)이면 날짜만.
     const who = (r.coach_name || r.coachee_name) ? `코치: ${esc(r.coach_name || '—')} · 코칭 대상: ${esc(r.coachee_name || '—')} · ` : '';
-    return `<div class="libcard"><h3>${r.mode === 'coachee' ? '코칭 대상 자기 성찰' : '코칭 리플렉션'}</h3><p>${esc(pats[0] || '')}</p><div class="meta">${who}${fmtDate(r.created_at)}</div></div>`;
+    return `<div class="libcard"><h3>${r.mode === 'coachee' ? '코칭 대상 자기 성찰' : '코칭 성찰'}</h3><p>${esc(pats[0] || '')}</p><div class="meta">${who}${fmtDate(r.created_at)}</div></div>`;
   }).join('');
   const openGaps = gaps.filter(g => g.status === 'open').length;
   $('libResult').innerHTML =
     `<div class="obs-subtabs" role="tablist" aria-label="라이브러리">
       <button type="button" role="tab" data-libtab="files" aria-selected="true" onclick="setLibTab('files')">파일 목록</button>
       <button type="button" role="tab" data-libtab="policies" aria-selected="false" onclick="setLibTab('policies')">규정 ${j.policies.length}건</button>
-      <button type="button" role="tab" data-libtab="reflections" aria-selected="false" onclick="setLibTab('reflections')">리플렉션 ${j.reflections.length}건</button>
+      <button type="button" role="tab" data-libtab="reflections" aria-selected="false" onclick="setLibTab('reflections')">성찰 ${j.reflections.length}건</button>
       <button type="button" role="tab" data-libtab="gaps" aria-selected="false" onclick="setLibTab('gaps')">답변 대기${openGaps ? ' (' + openGaps + ')' : ''}</button>
     </div>` +
     `<div data-libpanel="files"><h3>파일 목록</h3><div id="libFiles"></div></div>` +
     `<div data-libpanel="policies" style="display:none"><h3>규정 ${j.policies.length}건</h3><div class="libgrid">${pols}</div></div>` +
-    `<div data-libpanel="reflections" style="display:none"><h3>리플렉션 ${j.reflections.length}건</h3><div class="libgrid">${refls || '<p class="empty">리플렉션이 없습니다.</p>'}</div></div>` +
+    `<div data-libpanel="reflections" style="display:none"><h3>성찰 ${j.reflections.length}건</h3><div class="libgrid">${refls || '<p class="empty">성찰이 없습니다.</p>'}</div></div>` +
     `<div data-libpanel="gaps" style="display:none">${gapsHtml}</div>`;
   setLibTab(libTab);
   renderLibFiles();
@@ -1559,14 +1688,27 @@ function renderLibFiles() {
     // 코칭 지정/해제 (0020): 삭제와 같은 권한(canDelete)일 때만. 덱은 문서가 아니라 제외.
     const coachBtn = x.type !== 'deck' && x.canDelete ? `<button class="secondary" onclick="toggleCoaching('${esc(x.id)}', ${x.isCoaching ? 'false' : 'true'})">${x.isCoaching ? '코칭 해제' : '코칭 지정'}</button> ` : '';
     const ownerCell = showOwner ? `<td>${esc(x.owner || '공용')}</td>` : '';
+    // PPTX 편집 (2026-11-21, public/pptx-edit.js): 덱, 또는 원본 파일이 있는 업로드 문서(.pptx가 아니면 서버가 안내). 로그인 사용자만.
+    // 엑셀 편집 (2026-11-21, public/xlsx-edit.js): 업로드 문서는 openDocEdit가 먼저 .xlsx로 열어 보고, 아니면 PPTX 편집으로 넘긴다.
+    // 2026-11-21 브라우저 회귀 6번: 원본 형식(sourceKind)이 편집 가능한 형식일 때만 버튼을 단다. 그 밖의 형식은 버튼 대신 안내 글을 둔다.
+    // 형식을 모르는 예전 응답(null)은 버튼을 두고 서버 안내에 맡긴다.
+    // Word 편집 (2026-11-22, public/docx-edit.js): .docx는 openDocxEdit로 Word 편집기를 연다.
+    const editable = x.type === 'deck' || (x.type === 'upload' && x.hasSource && !x.failed && (x.sourceKind === 'pptx' || x.sourceKind === 'xlsx' || x.sourceKind === 'docx' || !x.sourceKind));
+    const editCall = x.sourceKind === 'docx' ? `openDocxEdit('${esc(x.id)}', this.dataset.title)` : `openDocEdit('${x.type}','${esc(x.id)}', this.dataset.title)`;
+    const editBtn = currentUser && editable
+      ? `<button class="secondary" onclick="${editCall}" data-title="${esc(x.title)}">편집본 만들기</button> `
+      : currentUser && x.type === 'upload' && x.hasSource && !x.failed
+        ? `<span class="small muted" title="편집본 만들기는 PPTX·XLSX·DOCX만 됩니다">편집 미지원 형식</span> ` : '';
     // 문서 행의 제목을 누르면 요약 화면(녹음전사·문서저장 > 문서)으로 열린다 (덱·변환 실패 문서 제외).
     const openable = x.type !== 'deck' && !x.failed;
     const titleCell = openable
       ? `<a href="#" class="lib-open" title="요약 화면으로 열기" onclick="libOpenDoc('${esc(x.id)}');return false">${esc(x.title)}</a>`
       : esc(x.title);
-    return `<tr><td>${titleCell}${warn}</td><td><span class="badge">${LIB_TYPES[x.type]}</span></td>${ownerCell}<td>${fmtDate(x.created_at)}</td><td>${x.size ? fmtSize(x.size) : '-'}</td><td><a href="${dl}">다운로드</a> ${coachBtn}${del}</td></tr>`;
+    return `<tr><td>${titleCell}${warn}</td><td><span class="badge">${LIB_TYPES[x.type]}</span></td>${ownerCell}<td>${fmtDate(x.created_at)}</td><td>${x.size ? fmtSize(x.size) : '-'}</td><td><a href="${dl}">다운로드</a> ${editBtn}${coachBtn}${del}</td></tr>`;
   }).join('');
-  el.innerHTML = `<div class="btnrow">${filters}</div>` + (rows.length
+  // Word 새 문서 만들기 (2026-11-21, public/docx-create.js) — 로그인 사용자만.
+  const createBtn = currentUser ? ` <button class="primary" onclick="openDocxCreate()">새 Word 문서 만들기</button>` : '';
+  el.innerHTML = `<div class="btnrow">${filters}${createBtn}</div>` + (rows.length
     ? `<table class="liblist" style="width:100%;border-collapse:collapse"><thead><tr style="text-align:left"><th>이름</th><th>유형</th>${showOwner ? '<th>소유자</th>' : ''}<th>날짜 ▼</th><th>크기</th><th>작업</th></tr></thead><tbody>${body}</tbody></table>`
     : '<p class="empty">해당하는 파일이 없습니다.</p>');
 }
@@ -1588,9 +1730,10 @@ async function toggleCoaching(id, on) {
   renderLibFiles();
 }
 async function deleteLibItem(type, id) {
-  if (!confirm('이 파일을 삭제할까요? 검색 색인도 함께 지워지며 되돌릴 수 없습니다.')) return;
+  if (!(await uiConfirm('이 파일을 삭제할까요? 검색 색인도 함께 지워지며 되돌릴 수 없습니다.', { title: '파일 삭제', okText: '삭제', danger: true }))) return;
   const j = await api((type === 'deck' ? '/api/decks/' : '/api/documents/') + id, { method: 'DELETE' });
-  if (!j.ok) { alert('삭제하지 못했습니다: ' + (j.error || '')); return; }
+  if (!j.ok) { uiToast('삭제하지 못했습니다: ' + (j.error || ''), true); return; }
+  uiToast('파일을 삭제했습니다.');
   refreshLib();
 }
 function toggleSidebar() {
@@ -1601,8 +1744,10 @@ function toggleSidebar() {
 }
 try { if (localStorage.getItem('people-os-sidebar-collapsed') === '1') { $('sidebar').classList.add('collapsed'); $('collapseBtn').textContent = '»'; } } catch {}
 fetch('/api/health', { method: 'POST' }).then(r => r.json()).then(j => {
-  $('health').textContent = j.ok ? 'health OK · ' + Object.entries(j.bindings).filter(([,v])=>v).map(([k])=>k).join(', ') : 'health 실패';
-}).catch(() => $('health').textContent = 'health 실패');
+  // 화면에는 "정상"만 보인다. 연결된 서비스 목록은 title(마우스를 올리면 보임)에만 둔다.
+  $('health').textContent = j.ok ? '정상' : '상태 확인 실패';
+  if (j.ok && j.bindings) $('health').title = Object.entries(j.bindings).filter(([,v])=>v).map(([k])=>k).join(', ');
+}).catch(() => $('health').textContent = '상태 확인 실패');
 // 로그인 (2026-11-15): 먼저 인증 상태를 확인한다. 미로그인이면 로그인 화면,
 // 설정 링크(#setup=)면 비밀번호 설정 화면, 로그인 상태면 역할에 맞게 탭을 연다.
 checkAuth();
@@ -1756,7 +1901,7 @@ function renderAsk(j, targetId) {
   const copyBtn = isPersonal
     ? `<button class="secondary" onclick="copyPersonalAnswer()">답변 복사</button>`
     : `<button class="secondary" onclick="copyAnswer()">답변 복사</button><button class="secondary" onclick="regenAnswer()">다시 생성</button>`;
-  const fb = j.eventId ? `<div class="btnrow"><button class="secondary" onclick="sendFeedback('${j.eventId}','up',this)">👍 도움이 됐어요</button><button class="secondary" onclick="sendFeedback('${j.eventId}','down',this)">👎 아쉬워요</button>${copyBtn}</div><div id="fbMsg" class="small"></div>` : '';
+  const fb = j.eventId ? `<div class="btnrow"><button class="secondary" onclick="sendFeedback('${j.eventId}','up',this)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden="true"><path d="M7 10v12"/><path d="M15 5.88 14 10h5.83a2 2 0 0 1 1.92 2.56l-2.33 8A2 2 0 0 1 17.5 22H4a2 2 0 0 1-2-2v-8a2 2 0 0 1 2-2h2.76a2 2 0 0 0 1.79-1.11L12 2a3.13 3.13 0 0 1 3 3.88Z"/></svg>도움이 됐어요</button><button class="secondary" onclick="sendFeedback('${j.eventId}','down',this)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden="true"><path d="M17 14V2"/><path d="M9 18.12 10 14H4.17a2 2 0 0 1-1.92-2.56l2.33-8A2 2 0 0 1 6.5 2H20a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2h-2.76a2 2 0 0 0-1.79 1.11L12 22a3.13 3.13 0 0 1-3-3.88Z"/></svg>아쉬워요</button>${copyBtn}</div><div id="fbMsg" class="small"></div>` : '';
   // 근거 없음이면 공백 큐 기록 안내를, 암묵지 근거면 출처 배지를 단다 (C5-b).
   const gapNote = j.grounded === false ? '<p class="small">답변 대기 목록에 기록됐습니다.</p>' : '';
   const srcList = j.sources.map(s => {
@@ -1868,42 +2013,62 @@ $('loadCoaching').onclick = async () => {
   const j = await api('/api/seed');
   $('coachingText').value = j.coachingTranscript;
 };
-// 코칭 리플렉션 모드는 서버가 세션의 coaching_role로 정한다. 프론트는 응답의 mode로 렌더링만 바꾼다.
+// 코칭 성찰 모드는 서버가 세션의 coaching_role로 정한다. 프론트는 응답의 mode로 렌더링만 바꾼다.
 function applyCoachingMode() {
   const coachee = isCoachee();
-  $('coachingTitle').textContent = coachee ? '코칭 리플렉션 — 나의 자기 성찰' : '코칭 리플렉션';
+  $('coachingTitle').textContent = coachee ? '코칭 성찰 — 나의 자기 성찰' : '코칭 성찰';
   $('coachingModeDesc').textContent = coachee
     ? '코칭 대상용: 코칭 세션 전사본을 붙여넣으면 나의 자기 성찰 포인트와 액션 플랜(실천 행동 + 권장 기한)을 정리합니다.'
     : '코치용: 세션 전사본에서 핵심 질문·반복 패턴·다음 세션 질문을 뽑습니다.';
 }
 // 코칭 전사본 선택 + 상대방 (0020). 탭을 열 때마다 다시 불러온다.
-let coachingDocs = [];
+let coachingDocs = [], coachingPickSeq = 0;
+// 2026-11-21 브라우저 회귀 2번:
+// - 상대방 목록이 "지정 안 함"만 보였다. 서버(/api/users/coaching)는 라이브에서 3명을 돌려준다 — 화면 쪽에서
+//   전사본 목록(본문 포함, 약 165 KB)을 다 받은 뒤에야 사용자 목록을 불렀고, 실패하면 아무 표시 없이 빈 목록이었다.
+//   → 두 목록을 동시에 따로 불러오고, 늦게 끝난 이전 호출이 새 결과를 덮지 않게 순번을 두고, 실패하면 목록에 사유를 적는다.
+// - 같은 제목·같은 본문 전사본(예: 샘플을 여러 번 업로드한 "11월 팀 회의 전사본 (샘플)" 10개)이 날짜까지 같아 똑같은 줄로
+//   10번 보였다 → 같은 내용은 최신 1개만 두고 "같은 내용 N개"로 표시한다 (문서는 지우지 않는다).
+function coachingDedupe(docs) {
+  const seen = new Map(), out = [];
+  for (const x of docs) { // 서버 순서(코칭 지정 먼저, 최신순) 그대로 — 처음 본 것이 남는다
+    const k = (x.title || '') + '\u0000' + (x.content || '') + '\u0000' + (x.owner_name || '');
+    const hit = seen.get(k);
+    if (hit) { hit.dupCount++; continue; }
+    const y = { ...x, dupCount: 1 };
+    seen.set(k, y); out.push(y);
+  }
+  return out;
+}
 async function loadCoachingPickers() {
+  const seq = ++coachingPickSeq;
   const coachee = isCoachee();
   $('coachingCounterpartLabel').textContent = coachee ? '코치' : '코칭 대상';
-  try {
-    const d = await api('/api/documents/coaching');
-    coachingDocs = d.ok ? (d.documents || []) : [];
-  } catch { coachingDocs = []; }
+  const docsP = api('/api/documents/coaching').then(d => d && d.ok ? { docs: d.documents || [] } : { docs: [], err: (d && d.error) || '불러오지 못했습니다' })
+    .catch(() => ({ docs: [], err: '서버에 연결할 수 없습니다' }));
+  const usersP = api('/api/users/coaching').then(u => u && u.ok ? { users: u.users || [] } : { users: [], err: (u && u.error) || '불러오지 못했습니다' })
+    .catch(() => ({ users: [], err: '서버에 연결할 수 없습니다' }));
+  usersP.then(({ users, err }) => {
+    if (seq !== coachingPickSeq) return;
+    const me = currentUser ? currentUser.id : null;
+    const keepCp = $('coachingCounterpart').value;
+    // 반대 역할을 먼저, 같은 역할은 뒤에 (역할이 바뀐 경우도 고를 수 있게 모두 보여준다).
+    const want = coachee ? 'coach' : 'coachee';
+    const others = users.filter(x => x.id !== me).sort((a, b) => (a.coaching_role === want ? 0 : 1) - (b.coaching_role === want ? 0 : 1));
+    $('coachingCounterpart').innerHTML = '<option value="">' + (err ? `지정 안 함 — 목록 오류: ${esc(err)} (탭을 다시 열어 주세요)` : others.length ? '지정 안 함' : '지정 안 함 (고를 수 있는 다른 계정이 없습니다)') + '</option>' +
+      others.map(x => `<option value="${esc(x.id)}">${esc(x.name || x.email)} (${esc(x.email)}) · ${x.coaching_role === 'coach' ? '코치' : '코칭 대상'}</option>`).join('');
+    if (others.some(x => x.id === keepCp)) $('coachingCounterpart').value = keepCp;
+  });
+  const { docs, err: docErr } = await docsP;
+  if (seq !== coachingPickSeq) return;
+  coachingDocs = coachingDedupe(docs);
   const keepDoc = $('coachingDocPick').value;
   // 2026-11-16: #upload의 전사본 전부 (코칭 지정 먼저, 최신순). 코칭 지정 문서는 [코칭] 배지,
   // 관리자에게는 소유자 이름도 보인다. <option> 안에는 HTML을 못 넣어 글자 배지로 표시한다.
-  $('coachingDocPick').innerHTML = '<option value="">직접 붙여넣기</option>' +
-    coachingDocs.map(x => `<option value="${esc(x.id)}">${x.is_coaching ? '[코칭] ' : ''}${esc(x.title)} · ${fmtDate(x.created_at)}${x.owner_name ? ' · ' + esc(x.owner_name) : ''}</option>`).join('');
+  $('coachingDocPick').innerHTML = '<option value="">' + (docErr ? `직접 붙여넣기 — 전사본 목록 오류: ${esc(docErr)}` : '직접 붙여넣기') + '</option>' +
+    coachingDocs.map(x => `<option value="${esc(x.id)}">${x.is_coaching ? '[코칭] ' : ''}${esc(x.title)} · ${fmtDate(x.created_at)}${x.owner_name ? ' · ' + esc(x.owner_name) : ''}${x.dupCount > 1 ? ` · 같은 내용 ${x.dupCount}개 (최신만 표시)` : ''}</option>`).join('');
   if (coachingDocs.some(x => x.id === keepDoc)) $('coachingDocPick').value = keepDoc;
-  let users = [];
-  try {
-    const u = await api('/api/users/coaching');
-    users = u.ok ? (u.users || []) : [];
-  } catch { users = []; }
-  const me = currentUser ? currentUser.id : null;
-  const keepCp = $('coachingCounterpart').value;
-  // 반대 역할을 먼저, 같은 역할은 뒤에 (역할이 바뀐 경우도 고를 수 있게 모두 보여준다).
-  const want = coachee ? 'coach' : 'coachee';
-  const others = users.filter(x => x.id !== me).sort((a, b) => (a.coaching_role === want ? 0 : 1) - (b.coaching_role === want ? 0 : 1));
-  $('coachingCounterpart').innerHTML = '<option value="">지정 안 함</option>' +
-    others.map(x => `<option value="${esc(x.id)}">${esc(x.name || x.email)} (${esc(x.email)}) · ${x.coaching_role === 'coach' ? '코치' : '코칭 대상'}</option>`).join('');
-  if (others.some(x => x.id === keepCp)) $('coachingCounterpart').value = keepCp;
+  await usersP;
 }
 $('coachingDocPick').onchange = () => {
   const d = coachingDocs.find(x => x.id === $('coachingDocPick').value);
@@ -1911,10 +2076,10 @@ $('coachingDocPick').onchange = () => {
 };
 $('reflectBtn').onclick = async () => {
   const counterpartId = $('coachingCounterpart').value || undefined;
-  // 빈 칸으로 누르면 서버가 예시 전사본으로 리플렉션을 만들어 내 이름으로 저장했다 — 화면에서 먼저 막는다.
+  // 빈 칸으로 누르면 서버가 예시 전사본으로 성찰을 만들어 내 이름으로 저장했다 — 화면에서 먼저 막는다.
   if ($('coachingText').value.trim().length < 10) { $('coachingResult').innerHTML = '<p class="err">코칭 세션 전사본을 먼저 입력하거나 위 목록에서 골라 주세요.</p>'; return; }
   const j = await api('/api/coaching/reflect', { method: 'POST', body: JSON.stringify({ transcript: $('coachingText').value, sessionId, counterpartId }) });
-  if (!j.ok) { $('coachingResult').innerHTML = `<p class="err">${esc(j.error || '리플렉션을 만들지 못했습니다.')}</p>`; return; }
+  if (!j.ok) { $('coachingResult').innerHTML = `<p class="err">${esc(j.error || '성찰을 만들지 못했습니다.')}</p>`; return; }
   if (j.mode === 'coachee') {
     $('coachingResult').innerHTML = `<div class="card"><p class="small">코칭 대상(나)의 자기 성찰 + 액션 플랜 <span class="badge">엔진: ${esc(j.engine)}</span></p>` +
       `<b>자기 성찰 포인트</b><ul>${j.reflection_points.map(s => `<li>${esc(s)}</li>`).join('')}</ul>` +

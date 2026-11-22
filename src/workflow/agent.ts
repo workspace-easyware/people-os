@@ -15,9 +15,12 @@
 import { executeNode } from "./nodes";
 import type { AdvanceResult, PendingAction } from "./agent-do";
 import {
-  APPROVAL_REQUIRED_NODES, agentSettings, resolveVars,
+  APPROVAL_REQUIRED_NODES, DEFERRABLE_NODES, agentSettings, isDeferredAgentStep, resolveVars,
   type Env, type NodeContext, type NodeType, type ToolNodeType, type WorkflowStepDef, type WorkflowStepMessage,
 } from "./types";
+
+/** 비동기 승인 P2: 지연 모드에서 대기열에 넣은 도구의 관찰 머리말 (하네스가 이 문구로 확인한다). */
+export const DEFERRED_OBSERVATION = "(승인 대기열에 넣음 — 승인되면 실행됩니다)";
 
 export function agentDoName(runId: string, stepIndex: number): string {
   return `agent:${runId}:${stepIndex}`;
@@ -56,7 +59,7 @@ async function doCall<T>(stub: DurableObjectStub, path: string, body?: unknown):
   return (await res.json()) as T;
 }
 
-function approvalSummary(tool: ToolNodeType, args: Record<string, unknown>, thinking: string): string {
+export function approvalSummary(tool: ToolNodeType, args: Record<string, unknown>, thinking: string): string {
   const s = (v: unknown) => (typeof v === "string" ? v : v === undefined || v === null ? "" : JSON.stringify(v));
   const head = tool === "send_email"
     ? `받는 사람: ${s(args.to)}\n제목: ${s(args.subject)}${s(args.body ?? args.text) ? `\n본문 미리보기: ${s(args.body ?? args.text).slice(0, 300)}` : ""}`
@@ -77,6 +80,8 @@ export async function advanceAgentTurn(env: Env, p: AgentTurnInput, hooks: Agent
   const settings = agentSettings({ ...(step.config ?? {}), goal: resolveVars(step.config?.goal ?? "", { input: ctx.input ?? {}, steps }) });
   // requiresApproval:true인 agent는 고르는 모든 도구가 승인을 받는다. 아니면 APPROVAL_REQUIRED_NODES(send_email)만.
   const gated = (tool: ToolNodeType) => step.requiresApproval === true || APPROVAL_REQUIRED_NODES.includes(tool);
+  // 비동기 승인 P2: approvalMode "deferred"인 agent 단계에서는 send_email·webhook을 멈추지 않고 대기열에 넣는다. 나머지는 지금과 같다.
+  const deferrable = (tool: ToolNodeType) => isDeferredAgentStep(step) && DEFERRABLE_NODES.includes(tool);
 
   const runTool = async (turn: number, tool: ToolNodeType, args: Record<string, unknown>, approvedTool: boolean, thinking: string) => {
     const res = await executeNode(tool, { ...ctx, approved: approvedTool }, args);
@@ -89,6 +94,20 @@ export async function advanceAgentTurn(env: Env, p: AgentTurnInput, hooks: Agent
     const obs = await doCall<{ ok: boolean; nextTurn: number }>(stub, "/observe",
       res.status === "succeeded" ? { turn, observation: res.output ?? null } : { turn, error: res.error || "도구 실행 실패" });
     await hooks.requeue(obs.nextTurn);
+  };
+
+  /**
+   * 비동기 승인 P2: 지연 모드에서 에이전트가 고른 send_email·webhook. 노드를 deferActions로 부른다 → 노드가 검증·SSRF 검사를 먼저 하고
+   * 통과하면 대기 동작(wfpa_<runId>_<stepIndex>_t<turn>)을 INSERT OR IGNORE로 쌓고 시뮬레이션 출력을 돌려준다 (재전달돼도 행 1개).
+   * 검증 실패는 대기 동작 없이 도구 실패로 관찰된다. 관찰에는 "아직 실행되지 않았다"는 사실과 simulated:true를 그대로 싣는다.
+   */
+  const runDeferred = async (turn: number, tool: ToolNodeType, args: Record<string, unknown>) => {
+    const res = await executeNode(tool, { ...ctx, approved: false, deferActions: true, deferTurn: turn }, args);
+    const obs = res.status === "succeeded"
+      ? { turn, observation: `${DEFERRED_OBSERVATION} 아직 실행되지 않았습니다. 같은 동작을 다시 부르지 마세요. ${JSON.stringify(res.output ?? null)}` }
+      : { turn, error: res.status === "failed" ? (res.error || "도구 실행 실패") : "승인 대기열에 넣지 못했습니다 (실행하지 않음)." };
+    const o = await doCall<{ ok: boolean; nextTurn: number }>(stub, "/observe", obs);
+    await hooks.requeue(o.nextTurn);
   };
 
   // 1. 승인 재개: 저장해 둔 행동을 꺼내 실행한다 (새 선택을 하지 않는다). 꺼내면 지워지므로 한 번만 실행된다.
@@ -131,6 +150,11 @@ export async function advanceAgentTurn(env: Env, p: AgentTurnInput, hooks: Agent
     // 이미 실행·기록된 턴의 재전달. 다음 턴이 아직 시작 안 됐을 때만 이어 보낸다 (도구는 다시 실행하지 않는다).
     if (r.nextTurn === r.turn + 1) await hooks.requeue(r.nextTurn);
     else await hooks.release();
+    return;
+  }
+  if (gated(r.tool) && deferrable(r.tool)) {
+    // 비동기 승인 P2: 지연 모드 agent 단계 — 멈추지 않고 대기 동작을 쌓은 뒤 다음 턴으로 (DO /pending은 쓰지 않는다).
+    await runDeferred(r.turn, r.tool, r.args);
     return;
   }
   if (gated(r.tool)) {

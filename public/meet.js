@@ -111,7 +111,9 @@ async function showRooms() {
 function endButton(id) {
   const b = el("button", { class: "meet-btn danger", type: "button" }, "모두에게 통화 종료");
   b.addEventListener("click", async () => {
-    if (!confirm("모든 참가자의 통화를 종료할까요? 종료하면 이 회의에 다시 들어올 수 없습니다.")) return;
+    // 2026-11-22: 네이티브 confirm() → 페이지 내 대화상자 (meet.html이 /ui-dialog.js를 먼저 부른다).
+    const ask = window.uiConfirm || ((m) => Promise.resolve(confirm(m)));
+    if (!(await ask("모든 참가자의 통화를 종료할까요? 종료하면 이 회의에 다시 들어올 수 없습니다.", { title: "통화 종료", okText: "모두에게 종료", danger: true }))) return;
     b.disabled = true;
     try {
       await api(`/api/meet/${encodeURIComponent(id)}/end`, { method: "POST" });
@@ -142,7 +144,7 @@ async function showMeeting(id) {
   // 전사 안내 (계획 9장 결정 7번: 입장 화면에 표시한다).
   const notice = meeting.transcribe
     ? el("div", { class: "meet-notice meet-notice-tx", role: "note" },
-      el("strong", {}, "🔴 이 회의는 전사됩니다. "),
+      el("strong", { class: "meet-rec" }, "이 회의는 전사됩니다. "),
       `통화가 끝나면 참가자별 음성이 한국어로 전사되어 ${meeting.is_coaching ? "코치" : "회의를 시작한 사람"}의 녹음전사 목록에 화자 이름과 함께 저장되고, 요약·검색에 쓰입니다. 입장하면 이에 동의한 것으로 봅니다.`)
     : el("div", { class: "meet-notice", role: "note" }, "이 회의는 전사되지 않습니다.");
   bodyEl.replaceChildren(notice, join, ...(canEnd ? [" ", endButton(id)] : []));

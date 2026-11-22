@@ -129,7 +129,7 @@
 .obs-details[open]>summary{border-bottom:1px solid var(--obs-line)}
 .obs-msg{padding:8px 12px;border-bottom:1px solid var(--obs-line)}
 .obs-msg:last-child{border-bottom:0}
-.obs-msg-role{font-size:var(--obs-text-xs);color:var(--obs-muted);text-transform:uppercase;letter-spacing:.04em;margin-bottom:4px}
+.obs-msg-role{font-size:var(--obs-text-xs);color:var(--obs-muted);font-family:var(--font-mono,ui-monospace,monospace);margin-bottom:4px}
 .obs-pre{margin:0;white-space:pre-wrap;word-break:break-word;font-family:var(--obs-font-mono);font-size:var(--obs-text-xs);background:var(--obs-code-bg);border-radius:var(--radius-xs,4px);padding:8px;max-height:360px;overflow:auto}
 
 /* §8 KPI · 미니 차트 (common.js sparkline/lineChart — M5 공유) */

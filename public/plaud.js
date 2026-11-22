@@ -222,7 +222,7 @@ async function plaudConnect() {
 }
 
 async function plaudDisconnect() {
-  if (!confirm('Plaud 연결을 해제할까요? 이미 가져온 문서는 그대로 남습니다.')) return;
+  if (!(await uiConfirm('Plaud 연결을 해제할까요? 이미 가져온 문서는 그대로 남습니다.', { title: 'Plaud 연결 해제', okText: '연결 해제', danger: true }))) return;
   const r = await plaudCall('/api/plaud/disconnect', { method: 'POST', body: '{}' });
   if (!r.ok) { plaudState.err = r.error || '연결을 해제하지 못했습니다.'; plaudRender(); return; }
   plaudState = { status: 'not_connected', email: null, files: [], page: 1, hasMore: false, loading: false, err: '', msg: 'Plaud 연결을 해제했습니다.', rows: {}, recs: {}, whisper: null };

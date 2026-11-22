@@ -26,6 +26,10 @@ export const PRICING_SOURCE = "https://developers.cloudflare.com/workers-ai/plat
 
 export const MODEL_PRICES: Record<string, ModelPrice> = {
   "@cf/meta/llama-4-scout-17b-16e-instruct": { inPerM: 0.27, outPerM: 0.85, checked: null, note: "답 생성(ask/eval-ask)·judge" },
+  // qwen 줄은 위 "기억으로 옮긴 값" 주의에 해당하지 않는다: 2026-11-22 공식 가격 페이지(2026-11-18판)와
+  // 직접 대조했고(입력 40,909 · 출력 290,909 뉴런/100만 토큰), AI Gateway 실측(tag=ask 38건,
+  // 질문 1건 평균 $0.00168 = 입력 583 · 출력 443토큰)이 이 단가로 계산한 값과 일치했다.
+  "@cf/qwen/qwen3.8-27b": { inPerM: 0.45, outPerM: 3.20, checked: "2026-11-22", note: "답 생성(ask/eval-ask) — 실측·공식 페이지 대조 완료" },
   "@cf/baai/bge-m3": { inPerM: 0.012, outPerM: 0, checked: null, note: "임베딩" },
   "@cf/meta/llama-3.3-70b-instruct-fp8-fast": { inPerM: 0.29, outPerM: 2.25, checked: null, note: "debug-ai 후보" },
 };

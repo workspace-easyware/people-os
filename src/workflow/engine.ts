@@ -24,14 +24,16 @@
 // - 턴 사이에는 단계를 running → pending으로 되돌리고(다음 메시지가 다시 점유할 수 있게) 같은 단계 메시지(agentTurn+1)를 보낸다.
 //   run은 running 그대로. 루프가 끝나야(finish/stopped) 단계가 succeeded가 된다.
 // - 단계 단위 승인 게이트(7번)는 agent에 걸지 않는다: 승인은 에이전트가 고른 도구 단위로 agent.ts가 건다.
-// - 30분 상한(4번)은 agent 단계에도 매 턴 그대로 적용된다. run 전체 LLM 30회 캡은 단계 행 기준이라 agent 턴은
-//   세지 않는다 — 대신 DO가 agent 단계 안에서 도구 선택 호출을 20회로 따로 막는다.
+// - 30분 상한(4번)은 agent 단계에도 매 턴 그대로 적용된다. run 전체 LLM 30회 캡(8번)은 LLM 노드 단계 수 + 앞 agent 단계의
+//   LLM 사용량(priorLlmCalls — Think는 output.llmCalls, legacy는 turns 길이)을 합산한다 (T3 남은 문제 1, 2026-11-20).
+//   agent 단계 안에서는 DO가 도구 선택 호출을 20회로 따로 막는다.
 import { executeNode } from "./nodes";
 import { logEvent } from "../obs/log";
 import { requestWorkflowApproval } from "./approvals";
 import { advanceAgentTurn, type AgentStepHooks } from "./agent";
+import { advanceThinkAgentStep, pickAgentRuntime } from "./agent-think"; // Think T1: agent 단계의 Think 런타임 (AGENT_RUNTIME)
 import {
-  APPROVAL_REQUIRED_NODES, resolveNextStep, resolveVars,
+  APPROVAL_REQUIRED_NODES, DEFERRABLE_NODES, resolveNextStep, resolveVars,
   type Env, type NodeContext, type NodeResult, type NodeType, type WorkflowDefinition, type WorkflowStepDef, type WorkflowStepMessage,
 } from "./types";
 
@@ -104,6 +106,11 @@ function needsApproval(step: WorkflowStepDef): boolean {
   return step.requiresApproval === true || APPROVAL_REQUIRED_NODES.includes(step.type);
 }
 
+/** 비동기 승인 P1: 지연 방식 단계인가. validateDefinition이 send_email·webhook에만 허용하지만 엔진도 타입을 다시 확인한다. */
+function isDeferred(step: WorkflowStepDef): boolean {
+  return step.approvalMode === "deferred" && DEFERRABLE_NODES.includes(step.type);
+}
+
 /** 승인 요청 본문용 요약. config를 앞 단계 출력으로 치환한 뒤 핵심만. */
 function approvalSummary(step: WorkflowStepDef, input: Record<string, unknown>, stepOutputs: Record<string, unknown>): string {
   const steps: Record<string, unknown> = {};
@@ -168,6 +175,28 @@ async function pauseForApproval(
   ).bind(JSON.stringify({ approval: "requested", requestedAt: nowIso() }), run.id, stepIndex).run();
   await env.DB.prepare("UPDATE workflow_runs SET status='waiting_approval', current_step=? WHERE id=? AND status IN ('queued','running')")
     .bind(stepIndex, run.id).run();
+}
+
+/**
+ * agent 단계 output 1개의 LLM 호출 수. Think 단계는 DO가 센 `llmCalls`(모델 스텝 + LLM 도구 호출)를 쓰고,
+ * 없으면(legacy) turns 길이(턴 1개 = 도구 선택 호출 1회). 관측 API(obs/routes-workflows.ts)와 같은 셈법.
+ */
+export function agentOutputLlmCalls(output: unknown): number {
+  const o = output as { llmCalls?: unknown; turns?: unknown } | null;
+  if (!o || typeof o !== "object") return 0;
+  if (typeof o.llmCalls === "number" && Number.isFinite(o.llmCalls) && o.llmCalls >= 0) return o.llmCalls;
+  return Array.isArray(o.turns) ? o.turns.length : 0;
+}
+
+/** Think T1: 이 단계 전에 run이 쓴 LLM 호출 수 = LLM 노드 단계 수 + 다른 agent 단계의 LLM 사용량 (agentOutputLlmCalls). */
+function priorLlmCalls(steps: StepDb[], stepIndex: number): number {
+  let n = 0;
+  for (const s of steps) {
+    if (s.step_index === stepIndex) continue;
+    if ((LLM_NODE_TYPES as string[]).includes(s.node_type)) n++;
+    else if (s.node_type === "agent") n += agentOutputLlmCalls(parseJson(s.output_json));
+  }
+  return n;
 }
 
 /** agent 단계(WF-6)의 D1 상태 전이. 모든 전이는 "이 메시지가 점유한 running 행"에서만 일어난다. */
@@ -281,7 +310,9 @@ export async function processWorkflowStep(env: Env, msg: WorkflowStepMessage): P
     const stepOutputs = stepOutputsBefore(def, steps, stepIndex);
 
     // 7. 승인 게이트 (1차 방어선 — send_email 노드도 ctx.approved를 다시 확인한다)
-    if (step.type !== "agent" && needsApproval(step) && !approved) {
+    // 비동기 승인 P1: approvalMode "deferred"인 send_email·webhook은 멈추지 않는다 — 노드가 deferActions로 대기 동작을 쌓고 성공한다.
+    const deferActions = !approved && isDeferred(step);
+    if (step.type !== "agent" && needsApproval(step) && !approved && !deferActions) {
       await pauseForApproval(env, run, step, stepIndex, input, stepOutputs);
       return; // 다음 단계 메시지 없음
     }
@@ -292,9 +323,10 @@ export async function processWorkflowStep(env: Env, msg: WorkflowStepMessage): P
     await env.DB.prepare("UPDATE workflow_runs SET status='running', current_step=? WHERE id=? AND status IN ('queued','running','waiting_approval')")
       .bind(stepIndex, runId).run();
 
-    // 8. LLM 호출 상한 — 이 단계가 LLM 노드이고 이전 LLM 단계가 이미 30개면 거부
+    // 8. LLM 호출 상한 — 이 단계가 LLM 노드이고 이전 LLM 사용량(LLM 노드 단계 + 앞 agent 단계의 LLM 호출)이 이미 30회면 거부
+    //    (T3 남은 문제 1: 예전에는 LLM 노드 단계 수만 세서 agent 뒤 LLM 노드가 캡을 넘겼다. 숫자 30은 그대로)
     if (LLM_NODE_TYPES.includes(step.type)) {
-      const llmSoFar = steps.filter((s) => s.step_index !== stepIndex && (LLM_NODE_TYPES as string[]).includes(s.node_type)).length;
+      const llmSoFar = priorLlmCalls(steps, stepIndex);
       if (llmSoFar >= LLM_CALL_CAP) {
         const error = `LLM 호출 상한(${LLM_CALL_CAP}회)에 도달`;
         await setStep(env, runId, stepIndex, "running", { status: "failed", error, finished: true });
@@ -315,10 +347,21 @@ export async function processWorkflowStep(env: Env, msg: WorkflowStepMessage): P
     }
     const user = { id: u.id, email: u.email, name: u.name ?? "", role: u.role, coaching_role: u.coaching_role ?? undefined };
     const ctx: NodeContext = { env, user, runId, workflowId: run.workflow_id, stepIndex, input, stepOutputs, approved };
+    if (deferActions) ctx.deferActions = true;
 
     // 9-a. agent 단계 (WF-6): 한 턴만 진행. 절대 executeNode로 보내지 않는다.
+    // Think T1: 런타임은 단계마다 처음 한 번 정해진다 (pickAgentRuntime). AGENT_RUNTIME이 legacy면 행이 없는 단계는 전부 기존 경로.
     if (step.type === "agent") {
-      await advanceAgentTurn(env, { step, msg, approved, ctx, activeSinceMs }, agentHooks(env, run, def, step, stepIndex));
+      const hooks = agentHooks(env, run, def, step, stepIndex);
+      if ((await pickAgentRuntime(env, msg, approved)) === "think") {
+        await advanceThinkAgentStep(env, { step, msg, approved, ctx, activeSinceMs }, hooks, {
+          release: () => hooks.release(),
+          priorLlmCalls: priorLlmCalls(steps, stepIndex),
+          llmCap: LLM_CALL_CAP,
+        });
+        return;
+      }
+      await advanceAgentTurn(env, { step, msg, approved, ctx, activeSinceMs }, hooks);
       return;
     }
 
@@ -415,6 +458,16 @@ export async function sweepStaleWorkflowRuns(env: Env): Promise<{ failed: number
       cancelled++;
       await env.DB.prepare("UPDATE workflow_run_steps SET status='skipped', finished_at=? WHERE run_id=? AND status='pending'").bind(t, id).run();
     }
+  }
+  // 비동기 승인 P1: 7일 넘게 결정되지 않은 대기 동작은 만료. 반환 형태는 그대로 (만료 수는 로그로만).
+  // 테이블이 아직 없으면(0042 미적용) 기존 청소 결과를 해치지 않게 건너뛴다.
+  try {
+    const ex = await env.DB.prepare("UPDATE workflow_pending_actions SET status='expired', decided_at=? WHERE status='queued' AND created_at < ?")
+      .bind(t, new Date(now - STALE_APPROVAL_MS).toISOString()).run();
+    const n = ex.meta?.changes ?? 0;
+    if (n > 0) logEvent("workflow.pending_actions_expired", { count: n });
+  } catch (e) {
+    console.log("[workflow] pending action expiry skipped:", errMsg(e));
   }
   return { failed, cancelled };
 }

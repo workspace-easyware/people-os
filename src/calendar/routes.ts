@@ -27,10 +27,11 @@ import { uid } from "../lib";
 import { decryptToken, encryptToken } from "./crypto";
 import { readGoogleEvents } from "./google-events";
 import {
-  buildAuthUrl, disconnect, exchangeCode, getAccessToken, GoogleError, googleConfigured, maskEmail, pkceChallenge,
-  randomUrlToken, readIdToken, redirectAllowed, redirectUriFor, saveConnection, scopeSufficient, STATE_TTL_MS,
+  buildAuthUrl, disconnect, exchangeCode, getAccessToken, GoogleError, googleConfigured, loadAccount, maskEmail, pkceChallenge,
+  randomUrlToken, readIdToken, redirectAllowed, redirectUriFor, saveConnection, scopeSufficient, STATE_TTL_MS, writeCapable,
   type GoogleEnv,
 } from "./google-oauth";
+import { newGoogleEventId, pushEvent, syncUserLinks } from "./google-push";
 
 export type CalendarEnv = GoogleEnv;
 
@@ -128,12 +129,16 @@ type EventRow = {
   start_date: string | null; end_date: string | null; timezone: string; rrule: string | null;
   exdates: string | null; remind_minutes: number | null; status: string; version: number;
   created_at: string; updated_at: string; owner_name?: string | null;
+  g_status?: string | null; g_error?: string | null;
 };
 
+// C6: 구글 연결 행(calendar_event_links)을 같이 읽는다 — 행이 있으면 "구글에도 저장"이 켜진 일정이다.
 const SELECT_COLS =
   "e.id, e.owner_id, e.visibility, e.title, e.description, e.location, e.category, e.all_day, e.start_at, e.end_at, " +
   "e.start_date, e.end_date, e.timezone, e.rrule, e.exdates, e.remind_minutes, e.status, e.version, e.created_at, e.updated_at, " +
-  "u.name AS owner_name";
+  "u.name AS owner_name, gl.push_status AS g_status, gl.last_error AS g_error";
+const EVENT_FROM =
+  "FROM calendar_events e LEFT JOIN users u ON u.id = e.owner_id LEFT JOIN calendar_event_links gl ON gl.event_id = e.id";
 
 function canEdit(v: SessionUser, r: { owner_id: string; visibility: string }): boolean {
   if (r.owner_id === v.id) return true;
@@ -148,13 +153,49 @@ function present(v: SessionUser, r: EventRow) {
     start_date: r.start_date, end_date: r.end_date, timezone: r.timezone, rrule: r.rrule, exdates: r.exdates,
     remind_minutes: r.remind_minutes, status: r.status, version: r.version,
     created_at: r.created_at, updated_at: r.updated_at, editable: canEdit(v, r),
+    // C6: 구글 저장 상태는 소유자에게만 보인다. google_status: pending(반영 대기) | synced | failed | null(저장 안 함)
+    google_sync: r.owner_id === v.id && linked(r),
+    google_status: r.owner_id === v.id && linked(r) ? (r.g_status === "SYNCED" ? "synced" : r.g_status === "FAILED" ? "failed" : "pending") : null,
+    google_error: r.owner_id === v.id && r.g_status === "FAILED" ? r.g_error ?? null : null,
   };
+}
+
+/** "구글에도 저장"이 켜져 있는가 (삭제 대기 중인 연결은 꺼진 것으로 본다). */
+function linked(r: { g_status?: string | null }): boolean {
+  return !!r.g_status && r.g_status !== "DELETE_PENDING";
+}
+
+/** 응답을 보낸 뒤 구글에 반영한다. 실패해도 응답은 그대로다 — 연결 행에 남고 크론이 다시 시도한다. */
+function pushLater(c: C, eventId: string): void {
+  const work = pushEvent(c.env, eventId).catch(() => "failed");
+  try {
+    c.executionCtx.waitUntil(work);
+  } catch {
+    /* executionCtx 없음(테스트) — 그냥 흘려보낸다 */
+  }
+}
+
+/** "구글에도 저장"을 켤 수 있는가: 구글 설정됨 + 본인 계정이 연결됨 + 쓰기 권한에 동의함. 아니면 409와 안내. */
+async function requireGoogleWritable(c: C, v: SessionUser): Promise<void> {
+  if (!googleConfigured(c.env)) throw new CalError(409, "구글 연동이 설정되지 않아 구글에 저장할 수 없습니다.");
+  const acc = await loadAccount(c.env, v.id);
+  if (!acc) throw new CalError(409, "구글 캘린더가 연결되어 있지 않습니다. 먼저 구글 캘린더를 연결하세요.");
+  if (acc.status !== "CONNECTED") throw new CalError(409, "구글 권한이 만료됐습니다. 구글 캘린더를 다시 연결한 뒤 시도하세요.");
+  if (!writeCapable(acc.scope)) {
+    throw new CalError(409, "구글에 저장하려면 쓰기 권한 동의가 필요합니다. 캘린더의 구글 칩에서 '구글에 저장 허용'을 눌러 다시 동의하세요.");
+  }
+}
+
+function parseGoogleSync(v: unknown): boolean | undefined {
+  if (v === undefined || v === null) return undefined;
+  if (v === true || v === false) return v;
+  throw new CalError(400, "google_sync는 true/false여야 합니다.");
 }
 
 /** 볼 수 있는 살아 있는 일정 한 건. 없거나 남의 개인 일정이면 null (호출자가 404). */
 async function loadVisible(c: C, v: SessionUser, id: string): Promise<EventRow | null> {
   return c.env.DB.prepare(
-    `SELECT ${SELECT_COLS} FROM calendar_events e LEFT JOIN users u ON u.id = e.owner_id
+    `SELECT ${SELECT_COLS} ${EVENT_FROM}
      WHERE e.id = ?1 AND e.deleted_at IS NULL AND (e.owner_id = ?2 OR e.visibility = 'team')`,
   ).bind(id, v.id).first<EventRow>();
 }
@@ -215,7 +256,7 @@ calendarApp.get("/events", async (c) => {
   if (to <= from) throw new CalError(400, "to는 from보다 뒤여야 합니다.");
   if (to - from > MAX_RANGE_MS) throw new CalError(400, "조회 기간은 최대 62일입니다.");
   const rows = await c.env.DB.prepare(
-    `SELECT ${SELECT_COLS} FROM calendar_events e LEFT JOIN users u ON u.id = e.owner_id
+    `SELECT ${SELECT_COLS} ${EVENT_FROM}
      WHERE e.deleted_at IS NULL AND e.start_at < ?2 AND e.end_at > ?1
        AND (e.owner_id = ?3 OR e.visibility = 'team')
      ORDER BY e.start_at, e.id LIMIT 1000`,
@@ -249,13 +290,26 @@ calendarApp.post("/events", async (c) => {
     remind_minutes: parseRemind(b.remind_minutes),
   };
   const d = validate(f);
+  // C6: "구글에도 저장"은 개인 일정만.
+  const wantGoogle = parseGoogleSync(b.google_sync) === true;
+  if (wantGoogle) {
+    if (f.visibility !== "private") throw new CalError(400, "팀 공유 일정은 구글 캘린더에 저장할 수 없습니다. 개인 일정만 저장됩니다.");
+    await requireGoogleWritable(c, v);
+  }
   const id = uid("cal");
-  await c.env.DB.prepare(
+  const stmts = [c.env.DB.prepare(
     `INSERT INTO calendar_events (id, owner_id, visibility, title, description, location, category, all_day,
        start_at, end_at, start_date, end_date, remind_minutes)
      VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)`,
   ).bind(id, v.id, f.visibility, f.title, f.description, f.location, f.category, f.all_day ? 1 : 0,
-    f.start_at, f.end_at, d.start_date, d.end_date, f.remind_minutes).run();
+    f.start_at, f.end_at, d.start_date, d.end_date, f.remind_minutes)];
+  if (wantGoogle) {
+    stmts.push(c.env.DB.prepare(
+      "INSERT INTO calendar_event_links (event_id, user_id, google_event_id, push_status, created_at, updated_at) VALUES (?1, ?2, ?3, 'PENDING', ?4, ?4)",
+    ).bind(id, v.id, newGoogleEventId(), Date.now()));
+  }
+  await c.env.DB.batch(stmts);
+  if (wantGoogle) pushLater(c, id);
   const row = await loadVisible(c, v, id);
   return c.json({ ok: true, event: row ? present(v, row) : { id } }, 201);
 });
@@ -291,14 +345,40 @@ calendarApp.patch("/events/:id", async (c) => {
     remind_minutes: b.remind_minutes !== undefined ? parseRemind(b.remind_minutes) : row.remind_minutes,
   };
   const d = validate(f);
-  const res = await c.env.DB.prepare(
+  // C6: 구글 저장 켜기/끄기. 값이 없으면 지금 상태를 유지한다. 팀 일정으로 바꾸면 꺼진다 (팀 일정은 구글에 쓰지 않는다).
+  const wasLinked = linked(row);
+  const asked = parseGoogleSync(b.google_sync);
+  if (asked === true && f.visibility !== "private") throw new CalError(400, "팀 공유 일정은 구글 캘린더에 저장할 수 없습니다. 개인 일정만 저장됩니다.");
+  if (asked !== undefined && row.owner_id !== v.id) throw new CalError(403, "구글 저장은 작성자만 바꿀 수 있습니다.");
+  const wantLinked = f.visibility === "private" && (asked !== undefined ? asked : wasLinked);
+  if (wantLinked && !wasLinked) await requireGoogleWritable(c, v);
+  const nowMs = Date.now();
+  const nextVersion = row.version + 1;
+  const stmts = [c.env.DB.prepare(
     `UPDATE calendar_events SET visibility = ?1, title = ?2, description = ?3, location = ?4, category = ?5,
        all_day = ?6, start_at = ?7, end_at = ?8, start_date = ?9, end_date = ?10, remind_minutes = ?11,
        version = version + 1, updated_at = datetime('now')
      WHERE id = ?12 AND version = ?13 AND deleted_at IS NULL`,
   ).bind(f.visibility, f.title, f.description, f.location, f.category, f.all_day ? 1 : 0, f.start_at, f.end_at,
-    d.start_date, d.end_date, f.remind_minutes, row.id, row.version).run();
-  if (!res.meta.changes) throw new CalError(409, "다른 곳에서 먼저 수정되었습니다. 새로 고친 뒤 다시 시도하세요.");
+    d.start_date, d.end_date, f.remind_minutes, row.id, row.version)];
+  // 연결 행은 위 UPDATE가 실제로 반영됐을 때만(version이 올라갔을 때만) 바꾼다.
+  const applied = "(SELECT version FROM calendar_events WHERE id = ?1) = ?2";
+  if (wantLinked) {
+    // 새로 켜기(행 없음) 또는 다시 보내기(행 있음 — 삭제 대기였다면 되살린다). etag·구글 id는 그대로 둔다.
+    stmts.push(c.env.DB.prepare(
+      `INSERT INTO calendar_event_links (event_id, user_id, google_event_id, push_status, created_at, updated_at)
+       SELECT ?1, ?3, ?4, 'PENDING', ?5, ?5 WHERE ${applied}
+       ON CONFLICT(event_id) DO UPDATE SET push_status = 'PENDING', attempts = 0, last_error = NULL, updated_at = excluded.updated_at`,
+    ).bind(row.id, nextVersion, row.owner_id, newGoogleEventId(), nowMs));
+  } else if (row.g_status) {
+    stmts.push(c.env.DB.prepare(
+      `UPDATE calendar_event_links SET push_status = 'DELETE_PENDING', attempts = 0, last_error = NULL, updated_at = ?3
+       WHERE event_id = ?1 AND ${applied}`,
+    ).bind(row.id, nextVersion, nowMs));
+  }
+  const out = await c.env.DB.batch(stmts);
+  if (!out[0].meta.changes) throw new CalError(409, "다른 곳에서 먼저 수정되었습니다. 새로 고친 뒤 다시 시도하세요.");
+  if (wantLinked || row.g_status) pushLater(c, row.id);
   const fresh = await loadVisible(c, v, row.id);
   return c.json({ ok: true, event: fresh ? present(v, fresh) : { id: row.id } });
 });
@@ -308,9 +388,16 @@ calendarApp.delete("/events/:id", async (c) => {
   const row = await loadVisible(c, v, c.req.param("id"));
   if (!row) throw new CalError(404, "일정을 찾을 수 없습니다.");
   if (!canEdit(v, row)) throw new CalError(403, "삭제 권한이 없습니다.");
-  await c.env.DB.prepare(
-    "UPDATE calendar_events SET deleted_at = datetime('now'), version = version + 1, updated_at = datetime('now') WHERE id = ? AND deleted_at IS NULL",
-  ).bind(row.id).run();
+  await c.env.DB.batch([
+    c.env.DB.prepare(
+      "UPDATE calendar_events SET deleted_at = datetime('now'), version = version + 1, updated_at = datetime('now') WHERE id = ? AND deleted_at IS NULL",
+    ).bind(row.id),
+    // C6 삭제 전파: 연결된 일정이면 구글에서도 지운다 (연결 행은 구글 삭제가 끝난 뒤 지워진다).
+    c.env.DB.prepare(
+      "UPDATE calendar_event_links SET push_status = 'DELETE_PENDING', attempts = 0, last_error = NULL, updated_at = ? WHERE event_id = ?",
+    ).bind(Date.now(), row.id),
+  ]);
+  if (row.g_status) pushLater(c, row.id);
   return c.json({ ok: true });
 });
 
@@ -331,6 +418,9 @@ calendarApp.use("/google/*", async (c, next) => {
 
 calendarApp.post("/google/connect", async (c) => {
   const v = await requireWriter(c);
+  // C6: { write: true }면 쓰기 스코프까지 요청한다 ("구글에도 저장"을 쓰려는 사용자만 — 읽기만 원하면 읽기 스코프만).
+  const cb = await readJson(c);
+  const write = cb.write === true;
   const redirectUri = redirectUriFor(c.env, c.req.url);
   if (!redirectUri) throw new CalError(400, "이 주소에서는 구글 연결을 시작할 수 없습니다 (등록되지 않은 리디렉션 주소).");
   const now = Date.now();
@@ -348,8 +438,8 @@ calendarApp.post("/google/connect", async (c) => {
       "INSERT INTO calendar_oauth_states (state_hash, user_id, code_verifier, redirect_uri, created_at) VALUES (?, ?, ?, ?, ?)",
     ).bind(await sha256hex(state), v.id, verifierEnc, redirectUri, now),
   ]);
-  const url = buildAuthUrl(c.env, { redirectUri, state, challenge: await pkceChallenge(verifier) });
-  return c.json({ ok: true, url });
+  const url = buildAuthUrl(c.env, { redirectUri, state, challenge: await pkceChallenge(verifier), write });
+  return c.json({ ok: true, url, write });
 });
 
 /** 콜백 페이지. 서버는 query를 읽지 않는다 — 스크립트가 location에서 읽어 /complete로 보낸다. */
@@ -435,9 +525,16 @@ calendarApp.post("/google/complete", async (c) => {
     throw new CalError(400, "구글이 장기 접근 토큰을 주지 않았습니다. 다시 연결하세요.");
   }
   const who = readIdToken(c.env, t.idToken);
+  // C6: 다른 구글 계정으로 바꿔 연결하면 옛 계정의 연결 행을 지운다. 남겨 두면 새 계정에서 그 일정들이 404로 보여
+  // "구글에서 삭제됨"으로 오인해 People OS 일정을 지우게 된다. (옛 계정에 저장된 일정은 그 계정에 남는다.)
+  const prev = await loadAccount(c.env, v.id);
+  if (prev && prev.google_sub && who.sub && prev.google_sub !== who.sub) {
+    await c.env.DB.prepare("DELETE FROM calendar_event_links WHERE user_id = ?").bind(v.id).run();
+    console.log(`[calendar/google] account switched → links cleared user=${v.id}`);
+  }
   await saveConnection(c.env, v.id, { ...t, refreshToken: t.refreshToken }, who);
-  console.log(`[calendar/google] connected user=${v.id}`);
-  return c.json({ ok: true, status: "connected", email: maskEmail(who.email) });
+  console.log(`[calendar/google] connected user=${v.id} write=${writeCapable(t.scope)}`);
+  return c.json({ ok: true, status: "connected", email: maskEmail(who.email), can_write: writeCapable(t.scope) });
 });
 
 calendarApp.get("/google/status", async (c) => {
@@ -462,10 +559,27 @@ calendarApp.get("/google/status", async (c) => {
     if (row) { email = row.google_email; scope = row.scope || ""; }
   }
   if (state === "not_connected") return c.json({ ok: true, configured: true, status: state });
+  // C6: 쓰기 권한 동의 여부 + 구글에 저장 중인 일정 수 (반영 실패가 있으면 화면이 알린다).
+  const links = await c.env.DB.prepare(
+    `SELECT COUNT(*) AS n, SUM(CASE WHEN push_status = 'FAILED' THEN 1 ELSE 0 END) AS failed
+     FROM calendar_event_links WHERE user_id = ? AND push_status <> 'DELETE_PENDING'`,
+  ).bind(v.id).first<{ n: number; failed: number | null }>();
   return c.json({
     ok: true, configured: true, status: state, degraded,
     email: maskEmail(email), scope, scopes: scope.split(/\s+/).filter(Boolean),
+    can_write: state === "connected" && writeCapable(scope),
+    linked_count: links?.n || 0, failed_count: links?.failed || 0,
   });
+});
+
+// C6: 내 연결 일정을 지금 구글과 맞춘다 (밀린 보내기 + 구글 쪽 변경 대조). 화면을 열 때·새로고침 버튼이 부른다.
+calendarApp.post("/google/sync", async (c) => {
+  const v = await requireWriter(c);
+  const acc = await loadAccount(c.env, v.id);
+  if (!acc || acc.status !== "CONNECTED" || !writeCapable(acc.scope)) return c.json({ ok: true, processed: 0, changed: 0, skipped: "no_write_access" });
+  const r = await syncUserLinks(c.env, v.id);
+  const changed = Object.entries(r.outcomes).filter(([k]) => k !== "unchanged" && k !== "skipped").reduce((n, [, x]) => n + x, 0);
+  return c.json({ ok: true, processed: r.processed, changed, outcomes: r.outcomes });
 });
 
 calendarApp.post("/google/disconnect", async (c) => {
@@ -492,7 +606,11 @@ calendarApp.get("/google/events", async (c) => {
     if (r.state === "needs_reconnect") {
       return c.json({ ok: true, status: "needs_reconnect", events: [], truncated: false, message: "구글 권한이 만료됐거나 회수됐습니다. 다시 연결해 주세요." });
     }
-    return c.json({ ok: true, status: "connected", events: r.events, truncated: r.truncated });
+    // C6: People OS가 구글에 저장한 일정은 구글 쪽 목록에서 뺀다 — 같은 일정이 달력에 두 번 보이지 않게.
+    const mine = await c.env.DB.prepare("SELECT google_event_id FROM calendar_event_links WHERE user_id = ?").bind(v.id).all<{ google_event_id: string }>();
+    const own = new Set((mine.results || []).map((x) => "g:" + x.google_event_id));
+    const events = own.size ? r.events.filter((e) => !own.has(e.id)) : r.events;
+    return c.json({ ok: true, status: "connected", events, truncated: r.truncated });
   } catch (e) {
     if (!(e instanceof GoogleError)) throw e;
     console.log(`[calendar/google] events read failed (${e.kind}: ${e.code}) user=${v.id}`);

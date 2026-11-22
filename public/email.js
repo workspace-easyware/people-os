@@ -59,10 +59,10 @@ async function emailLoad(page) {
       const who = m.direction === 'out' ? '받는 사람: ' + emailName(m.to_addr) : emailName(m.from_addr);
       const unread = m.direction === 'in' && !m.is_read;
       return `<div class="email-row${unread ? ' unread' : ''}" onclick="emailView('${escAttr(m.id)}')">
-        <button type="button" class="email-star${m.is_starred ? ' on' : ''}" title="별표" onclick="event.stopPropagation();emailStar('${escAttr(m.id)}', this)">${m.is_starred ? '★' : '☆'}</button>
+        <button type="button" class="email-star${m.is_starred ? ' on' : ''}" title="별표" aria-label="별표" aria-pressed="${m.is_starred ? 'true' : 'false'}" onclick="event.stopPropagation();emailStar('${escAttr(m.id)}', this)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden="true"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg></button>
         <div class="email-from">${unread ? '<span class="email-dot" aria-label="안 읽음"></span>' : ''}${esc(who)}</div>
         <div class="email-subj"><b>${esc(m.subject || '(제목 없음)')}</b> <span class="small">${esc(m.snippet || '')}</span></div>
-        <div class="email-meta">${m.attachments ? '📎 ' : ''}${m.owner !== undefined ? `<span class="badge">${esc(m.owner || '공용·미지정')}</span> ` : ''}${esc(emailFmt(m.received_at))}</div>
+        <div class="email-meta">${m.attachments ? '<svg class="email-clip" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" role="img" aria-label="첨부 있음"><path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg>' : ''}${m.owner !== undefined ? `<span class="badge">${esc(m.owner || '공용·미지정')}</span> ` : ''}${esc(emailFmt(m.received_at))}</div>
       </div>`;
     }).join('') + '</div>';
   }
@@ -79,7 +79,7 @@ function emailBadge(n) {
 async function emailStar(id, btn) {
   const j = await api(`/api/email/${encodeURIComponent(id)}/star`, { method: 'POST', body: '{}' });
   if (!j.ok) return alert(j.error || '실패');
-  if (btn) { btn.textContent = j.is_starred ? '★' : '☆'; btn.classList.toggle('on', j.is_starred); }
+  if (btn) { btn.classList.toggle('on', j.is_starred); btn.setAttribute('aria-pressed', j.is_starred ? 'true' : 'false'); }
   if (emailCurrent && emailCurrent.id === id) emailCurrent.is_starred = j.is_starred;
 }
 async function emailView(id) {

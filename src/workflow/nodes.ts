@@ -6,13 +6,18 @@
 //   (config에서 owner를 받지 않는다).
 // - 출력은 JSON 직렬화 가능해야 한다 (D1 workflow_run_steps.output_json). executeNode가 마지막에 한 번 더 검사한다.
 // - executor가 던진 예외는 executeNode가 { status:'failed', error }로 바꾼다 (throw하지 않는다).
-// - src/index.ts는 건드리지 않는다. index.ts 안에 export되지 않은 로직(요약·리플렉션·덱 생성)은 같은 동작으로
+// - src/index.ts는 건드리지 않는다. index.ts 안에 export되지 않은 로직(요약·성찰·덱 생성)은 같은 동작으로
 //   여기에 복제했다 (프롬프트·모델·폴백 동일). index.ts 쪽이 바뀌면 이 복제본도 맞춰야 한다.
 import PptxGenJS from "pptxgenjs";
 import { LLM_MODEL, responseText, runAsk } from "../ask-pipeline";
 import { aiGatewayOptions } from "../ai-gateway";
+import { createTraceSink } from "../obs/trace"; // ask_rag·ask_personal 트레이스 (2026-11-21 브라우저 회귀 3번)
 import { EMAIL_DOMAIN, localPartFor, sendEmail } from "../email/send";
 import { localReflect, localSummarize, uid } from "../lib";
+import { MAX_INSTRUCTION, parseSourceRef, runPptxEdit } from "../pptx/edit"; // pptx_edit 노드 (2026-11-21)
+import { MAX_XLSX_INSTRUCTION, parseXlsxSource, runXlsxEdit } from "../xlsx/edit"; // xlsx_edit 노드 (2026-11-21)
+import { MAX_DOCX_INSTRUCTION, runDocxCreate } from "../docx/create"; // docx_create 노드 (2026-11-21)
+import { MAX_DOCX_EDIT_INSTRUCTION, parseDocxSource, runDocxEdit } from "../docx/edit"; // docx_edit 노드 (2026-11-22)
 import { resolveVars, validateWebhookConfig, type NodeContext, type NodeResult, type NodeType, type ToolNodeType } from "./types";
 
 export type NodeExecutor = (ctx: NodeContext, config: Record<string, unknown>) => Promise<NodeResult>;
@@ -86,16 +91,21 @@ async function transcriptFrom(ctx: NodeContext, cfg: Cfg): Promise<string> {
 // ---------- ask_rag / ask_personal ----------
 
 type AskBody = { answer?: unknown; sources?: unknown; grounded?: unknown };
+const askTraceSink = createTraceSink();
 
 async function runAskNode(ctx: NodeContext, cfg: Cfg, pool: "shared" | "personal"): Promise<NodeResult> {
   const question = need(cfg, "question", "question");
   // 개인 풀: viewer를 실행자로 명시한다. runAsk의 pool 필터(vectorPoolFilter/docOwnerClauseForPool)가
   // viewer.id로 서버에서 강제하므로 다른 사용자 문서는 검색되지 않는다. scopeViewer는 넘기지 않는다.
   const viewer = { id: ctx.user.id, role: ctx.user.role };
+  // 2026-11-21 브라우저 회귀 3번: traceSink 없이 부르면 runAsk가 ask_events 기본 9개 컬럼만 써서
+  // 워크플로·에이전트(어시스턴트·조사 하위 에이전트 포함) 질문의 트레이스 상세가 "단계 0 · 후보 없음 · 원문 없음(no_r2_key)"이었다.
+  // /api/ask와 같은 sink로 spans·retrievals·R2 원문까지 남긴다. ctx(waitUntil)가 없으면 R2 쓰기를 기다린다 (recordTrace).
   const res = await runAsk(
     ctx.env,
     { question, sessionId: `wf_${ctx.runId}_${ctx.stepIndex}` },
     { pool, viewer, origin: pool === "personal" ? "personal" : "user" },
+    { traceSink: askTraceSink },
   );
   const body = res.body as unknown as AskBody;
   const sources = (Array.isArray(body.sources) ? body.sources : []).slice(0, MAX_SOURCES).map((s) => {
@@ -237,7 +247,7 @@ async function reflectNode(ctx: NodeContext, cfg: Cfg, mode: "coach" | "coachee"
     const ai = await ctx.env.AI.run(LLM_MODEL as keyof AiModels, {
       reasoning_effort: "medium",
       messages: [
-        { role: "system", content: "너는 코칭 리플렉션 분석가다. 세션 전사본에서 핵심 질문, 반복 패턴, 다음 세션 질문 3개를 한국어로 뽑아 JSON으로만 답하라: {\"questions\":[],\"patterns\":[],\"next_questions\":[]}" },
+        { role: "system", content: "너는 코칭 성찰 분석가다. 세션 전사본에서 핵심 질문, 반복 패턴, 다음 세션 질문 3개를 한국어로 뽑아 JSON으로만 답하라: {\"questions\":[],\"patterns\":[],\"next_questions\":[]}" },
         { role: "user", content: transcript.slice(0, 4000) },
       ],
     } as never, aiGatewayOptions({ tag: "coaching" }));
@@ -360,6 +370,27 @@ async function emailDraftNode(ctx: NodeContext, cfg: Cfg): Promise<NodeResult> {
   return ok({ draft, to });
 }
 
+/**
+ * 비동기 승인 P1: 실제 동작 대신 대기 동작 1개를 쌓는다 (workflow_pending_actions, 마이그레이션 0042).
+ * id는 결정적(wfpa_<runId>_<stepIndex>) — 큐 재전달로 같은 단계가 다시 돌아도 PRIMARY KEY + INSERT OR IGNORE로 행은 1개다.
+ * (UNIQUE(run_id, step_index, turn)은 turn이 NULL이면 SQLite에서 중복을 막지 못한다.)
+ * args = executeNode가 치환해 넘긴 최종 config. 반환값은 pendingActionId.
+ */
+export function pendingActionId(runId: string, stepIndex: number, turn?: number): string {
+  return `wfpa_${runId}_${stepIndex}${turn === undefined ? "" : `_t${turn}`}`;
+}
+async function deferAction(ctx: NodeContext, nodeType: "send_email" | "webhook", args: Cfg, simulated: (id: string) => Record<string, unknown>): Promise<NodeResult> {
+  // P2: agent 단계면 ctx.deferTurn이 있다 → id에 _t<turn>, turn 열에도 기록.
+  const turn = typeof ctx.deferTurn === "number" ? ctx.deferTurn : undefined;
+  const id = pendingActionId(ctx.runId, ctx.stepIndex, turn);
+  const output = simulated(id);
+  await ctx.env.DB.prepare(
+    `INSERT OR IGNORE INTO workflow_pending_actions (id, run_id, step_index, turn, owner_id, node_type, args_json, simulated_output_json, status, created_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'queued', ?)`,
+  ).bind(id, ctx.runId, ctx.stepIndex, turn ?? null, ctx.user.id, nodeType, JSON.stringify(args), JSON.stringify(output), new Date().toISOString()).run();
+  return ok(output);
+}
+
 const EMAIL_RE = /^[^\s@<>",;]+@[^\s@<>",;]+\.[^\s@<>",;]+$/;
 
 function addrs(v: unknown): string[] {
@@ -376,7 +407,11 @@ async function sendEmailNode(ctx: NodeContext, cfg: Cfg): Promise<NodeResult> {
   if (!subject) throw new NodeError("제목을 입력하세요.");
   if (!text.trim()) throw new NodeError("본문을 입력하세요.");
   // 안전장치: 승인 없이는 절대 발송하지 않는다 (검증은 위에서 먼저 — 잘못된 메일을 승인 요청에 올리지 않는다).
-  if (ctx.approved !== true) return { status: "waiting_approval", output: { to, subject } };
+  if (ctx.approved !== true) {
+    // 비동기 승인 P1: 지연 방식이면 멈추지 않고 대기 동작을 쌓는다 (발송 없음).
+    if (ctx.deferActions === true) return deferAction(ctx, "send_email", cfg, (pendingActionId) => ({ providerId: null, simulated: true, pendingActionId, to, subject }));
+    return { status: "waiting_approval", output: { to, subject } };
+  }
   if (!ctx.env.RESEND_API_KEY) throw new NodeError("Resend 미설정: 메일 발송이 아직 준비되지 않았습니다 (RESEND_API_KEY).");
   const fromAddr = `${localPartFor(ctx.user.email)}@${EMAIL_DOMAIN}`;
   const providerId = (await sendEmail(ctx.env, { from: fromAddr, to, subject, text })).id;
@@ -623,7 +658,11 @@ async function webhookNode(ctx: NodeContext, cfg: Cfg): Promise<NodeResult> {
   const hasBody = cfg.body !== undefined && cfg.body !== null && cfg.body !== "";
   if (hasBody && (method === "GET" || method === "DELETE")) throw new NodeError(`${method} 요청에는 body를 보낼 수 없습니다.`);
   // 안전장치: 승인 없이는 절대 fetch하지 않는다 (검증·SSRF 검사는 위에서 먼저 — 막힌 주소를 승인 요청에 올리지 않는다).
-  if (ctx.approved !== true) return { status: "waiting_approval", output: { method, url } };
+  if (ctx.approved !== true) {
+    // 비동기 승인 P1: 지연 방식이면 fetch 없이 대기 동작을 쌓는다. 응답 본문은 지어내지 않는다 (status·ok null).
+    if (ctx.deferActions === true) return deferAction(ctx, "webhook", cfg, (pendingActionId) => ({ status: null, ok: null, simulated: true, pendingActionId, method, url }));
+    return { status: "waiting_approval", output: { method, url } };
+  }
 
   const headers = new Headers();
   for (const [k, v] of Object.entries((cfg.headers ?? {}) as Record<string, string>)) {
@@ -667,6 +706,112 @@ async function webhookNode(ctx: NodeContext, cfg: Cfg): Promise<NodeResult> {
   return ok(out); // 4xx/5xx도 실패가 아니라 성공 출력 — condition 노드로 status를 보고 분기한다
 }
 
+// ---------- pptx_edit (2026-11-21, 기존 PPTX 편집 — 별도 Worker DOC_EDITOR) ----------
+// 입력: 원본(deckId | docId | source "deck:<id>"/"doc:<id>") + ops(JSON 배열) 또는 instruction(자연어 → LLM이 inspect 요약을 보고 ops 생성).
+// 원본은 그대로 두고 편집본을 실행자 소유의 새 덱으로 저장한다 (src/pptx/edit.ts runPptxEdit — /api/pptx/edit와 같은 흐름).
+// 권한은 다른 노드(loadDoc)와 같다: 공용이거나 실행자 본인 것만 (hr_admin이라도 남의 덱은 못 연다).
+// 승인: 단계의 requiresApproval: true를 엔진 게이트(WF-4)가 그대로 처리한다 (승인 뒤에만 편집·저장).
+async function pptxEditNode(ctx: NodeContext, cfg: Cfg): Promise<NodeResult> {
+  const deckId = str(cfg.deckId).trim();
+  const docId = str(cfg.docId).trim();
+  const ref = deckId ? { kind: "deck" as const, id: deckId } : docId ? { kind: "doc" as const, id: docId } : parseSourceRef(cfg.source);
+  if (!ref) throw new NodeError("deckId 또는 docId가 필요합니다.");
+  const instruction = str(cfg.instruction).trim();
+  if (instruction.length > MAX_INSTRUCTION) throw new NodeError(`instruction은 ${MAX_INSTRUCTION}자까지입니다.`);
+  const r = await runPptxEdit(ctx.env, { id: ctx.user.id, role: ctx.user.role }, ref, {
+    ops: cfg.ops, instruction, title: str(cfg.title), ownerId: ctx.user.id, adminRead: false,
+  });
+  if (!r.ok) throw new NodeError(r.error);
+  return ok({
+    deckId: r.deck.id, title: r.deck.title, url: r.deck.url, slides: r.deck.slides, bytes: r.deck.bytes,
+    source: `${ref.kind}:${ref.id}`, opsApplied: r.ops.length, planned: r.planned,
+    changes: r.diff.slice(0, 30).map((d) => ({ slide: d.slide, before: (d.before ?? "").slice(0, 200), after: (d.after ?? "").slice(0, 200) })),
+    warnings: r.warnings,
+  });
+}
+
+// ---------- xlsx_edit (2026-11-21, 업로드한 .xlsx 편집 — 같은 Worker DOC_EDITOR의 XLSX RPC) ----------
+// 입력: docId(업로드 .xlsx) + ops(JSON 배열: cell·formula·row·sheet) 또는 instruction(자연어 → LLM이 inspect 요약을 보고 ops 생성).
+// 원본은 그대로 두고 편집본을 실행자 소유의 새 문서로 저장한다 (src/xlsx/edit.ts runXlsxEdit — /api/xlsx/edit와 같은 흐름).
+// 권한·승인은 pptx_edit과 같다 (공용이거나 실행자 본인 것, requiresApproval: true면 엔진 게이트가 승인 뒤에만 실행).
+async function xlsxEditNode(ctx: NodeContext, cfg: Cfg): Promise<NodeResult> {
+  const docId = parseXlsxSource(str(cfg.docId).trim() || cfg.source);
+  if (!docId) throw new NodeError("docId(업로드한 .xlsx 문서 id)가 필요합니다.");
+  const instruction = str(cfg.instruction).trim();
+  if (instruction.length > MAX_XLSX_INSTRUCTION) throw new NodeError(`instruction은 ${MAX_XLSX_INSTRUCTION}자까지입니다.`);
+  const r = await runXlsxEdit(ctx.env, { id: ctx.user.id, role: ctx.user.role }, docId, {
+    ops: cfg.ops, instruction, title: str(cfg.title), ownerId: ctx.user.id, adminRead: false,
+  });
+  if (!r.ok) throw new NodeError(r.error);
+  return ok({
+    docId: r.doc.id, title: r.doc.title, url: r.doc.url, sheets: r.doc.sheets, bytes: r.doc.bytes,
+    source: `doc:${docId}`, opsApplied: r.ops.length, planned: r.planned,
+    changes: r.diff.slice(0, 30).map((d) => ({ sheet: d.sheet, cell: d.cell, before: (d.before ?? "").slice(0, 200), after: (d.after ?? "").slice(0, 200) })),
+    warnings: { formulasNotRecalculated: r.warnings.formulasNotRecalculated },
+  });
+}
+
+// ---------- docx_create (2026-11-21, Word 새 문서 만들기 — 본체 Worker의 docx 9.16.0) ----------
+// 입력: definition(문서 정의 객체 또는 JSON 문자열: {title, sections:[…]}) 또는 instruction(자연어 → Qwen이 구조 생성) + title(선택).
+// 실행자 소유의 새 문서(documents 새 행 + R2 docs/created/<id>.docx)로 저장한다 (src/docx/create.ts runDocxCreate — /api/docx/create와 같은 흐름).
+// 승인: 단계의 requiresApproval: true를 엔진 게이트(WF-4)가 그대로 처리한다 (승인 뒤에만 생성·저장).
+async function docxCreateNode(ctx: NodeContext, cfg: Cfg): Promise<NodeResult> {
+  let def: unknown = cfg.definition;
+  if (typeof def === "string") {
+    const s = def.trim();
+    if (!s) def = undefined;
+    else { try { def = JSON.parse(s); } catch { throw new NodeError("definition은 JSON 객체여야 합니다."); } }
+  }
+  if (def === undefined && Array.isArray(cfg.sections)) def = { title: cfg.title, subtitle: cfg.subtitle, sections: cfg.sections };
+  const instruction = str(cfg.instruction).trim();
+  if (instruction.length > MAX_DOCX_INSTRUCTION) throw new NodeError(`instruction은 ${MAX_DOCX_INSTRUCTION}자까지입니다.`);
+  // 확장 (2026-11-22): images(이미지 문서 id 배열 또는 쉼표 문자열)·toc·header·footer(+pageNumber)·differentFirstPage.
+  // 정의(definition) 안에 같은 키를 직접 써도 된다. 이미지는 실행자가 읽을 수 있는 문서(공용·본인 것)만 넣는다.
+  const on = (v: unknown) => v === true || v === "true";
+  const footerText = typeof cfg.footer === "string" ? cfg.footer.trim() : "";
+  const footer = cfg.footer && typeof cfg.footer === "object" ? cfg.footer
+    : footerText || on(cfg.pageNumber) ? { text: footerText, pageNumber: on(cfg.pageNumber) } : undefined;
+  const r = await runDocxCreate(ctx.env, {
+    def, instruction, title: str(cfg.title), ownerId: ctx.user.id,
+    options: {
+      images: Array.isArray(cfg.images) || typeof cfg.images === "string" ? cfg.images : undefined,
+      toc: cfg.toc && typeof cfg.toc === "object" ? cfg.toc : on(cfg.toc) ? true : undefined,
+      header: typeof cfg.header === "string" ? cfg.header.trim() || undefined : cfg.header && typeof cfg.header === "object" ? cfg.header : undefined,
+      footer,
+      differentFirstPage: on(cfg.differentFirstPage) ? true : undefined,
+    },
+    imageAdmin: false,
+  });
+  if (!r.ok) throw new NodeError(r.error);
+  return ok({
+    docId: r.doc.id, title: r.doc.title, url: r.doc.url, bytes: r.doc.bytes, planned: r.planned,
+    sections: r.stats.sections, blocks: r.stats.blocks,
+    ...(r.extras ? { images: r.extras.images, toc: r.extras.toc, header: r.extras.header, footer: r.extras.footer } : {}),
+    outline: r.outline.slice(0, 50).map((s) => s.heading).filter(Boolean),
+  });
+}
+
+// ---------- docx_edit (2026-11-22, 기존 .docx 편집 — 같은 Worker DOC_EDITOR의 DOCX RPC) ----------
+// 입력: docId(.docx 문서) + ops(JSON 배열: replace·paragraph·cell·insert·delete) 또는 instruction(자연어 → LLM이 inspect 요약을 보고 ops 생성, 실패 시 1회 재시도).
+// 원본은 그대로 두고 편집본을 실행자 소유의 새 문서로 저장한다 (src/docx/edit.ts runDocxEdit — /api/docx/edit와 같은 흐름).
+// 권한·승인은 pptx_edit·xlsx_edit과 같다 (공용이거나 실행자 본인 것, requiresApproval: true면 엔진 게이트가 승인 뒤에만 실행).
+async function docxEditNode(ctx: NodeContext, cfg: Cfg): Promise<NodeResult> {
+  const docId = parseDocxSource(str(cfg.docId).trim() || cfg.source);
+  if (!docId) throw new NodeError("docId(.docx 문서 id)가 필요합니다.");
+  const instruction = str(cfg.instruction).trim();
+  if (instruction.length > MAX_DOCX_EDIT_INSTRUCTION) throw new NodeError(`instruction은 ${MAX_DOCX_EDIT_INSTRUCTION}자까지입니다.`);
+  const r = await runDocxEdit(ctx.env, { id: ctx.user.id, role: ctx.user.role }, docId, {
+    ops: cfg.ops, instruction, title: str(cfg.title), ownerId: ctx.user.id, adminRead: false,
+  });
+  if (!r.ok) throw new NodeError(r.error);
+  return ok({
+    docId: r.doc.id, title: r.doc.title, url: r.doc.url, paragraphs: r.doc.paragraphs, bytes: r.doc.bytes,
+    source: `doc:${docId}`, opsApplied: r.ops.length, planned: r.planned,
+    changes: r.diff.slice(0, 30).map((d) => ({ paragraph: d.index, where: d.where, kind: d.kind, before: (d.before ?? "").slice(0, 200), after: (d.after ?? "").slice(0, 200) })),
+    warnings: r.warnings,
+  });
+}
+
 // ---------- 레지스트리 ----------
 
 type Entry = { execute: NodeExecutor; description: string; inputKeys: string[]; outputKeys: string[] };
@@ -677,8 +822,8 @@ export const NODE_REGISTRY: Record<ToolNodeType, Entry> = {
   ask_personal: { execute: (c, g) => runAskNode(c, g, "personal"), description: "실행한 사람의 개인 문서에만 질문한다.", inputKeys: ["question"], outputKeys: ["answer", "sources", "grounded"] },
   transcribe: { execute: transcribeNode, description: "이미 전사가 끝난 문서/녹음을 가져온다 (미완료면 실패).", inputKeys: ["docId", "recordingId"], outputKeys: ["docId", "title"] },
   summarize: { execute: summarizeNode, description: "문서를 3줄 요약하고 액션 아이템을 뽑는다.", inputKeys: ["docId"], outputKeys: ["summary", "actions", "engine"] },
-  reflect_coach: { execute: (c, g) => reflectNode(c, g, "coach"), description: "코치 모드 리플렉션: 핵심 질문·패턴·다음 질문.", inputKeys: ["docId", "transcript"], outputKeys: ["reflectionId", "questions", "patterns", "next_questions", "engine"] },
-  reflect_coachee: { execute: (c, g) => reflectNode(c, g, "coachee"), description: "코칭 대상 모드 리플렉션: 성찰 포인트 + 기한 있는 액션 플랜.", inputKeys: ["docId", "transcript"], outputKeys: ["reflectionId", "reflection_points", "action_plan", "engine"] },
+  reflect_coach: { execute: (c, g) => reflectNode(c, g, "coach"), description: "코치 모드 성찰: 핵심 질문·패턴·다음 질문.", inputKeys: ["docId", "transcript"], outputKeys: ["reflectionId", "questions", "patterns", "next_questions", "engine"] },
+  reflect_coachee: { execute: (c, g) => reflectNode(c, g, "coachee"), description: "코칭 대상 모드 성찰: 성찰 포인트 + 기한 있는 액션 플랜.", inputKeys: ["docId", "transcript"], outputKeys: ["reflectionId", "reflection_points", "action_plan", "engine"] },
   draft_pptx: { execute: draftPptxNode, description: "요약/불릿으로 PPTX 덱 초안을 만들어 R2에 저장한다.", inputKeys: ["title", "bullets"], outputKeys: ["deckId", "title", "slides"] },
   email_draft: { execute: emailDraftNode, description: "메일 초안을 쓴다 (저장·발송 안 함).", inputKeys: ["to", "context"], outputKeys: ["draft", "to"] },
   send_email: { execute: sendEmailNode, description: "메일을 발송한다. 승인된 실행에서만 보낸다.", inputKeys: ["to", "subject", "body"], outputKeys: ["providerId"] },
@@ -687,6 +832,10 @@ export const NODE_REGISTRY: Record<ToolNodeType, Entry> = {
   create_calendar_event: { execute: createCalendarEventNode, description: "내 개인 캘린더에 일정을 만든다.", inputKeys: ["title", "start", "end", "allDay"], outputKeys: ["eventId"] },
   webhook: { execute: webhookNode, description: "외부 HTTP 엔드포인트를 호출한다 (승인 필수, 사설 주소 차단, 10초·256KB 상한).", inputKeys: ["url", "method", "headers", "body"], outputKeys: ["status", "ok", "contentType", "body", "json"] },
   condition: { execute: conditionNode, description: "앞 단계 출력이 조건에 맞는지 보고 갈림길(true/false)을 고른다.", inputKeys: ["source", "operator", "value"], outputKeys: ["matched", "branch", "source"] },
+  pptx_edit: { execute: pptxEditNode, description: "기존 PPTX 덱(deckId 또는 업로드 docId)을 ops나 자연어 지시로 고쳐 새 편집본 덱으로 저장한다 (원본 보존).", inputKeys: ["deckId", "docId", "ops", "instruction", "title"], outputKeys: ["deckId", "title", "url", "slides", "opsApplied", "changes", "warnings"] },
+  xlsx_edit: { execute: xlsxEditNode, description: "업로드한 엑셀(.xlsx, docId)을 ops(cell·formula·row·sheet)나 자연어 지시로 고쳐 새 편집본 문서로 저장한다 (원본 보존, 수식은 Excel이 열 때 다시 계산).", inputKeys: ["docId", "ops", "instruction", "title"], outputKeys: ["docId", "title", "url", "sheets", "opsApplied", "changes", "warnings"] },
+  docx_edit: { execute: docxEditNode, description: "기존 Word(.docx, docId) 문서를 ops(replace·paragraph·cell·insert·delete)나 자연어 지시로 고쳐 새 편집본 문서로 저장한다 (원본 보존).", inputKeys: ["docId", "ops", "instruction", "title"], outputKeys: ["docId", "title", "url", "paragraphs", "opsApplied", "changes", "warnings"] },
+  docx_create: { execute: docxCreateNode, description: "새 Word(.docx) 문서를 만든다: 문서 정의(title·sections: 제목·문단·글머리·번호·표) 또는 자연어 지시(+제목)로. 선택: 이미지(올려 둔 이미지 문서 id)·목차·머리말·바닥글(쪽 번호). 실행자 소유 새 문서로 저장.", inputKeys: ["title", "instruction", "definition", "images", "toc", "header", "footer", "pageNumber"], outputKeys: ["docId", "title", "url", "bytes", "sections", "blocks", "outline"] },
 };
 
 /**

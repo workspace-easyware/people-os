@@ -1,0 +1,4 @@
+# Bundle-size baseline only (dry-run). xlvane editCells, no nodejs_compat.
+name = "people-os-xlsx-pilot-minimal"
+main = "src/minimal.js"
+compatibility_date = "2025-07-18"

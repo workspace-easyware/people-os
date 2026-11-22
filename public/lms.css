@@ -18,7 +18,7 @@
 .lms-player{width:100%;height:100%;position:relative;background:#000}
 #lmsPlayer video,#lmsPlayer iframe,.lms-frame{width:100%;height:100%;border:0;display:block;background:#000}
 .lms-video{object-fit:contain}
-#lmsTitle{font-weight:700;margin-top:var(--space-3)}
+#lmsTitle{font-weight:600;margin-top:var(--space-3)}
 #lmsTitle .small{font-weight:400}
 #lmsActions{display:flex;gap:var(--space-2);margin-top:var(--space-3)}
 #lmsActions button{margin-top:0}
@@ -26,9 +26,9 @@
 .lms-lesson{display:grid;grid-template-columns:20px 1fr auto;gap:var(--space-2);align-items:center;width:100%;text-align:left;border:0;border-bottom:1px solid var(--color-line);border-radius:0;background:#fff;color:inherit;padding:10px 12px;margin:0;font:inherit;cursor:pointer}
 .lms-lesson:last-child{border-bottom:0}
 .lms-lesson:hover{background:var(--color-surface-soft)}
-.lms-lesson.cur{background:var(--color-primary-soft);font-weight:700}
+.lms-lesson.cur{background:var(--color-primary-soft);font-weight:600}
 .lms-lesson.done .lms-mark{color:var(--color-ok)}
-.lms-mark{text-align:center}
+.lms-mark{display:grid;place-items:center;width:20px;height:20px;color:var(--color-primary)}
 .lms-lt{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .lms-ld{color:var(--color-muted);font-size:12px;white-space:nowrap}
 .lms-player-msg{padding:var(--space-4);color:#fff}

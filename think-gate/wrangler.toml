@@ -1,0 +1,28 @@
+# T0 관문 전용 Worker (2026-11-19). 운영 Worker(people-os)와 완전히 분리돼 있다.
+# 배포: cf-wrangler.py deploy --config think-gate/wrangler.toml
+name = "people-os-think-gate"
+main = "src/index.ts"
+# 먼저 운영과 같은 날짜로 시험한다 (compatibility_date를 올려야 하는지가 T0 점검 항목).
+compatibility_date = "2025-07-18"
+compatibility_flags = ["nodejs_compat"]
+workers_dev = true
+
+[observability]
+enabled = true
+
+[ai]
+binding = "AI"
+
+[[durable_objects.bindings]]
+name = "ThinkAgent"
+class_name = "ThinkAgent"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["ThinkAgent"]
+
+[vars]
+# 시험 창(UTC epoch ms). 이 시각이 지나면 모든 요청이 403. 시험이 끝나면 "0"으로 다시 배포해 닫는다.
+GATE_OPEN_UNTIL = "1795104000000"
+# 재배포로 DO를 죽이는 시험(관문 6)에서 버전을 바꾸는 용도.
+BUILD = "3"

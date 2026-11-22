@@ -69,3 +69,26 @@ button.wf-copy{height:44px;padding:0 24px}
 .wf-tpl-warn{color:#8a5a00}
 .wf-tpl-steps{margin:0;padding-left:1.2em}
 .wf-tpl-card button{margin-top:auto}
+/* 비동기 승인 P3 (2026-11-21): 대기 동작 섹션 */
+.wf-pa{margin:var(--space-2) 0 var(--space-3);padding:var(--space-3);border:1px solid var(--color-line);border-radius:var(--radius-sm);background:var(--color-surface-soft)}
+.wf-pa h3{margin-top:0}
+.wf-pa select{height:var(--control-h);padding:0 10px;border:1px solid var(--color-line-strong);border-radius:var(--radius-sm);background:#fff;color:var(--color-text);font-size:var(--text-sm)}
+.wf-pa input[type=checkbox]{accent-color:var(--color-primary)}
+.wf-pa-bar{margin:var(--space-2) 0}
+.wf-pa-alllbl{font-size:var(--text-sm);white-space:nowrap}
+.wf-pa-list{list-style:none;margin:0;padding:0}
+.wf-pa-row{margin:4px 0;padding:8px 10px;background:var(--color-surface);border:1px solid var(--color-line);border-radius:var(--radius-sm)}
+.wf-pa-main{display:flex;gap:var(--space-2);align-items:flex-start}
+.wf-pa-cb{flex:none;width:18px;padding-top:2px}
+.wf-pa-body{flex:1;min-width:0}
+.wf-pa-sum{overflow-wrap:anywhere}
+.wf-pa-meta{margin-top:2px;overflow-wrap:anywhere}
+.wf-pa-owner{color:var(--color-text-2)}
+.wf-pa-more{flex:none;margin-top:0}
+.wf-pa-link{background:none;border:0;padding:0;margin:0;color:var(--color-primary);text-decoration:underline;cursor:pointer;font-size:inherit;text-align:left}
+.wf-pa-jump{cursor:pointer;margin-left:var(--space-2)}
+.wf-pa-detail{margin:var(--space-2) 0 0 26px;display:flex;flex-direction:column;gap:4px;overflow-wrap:anywhere}
+.wf-pa-detail button{margin-top:0;align-self:flex-start}
+.wf-pa-after{margin:0;padding-left:1.2em}
+.wf-pa-sub{margin-top:var(--space-2);color:var(--color-text-2);font-weight:var(--weight-medium)}
+.wf-pa-runf code{font-size:var(--text-xs)}

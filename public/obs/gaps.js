@@ -22,7 +22,7 @@
   var DEFAULT_DATASET = 'ds_core_v1';
 
   var KIND = {
-    no_evidence: ['근거 없음', 'warn'], downvote: ['👎 피드백', 'warn'], low_score: ['낮은 점수', 'info'],
+    no_evidence: ['근거 없음', 'warn'], downvote: ['아쉬움 피드백', 'warn'], low_score: ['낮은 점수', 'info'],
     hallucination_risk: ['환각 의심', 'err'], regression: ['회귀', 'err']
   };
   var STATUS = { open: ['열림', 'warn'], applied: ['적용함', 'info'], verified: ['검증됨', 'ok'], regressed: ['재발', 'err'], dismissed: ['무시', ''] };
@@ -148,7 +148,7 @@
       drawBar();
       var rows = visible();
       if (!rows.length) {
-        body.innerHTML = '<div class="obs-empty">' + (st.gaps.length ? '조건에 맞는 공백이 없습니다.' : '열린 공백이 없습니다. 근거 없는 질문·👎·낮은 judge 점수·회귀가 생기면 여기에 모입니다.') + '</div>';
+        body.innerHTML = '<div class="obs-empty">' + (st.gaps.length ? '조건에 맞는 공백이 없습니다.' : '열린 공백이 없습니다. 근거 없는 질문·아쉬움 피드백·낮은 judge 점수·회귀가 생기면 여기에 모입니다.') + '</div>';
         return;
       }
       body.innerHTML = '<div class="obs-table-wrap"><table class="obs-table obs-gaps-table"><thead><tr>' +
