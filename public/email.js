@@ -167,7 +167,8 @@ async function emailIndex() {
 }
 function emailCompose() {
   $('emailComposeTitle').textContent = '새 메일';
-  $('emailTo').value = ''; $('emailCc').value = ''; $('emailSubject').value = ''; $('emailBody').value = '';
+  $('emailTo').value = ''; $('emailCc').value = ''; $('emailSubject').value = ''; emailRtSet('');
+  emailRtInit(); $('emailLinkBar').style.display = 'none';
   $('emailReplyToId').value = ''; $('emailSendResult').innerHTML = '';
   if ($('emailFromAddr').textContent === '—') api('/api/email/inbox?limit=1').then(j => { if (j.ok) $('emailFromAddr').textContent = j.address; }).catch(() => {});
   emailShow('compose');
@@ -180,19 +181,24 @@ function emailReply(useDraft) {
   const addr = (String(m.from_addr).match(/<([^>]+)>/) || [null, m.from_addr])[1];
   $('emailTo').value = addr || '';
   $('emailSubject').value = /^\s*(re|회신|답장)\s*:/i.test(m.subject || '') ? m.subject : 'Re: ' + (m.subject || '');
-  const quoted = (m.body_text || '').split('\n').slice(0, 40).map(l => '> ' + l).join('\n');
-  $('emailBody').value = (useDraft && m.ai_draft ? m.ai_draft : '') + `\n\n${emailFmt(m.received_at)}, ${m.from_addr} 작성:\n${quoted}`;
+  // 모든 텍스트는 esc()로 이스케이프해서 넣는다 (원문에 태그가 있어도 글자로만 보임). 인용은 blockquote.
+  const lines = t => String(t || '').split('\n').map(l => l.replace(/\r$/, ''));
+  const quoted = lines(m.body_text).slice(0, 40).map(esc).join('<br>');
+  const draft = useDraft && m.ai_draft ? lines(m.ai_draft).map(l => `<div>${l ? esc(l) : '<br>'}</div>`).join('') : '<div><br></div>';
+  emailRtSet(`${draft}<div><br></div><div>${esc(emailFmt(m.received_at))}, ${esc(m.from_addr)} 작성:</div><blockquote>${quoted}</blockquote>`);
   $('emailReplyToId').value = m.id;
 }
 function emailCloseCompose() {
   if (emailCurrent && $('emailReplyToId').value) emailShow('detail'); else emailShow('list');
 }
 async function emailSend() {
+  const clean = emailSanitizeHtml($('emailBody').innerHTML);
   const body = {
-    to: $('emailTo').value, cc: $('emailCc').value, subject: $('emailSubject').value.trim(), text: $('emailBody').value,
+    to: $('emailTo').value, cc: $('emailCc').value, subject: $('emailSubject').value.trim(), text: clean.text, html: clean.html,
   };
   if ($('emailReplyToId').value) body.replyToId = $('emailReplyToId').value;
   if (!body.to.trim() || !body.subject || !body.text.trim()) { $('emailSendResult').innerHTML = '<p class="small">받는 사람·제목·본문을 입력하세요.</p>'; return; }
+  if (body.html.length > 200000) { $('emailSendResult').innerHTML = '<p class="small">본문이 너무 큽니다 (서식 포함 200KB 이하).</p>'; return; }
   const btn = $('emailSendBtn');
   btn.disabled = true; btn.textContent = '발송 중…';
   const j = await api('/api/email/send', { method: 'POST', body: JSON.stringify(body) }).catch(() => ({ ok: false, error: '네트워크 오류' }));

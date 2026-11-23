@@ -3,8 +3,11 @@ import type { Context } from "hono";
 import PptxGenJS from "pptxgenjs";
 import { AgentSession } from "./agent-session";
 import { splitOggOpus } from "./ogg";
+import { splitMp3 } from "./mp3";
 import { coachingTranscript, docOwnerClause, localReflect, localSearchChunks, localSummarize, policies, poolForDoc, poolForKind, sampleTranscript, SHARED_USER_ID, splitMarkdownIntoChunks, splitPolicyIntoChunks, uid, vectorUserIdForDoc } from "./lib";
 import type { RagViewer } from "./lib";
+import { arrangeTasks, DEFAULT_LIST_TITLE, isValidDate, isValidTime, kstToday, LIST_TITLE_MAX, nextRepeatDate, parseRepeatRule, TASK_DETAILS_MAX, TASK_SORTS, TASK_TITLE_MAX, taskOut, UNASSIGNED_LIST_TITLE, validateRepeatRule } from "./tasks"; // 할 일 Google Tasks 패리티 (2026-11-23, migration 0046)
+import type { TaskRow, TaskSort } from "./tasks";
 import { AI_GATEWAY_ID, aiGatewayOptions } from "./ai-gateway";
 import { decodePlainText, detectDocumentFormat, extractHwpxText } from "./parse";
 import { generateDigest, getLatestDigest } from "./digest";
@@ -147,6 +150,8 @@ const MAX_DOC_BYTES = 10 * 1024 * 1024;
 // mp3와 489KB/2분 ogg 클립은 1분 안에 전사됐다. 시간 상한 15분도 함께 둔다.
 const CHUNK_SECONDS = 900;
 const CHUNK_BYTES = 1024 * 1024;
+// 구간으로 못 나눈 오디오를 통째로 1구간 전사해도 되는 상한 (2026-11-23). 이보다 크면 실패로 멈춘다.
+const WHOLE_FILE_MAX_BYTES = 5 * 1024 * 1024;
 // 질문 레이트 리밋 (C7): 세션/IP 기준 분당 20회. 초과 시 429 + 재시도 안내.
 // 계획서에 수치가 없어 분당 20회로 잡았다. KV get+put이라 동시 호출에
 // 완벽하지 않지만 데모 보호용으로는 충분하다.
@@ -387,11 +392,28 @@ async function advanceRecording(env: Env, recordingId: string, opts: { maxSegmen
       return { status: "pending" };
     }
     const bytes = new Uint8Array(await obj.arrayBuffer());
-    const isOgg = row.mime_type.includes("ogg") || row.object_key.toLowerCase().endsWith(".ogg");
+    const mime = (row.mime_type || "").toLowerCase();
+    const key = row.object_key.toLowerCase();
+    // MP3 판별을 먼저: 옛 Plaud 가져오기는 MP3를 .ogg 이름으로 저장했다 (mime은 audio/mpeg).
+    const isMp3 = mime.includes("mpeg") || mime.includes("mp3") || key.endsWith(".mp3");
+    const isOgg = !isMp3 && (mime.includes("ogg") || key.endsWith(".ogg"));
     let chunks: Uint8Array[] = [bytes];
+    let split: { segments: Uint8Array[] } | null = null;
     if (isOgg) {
-      const split = splitOggOpus(bytes, CHUNK_SECONDS, CHUNK_BYTES);
+      split = splitOggOpus(bytes, CHUNK_SECONDS, CHUNK_BYTES);
       if (split && split.segments.length > 1) chunks = split.segments;
+    } else if (isMp3) {
+      split = splitMp3(bytes, CHUNK_SECONDS, CHUNK_BYTES);
+      if (split && split.segments.length > 1) chunks = split.segments;
+    }
+    // 쪼갤 수 없는 큰 파일을 Whisper에 통째로 보내면 끝나지 않고 잠금만 갱신하며 무한 반복한다
+    // (2026-11-23 Plaud 37MB MP3). 작은 파일(≤5MB)만 통째 1구간을 허용하고, 나머지는 실패로 멈춘다.
+    if (!split && bytes.length > WHOLE_FILE_MAX_BYTES) {
+      await env.DB.prepare("UPDATE recordings SET transcript_status = 'pending', progress = ? WHERE id = ?")
+        .bind("실패: 오디오 형식을 나눌 수 없습니다 (파일이 손상되었거나 지원하지 않는 형식입니다)", recordingId).run();
+      await setPipelineStage(env, recordingId, "queued").catch(() => {});
+      console.log(`[transcribe] unsplittable recording=${recordingId} mime=${mime} bytes=${bytes.length}`);
+      return { status: "pending" };
     }
     let done = row.done_chunks ?? 0;
     let partial = row.partial ?? "";
@@ -798,6 +820,28 @@ async function handleDocumentFileUpload(c: Context<{ Bindings: Env }>) {
 // 문서 요약 공용 함수 — POST /api/documents/:id/summarize와 S1 큐 소비자가 함께 쓴다.
 // Workers AI 시도 → 실패 시 추출식 폴백(localSummarize). D1에 저장까지 한다.
 // 멱등: 다시 돌려도 같은 행을 덮어쓴다.
+const SUMMARY_SINGLE_MAX = 4000; // 이 길이 이하는 LLM 1번(기존 경로)
+const SUMMARY_CHUNK_SIZE = 3500; // 긴 문서의 청크 크기
+
+// 요약용 청크 나누기: 문장 경계(마침표·물음표·느낌표 뒤 공백, 줄바꿈)에서 max자 이하로 묶는다.
+// 한 문장이 max보다 길면 글자 수로 자른다. 모든 글자가 어느 청크엔가 들어간다(공백 정규화만 제외).
+function splitSummaryChunks(text: string, max: number): string[] {
+  const units: string[] = [];
+  for (const raw of text.split(/(?<=[.?!。])\s+|\n+/)) {
+    const s = raw.trim();
+    if (!s) continue;
+    for (let i = 0; i < s.length; i += max) units.push(s.slice(i, i + max));
+  }
+  const chunks: string[] = [];
+  let cur = "";
+  for (const u of units) {
+    if (cur && cur.length + 1 + u.length > max) { chunks.push(cur); cur = u; }
+    else cur = cur ? `${cur} ${u}` : u;
+  }
+  if (cur) chunks.push(cur);
+  return chunks;
+}
+
 async function summarizeDocument(env: Env, docId: string): Promise<{ summary: string[]; actions: string[]; engine: string }> {
   const doc = await env.DB.prepare("SELECT id, title, content FROM documents WHERE id = ?").bind(docId)
     .first<{ id: string; title: string; content: string }>();
@@ -805,27 +849,77 @@ async function summarizeDocument(env: Env, docId: string): Promise<{ summary: st
   let engine = "local-extractive";
   let summary: string[] = [];
   let actions: string[] = [];
-  // 1) Workers AI 시도 (클라우드에서 동작, 로컬에서는 실패할 수 있음)
-  try {
+  const aiSummarize = async (system: string, content: string): Promise<{ summary: string[]; actions: string[] }> => {
     const out = await env.AI.run(LLM_MODEL, {
       reasoning_effort: "medium",
       messages: [
-        { role: "system", content: "다음 회의 전사본을 한국어로 3줄 요약하고 액션 아이템을 뽑아라. JSON으로만 답하라: {\"summary\":[\"...\"],\"actions\":[\"...\"]}" },
-        { role: "user", content: doc.content.slice(0, 4000) },
+        { role: "system", content: system },
+        { role: "user", content },
       ],
     }, aiGatewayOptions({ tag: "summary" }));
-    const text = responseText(out);
-    const parsed = extractJson(text);
-    if (Array.isArray(parsed.summary) && parsed.summary.length) {
-      summary = parsed.summary.slice(0, 3);
-      actions = Array.isArray(parsed.actions) ? parsed.actions.slice(0, 5) : [];
+    const parsed = extractJson(responseText(out));
+    if (!Array.isArray(parsed.summary) || !parsed.summary.length) throw new Error("empty ai summary");
+    return { summary: parsed.summary.map(String), actions: Array.isArray(parsed.actions) ? parsed.actions.map(String) : [] };
+  };
+  const CHUNK_SYSTEM = "다음 회의 전사본을 한국어로 3줄 요약하고 액션 아이템을 뽑아라. JSON으로만 답하라: {\"summary\":[\"...\"],\"actions\":[\"...\"]}";
+  // 1) Workers AI 시도 (클라우드에서 동작, 로컬에서는 실패할 수 있음)
+  if (doc.content.length <= SUMMARY_SINGLE_MAX) {
+    // 짧은 문서: 기존 경로 그대로 (LLM 1번, 요약 3줄·액션 5개)
+    try {
+      const r = await aiSummarize(CHUNK_SYSTEM, doc.content);
+      summary = r.summary.slice(0, 3);
+      actions = r.actions.slice(0, 5);
       engine = "workers-ai";
-    } else throw new Error("empty ai summary");
-  } catch {
-    const fb = localSummarize(doc.content);
-    summary = fb.summary;
-    actions = fb.actions;
-    engine = "local-extractive";
+    } catch {
+      const fb = localSummarize(doc.content);
+      summary = fb.summary;
+      actions = fb.actions;
+      engine = "local-extractive";
+    }
+  } else {
+    // 긴 문서: map-reduce. 청크는 순차 호출(동시 호출로 AI 부하·타임아웃을 키우지 않는다).
+    const chunks = splitSummaryChunks(doc.content, SUMMARY_CHUNK_SIZE);
+    const parts: { summary: string[]; actions: string[] }[] = [];
+    let aiOk = 0;
+    for (const chunk of chunks) {
+      try {
+        parts.push(await aiSummarize(CHUNK_SYSTEM, chunk));
+        aiOk++;
+      } catch {
+        parts.push(localSummarize(chunk)); // 실패한 청크는 추출식으로 메워 내용이 빠지지 않게
+      }
+    }
+    if (aiOk === 0) {
+      // 전체 AI 실패 → 기존처럼 통째로 localSummarize
+      const fb = localSummarize(doc.content);
+      summary = fb.summary;
+      actions = fb.actions;
+      engine = "local-extractive";
+    } else {
+      const merged = parts.map((p, i) =>
+        `[${i + 1}/${parts.length}]\n요약:\n${p.summary.map((s) => `- ${s}`).join("\n")}\n액션:\n${p.actions.map((a) => `- ${a}`).join("\n") || "- (없음)"}`).join("\n\n");
+      try {
+        const r = await aiSummarize(
+          `다음은 긴 회의 전사본을 앞에서부터 순서대로 나눠 요약한 ${parts.length}개 부분 요약이다. 전체 회의를 처음부터 끝까지 빠짐없이 아우르는 한국어 요약(최대 6줄)과 중복 없는 액션 아이템(최대 6개)으로 합쳐라. 뒷부분 내용도 반드시 포함하라. JSON으로만 답하라: {"summary":["..."],"actions":["..."]}`,
+          merged);
+        summary = r.summary.slice(0, 6);
+        actions = r.actions.slice(0, 6);
+        engine = "workers-ai";
+      } catch {
+        // 합치기 실패: 청크 요약을 앞에서부터 고르게 골라 6줄·6개로 (뒷부분이 잘리지 않게 청크마다 1줄 이상)
+        const lines: string[] = [];
+        for (let round = 0; lines.length < 6 && round < 3; round++) {
+          for (const p of parts) if (p.summary[round] && lines.length < 6) lines.push(p.summary[round]);
+        }
+        summary = lines;
+        const acts: string[] = [];
+        for (let round = 0; acts.length < 6 && round < 5; round++) {
+          for (const p of parts) if (p.actions[round] && !acts.includes(p.actions[round]) && acts.length < 6) acts.push(p.actions[round]);
+        }
+        actions = acts;
+        engine = "workers-ai-chunks";
+      }
+    }
   }
   await env.DB.prepare("UPDATE documents SET summary = ?, actions = ? WHERE id = ?")
     .bind(JSON.stringify(summary), JSON.stringify(actions), docId).run();
@@ -1355,10 +1449,12 @@ app.get("/api/gaps", async (c) => {
   if (!(await loggedInOrAdmin(c))) return c.json({ ok: false, error: "로그인이 필요합니다." }, 401);
   const rows = await c.env.DB.prepare(
     // 0021: 질문자 이름 (user_id NULL → "익명", 평가에서 온 행(low-score/regression) → "평가").
-    "SELECT g.id, g.question, g.asked_at, g.status, g.doc_id, g.count, g.source, g.user_id, d.title AS doc_title, u.name AS asker_user_name FROM knowledge_gaps g LEFT JOIN documents d ON d.id = g.doc_id LEFT JOIN users u ON u.id = g.user_id ORDER BY g.asked_at DESC LIMIT 50"
-  ).all<{ id: string; question: string; asked_at: number; status: string; doc_id: string | null; count: number; source: string; user_id: string | null; doc_title: string | null; asker_user_name: string | null }>();
-  const gaps = (rows.results || []).map(({ user_id, asker_user_name, ...g }) => ({
+    "SELECT g.id, g.question, g.asked_at, g.status, g.doc_id, g.count, g.source, g.user_id, d.title AS doc_title, d.content AS doc_content, u.name AS asker_user_name FROM knowledge_gaps g LEFT JOIN documents d ON d.id = g.doc_id LEFT JOIN users u ON u.id = g.user_id ORDER BY g.asked_at DESC LIMIT 50"
+  ).all<{ id: string; question: string; asked_at: number; status: string; doc_id: string | null; count: number; source: string; user_id: string | null; doc_title: string | null; doc_content: string | null; asker_user_name: string | null }>();
+  // 게시된 답변 전문(documents.content)은 open이 아닌 행에만 answer로 싣는다.
+  const gaps = (rows.results || []).map(({ user_id, asker_user_name, doc_content, ...g }) => ({
     ...g,
+    answer: g.status !== "open" && g.doc_id ? (doc_content || "") : null,
     asker_name: gapAskerName(g.source, user_id, asker_user_name),
   }));
   return c.json({ ok: true, gaps });
@@ -1630,40 +1726,369 @@ app.get("/api/tasks", async (c) => {
     if (owner === "unassigned") conds.push("t.owner_id IS NULL");
     else { conds.push("t.owner_id = ?"); params.push(owner); }
   }
+  // 0046: ?list=<목록 id> · ?filter=starred · ?sort=myorder|date|deadline|starred|title
+  const list = (c.req.query("list") || "").trim();
+  if (list) { conds.push("t.list_id = ?"); params.push(list); }
+  const filter = (c.req.query("filter") || "").trim();
+  if (filter && filter !== "starred") return c.json({ ok: false, error: "filter must be starred" }, 400);
+  if (filter === "starred") conds.push("t.starred = 1");
+  const sortRaw = (c.req.query("sort") || "myorder").trim();
+  if (!(TASK_SORTS as readonly string[]).includes(sortRaw)) return c.json({ ok: false, error: `sort must be one of ${TASK_SORTS.join("|")}` }, 400);
+  await healTaskLists(c.env.DB);
   const where = conds.length ? ` WHERE ${conds.join(" AND ")}` : "";
-  const rows = await c.env.DB.prepare(`SELECT t.id, t.title, t.source, t.done, t.created_at, t.done_at, t.owner_id, COALESCE(u.name, '미지정') AS owner_name FROM tasks t LEFT JOIN users u ON u.id = t.owner_id${where} ORDER BY t.done ASC, t.created_at DESC`).bind(...params).all();
-  return c.json({ ok: true, tasks: rows.results || [], isAdmin: viewer?.role === "hr_admin" }, 200, { "cache-control": "no-store" });
+  const rows = await c.env.DB.prepare(`SELECT ${TASK_COLS} FROM tasks t LEFT JOIN users u ON u.id = t.owner_id${where}`).bind(...params).all<TaskRow>();
+  // 순서: 진행 중(정렬 기준, 하위 작업은 부모 바로 아래) → 완료됨(최근 완료가 위). 기존 필드는 그대로, 새 필드만 더했다.
+  return c.json({ ok: true, tasks: arrangeTasks(rows.results || [], sortRaw as TaskSort), isAdmin: viewer?.role === "hr_admin", sort: sortRaw, today: kstToday() }, 200, { "cache-control": "no-store" });
 });
+
+// ---- 0046: 목록 (task_lists) ----
+const TASK_COLS = "t.id, t.title, t.source, t.done, t.created_at, t.done_at, t.owner_id, COALESCE(u.name, '미지정') AS owner_name, t.list_id, t.details, t.due_date, t.due_time, t.starred, t.starred_at, t.repeat_rule, t.repeat_group, t.parent_id, COALESCE(t.position, -CAST(strftime('%s', t.created_at) AS INTEGER) * 1000) AS position";
+
+function defaultListId(ownerId: string | null): string {
+  return `tl_default_${ownerId ?? "unassigned"}`;
+}
+
+// 소유자의 기본 목록을 (없으면) 만든다. id가 소유자로 정해져 있어 동시에 불려도 1개만 생긴다.
+async function ensureDefaultList(db: D1Database, ownerId: string | null): Promise<string> {
+  const id = defaultListId(ownerId);
+  await db.prepare("INSERT OR IGNORE INTO task_lists (id, owner_id, title, is_default) VALUES (?, ?, ?, 1)").bind(id, ownerId, ownerId ? DEFAULT_LIST_TITLE : UNASSIGNED_LIST_TITLE).run();
+  return id;
+}
+
+// 목록이 없는 할 일(list_id NULL)을 소유자의 기본 목록에 넣는다. 이 컬럼을 모르는 INSERT(워크플로우 create_task 노드 등)가 만든 행을 읽을 때 고친다. 멱등.
+async function healTaskLists(db: D1Database): Promise<void> {
+  const orphan = await db.prepare("SELECT 1 AS x FROM tasks WHERE list_id IS NULL LIMIT 1").first();
+  if (!orphan) return;
+  await db.batch([
+    db.prepare(`INSERT OR IGNORE INTO task_lists (id, owner_id, title, is_default) SELECT DISTINCT 'tl_default_' || COALESCE(owner_id, 'unassigned'), owner_id, CASE WHEN owner_id IS NULL THEN ? ELSE ? END, 1 FROM tasks WHERE list_id IS NULL`).bind(UNASSIGNED_LIST_TITLE, DEFAULT_LIST_TITLE),
+    db.prepare("UPDATE tasks SET list_id = 'tl_default_' || COALESCE(owner_id, 'unassigned') WHERE list_id IS NULL"),
+  ]);
+}
+
+type TaskListRow = { id: string; owner_id: string | null; title: string; is_default: number; created_at: string };
+
+// 목록 고치기·지우기 범위: hr_admin(또는 X-Admin-Secret) 전체, 그 외는 본인 목록만. 소유자 없는 목록("미지정 할 일")은 관리자만 고친다
+// (할 일과 달리 목록 이름은 모두에게 보이므로 아무나 바꾸지 못하게 한다).
+function canEditList(c: Context<{ Bindings: Env }>, viewer: { id: string; role: string } | null, ownerId: string | null): boolean {
+  if (viewer?.role === "hr_admin") return true;
+  if (!viewer) return adminAllowed(c.env, c.req.header("x-admin-secret"));
+  return !!ownerId && viewer.id === ownerId;
+}
+
+// 읽기 범위는 할 일과 같다: hr_admin 전체 (+ ?owner= 필터), 그 외 본인 + 소유자 없는 목록.
+app.get("/api/task-lists", async (c) => {
+  await ensureSeeded(c.env.DB);
+  if (!(await loggedInOrAdmin(c))) return c.json({ ok: false, error: LOGIN_REQUIRED }, 401);
+  const viewer = await getSessionUser(c.env, c.req.header("cookie"));
+  const isAdmin = viewer?.role === "hr_admin";
+  await healTaskLists(c.env.DB);
+  // 첫 사용 시 기본 목록 자동 생성. 관리자는 고른 사용자 대신 처리하므로 본인 목록을 만들지 않는다 (기존 원칙: 관리자 계정에 쌓지 않는다).
+  if (viewer && !isAdmin) await ensureDefaultList(c.env.DB, viewer.id);
+  const conds: string[] = [];
+  const params: string[] = [];
+  if (!isAdmin) {
+    if (viewer) { conds.push("(l.owner_id IS NULL OR l.owner_id = ?)"); params.push(viewer.id); }
+    else conds.push("l.owner_id IS NULL");
+  }
+  const owner = (c.req.query("owner") || "").trim();
+  if (isAdmin && owner) {
+    if (owner === "unassigned") conds.push("l.owner_id IS NULL");
+    else { conds.push("l.owner_id = ?"); params.push(owner); }
+  }
+  const where = conds.length ? ` WHERE ${conds.join(" AND ")}` : "";
+  const rows = await c.env.DB.prepare(
+    `SELECT l.id, l.title, l.is_default, l.owner_id, COALESCE(u.name, '미지정') AS owner_name, l.created_at,
+       (SELECT COUNT(*) FROM tasks t WHERE t.list_id = l.id AND t.done = 0) AS open_count
+     FROM task_lists l LEFT JOIN users u ON u.id = l.owner_id${where}
+     ORDER BY (l.owner_id IS NULL) ASC, l.owner_id ASC, l.is_default DESC, l.created_at ASC, l.id ASC`
+  ).bind(...params).all();
+  return c.json({ ok: true, lists: rows.results || [], defaultListId: viewer && !isAdmin ? defaultListId(viewer.id) : null, isAdmin }, 200, { "cache-control": "no-store" });
+});
+
+app.post("/api/task-lists", async (c) => {
+  await ensureSeeded(c.env.DB);
+  if (!(await loggedInOrAdmin(c))) return c.json({ ok: false, error: LOGIN_REQUIRED }, 401);
+  const body = await c.req.json().catch(() => ({})) as { title?: unknown; ownerId?: unknown };
+  const title = typeof body.title === "string" ? body.title.trim() : "";
+  if (title.length < 1 || title.length > LIST_TITLE_MAX) return c.json({ ok: false, error: `title must be 1~${LIST_TITLE_MAX} characters` }, 400);
+  const viewer = await getSessionUser(c.env, c.req.header("cookie"));
+  const as = await resolveAsUser(c.env, viewer, body.ownerId);
+  if (as.error) return c.json({ ok: false, error: "ownerId: 존재하지 않는 사용자입니다" }, 400);
+  const ownerId = as.target ? as.target.id : (viewer?.id ?? null);
+  await ensureDefaultList(c.env.DB, ownerId); // 새 목록보다 기본 목록이 먼저 있게 한다
+  const id = uid("tl");
+  await c.env.DB.prepare("INSERT INTO task_lists (id, owner_id, title, is_default) VALUES (?, ?, ?, 0)").bind(id, ownerId, title).run();
+  return c.json({ ok: true, id, title, is_default: 0, owner_id: ownerId, owner_name: as.target ? as.target.name : (viewer?.name ?? "미지정") }, 201);
+});
+
+app.patch("/api/task-lists/:id", async (c) => {
+  await ensureSeeded(c.env.DB);
+  if (!(await loggedInOrAdmin(c))) return c.json({ ok: false, error: LOGIN_REQUIRED }, 401);
+  const id = c.req.param("id");
+  const body = await c.req.json().catch(() => ({})) as { title?: unknown };
+  const title = typeof body.title === "string" ? body.title.trim() : "";
+  if (title.length < 1 || title.length > LIST_TITLE_MAX) return c.json({ ok: false, error: `title must be 1~${LIST_TITLE_MAX} characters` }, 400);
+  const row = await c.env.DB.prepare("SELECT id, owner_id, title, is_default, created_at FROM task_lists WHERE id = ?").bind(id).first<TaskListRow>();
+  if (!row) return c.json({ ok: false, error: "list not found" }, 404);
+  if (!canEditList(c, await getSessionUser(c.env, c.req.header("cookie")), row.owner_id)) return c.json({ ok: false, error: "forbidden" }, 403);
+  await c.env.DB.prepare("UPDATE task_lists SET title = ? WHERE id = ?").bind(title, id).run();
+  return c.json({ ok: true, id, title, is_default: row.is_default });
+});
+
+// 기본 목록은 지울 수 없다. 지우는 목록 안의 할 일(하위 작업 포함)은 그 소유자의 기본 목록으로 옮긴다.
+app.delete("/api/task-lists/:id", async (c) => {
+  await ensureSeeded(c.env.DB);
+  if (!(await loggedInOrAdmin(c))) return c.json({ ok: false, error: LOGIN_REQUIRED }, 401);
+  const id = c.req.param("id");
+  const row = await c.env.DB.prepare("SELECT id, owner_id, title, is_default, created_at FROM task_lists WHERE id = ?").bind(id).first<TaskListRow>();
+  if (!row) return c.json({ ok: false, error: "list not found" }, 404);
+  if (!canEditList(c, await getSessionUser(c.env, c.req.header("cookie")), row.owner_id)) return c.json({ ok: false, error: "forbidden" }, 403);
+  if (row.is_default) return c.json({ ok: false, error: "기본 목록은 삭제할 수 없습니다." }, 400);
+  const target = await ensureDefaultList(c.env.DB, row.owner_id);
+  const res = await c.env.DB.batch([
+    c.env.DB.prepare("UPDATE tasks SET list_id = ? WHERE list_id = ?").bind(target, id),
+    c.env.DB.prepare("DELETE FROM task_lists WHERE id = ? AND is_default = 0").bind(id),
+  ]);
+  return c.json({ ok: true, id, moved: res[0]?.meta.changes ?? 0, movedTo: target });
+});
+
+// ---- 0046: 할 일 만들기·고치기 ----
+type TaskFull = { id: string; title: string; done: number; owner_id: string | null; list_id: string | null; details: string | null; due_date: string | null; due_time: string | null; starred: number; repeat_rule: string | null; repeat_group: string | null; parent_id: string | null; source: string | null };
+const TASK_FULL_COLS = "id, title, done, owner_id, list_id, details, due_date, due_time, starred, repeat_rule, repeat_group, parent_id, source";
+
+async function readTaskOut(db: D1Database, id: string) {
+  const r = await db.prepare(`SELECT ${TASK_COLS} FROM tasks t LEFT JOIN users u ON u.id = t.owner_id WHERE t.id = ?`).bind(id).first<TaskRow>();
+  return r ? taskOut(r, r.parent_id ? 1 : 0) : null;
+}
+
+// 할 일을 넣을 목록 확인: 있는 목록이고, 그 목록의 소유자가 할 일의 담당자와 같아야 한다 (남의 목록에 넣지 못한다).
+async function checkTaskList(db: D1Database, listId: unknown, ownerId: string | null): Promise<string | null> {
+  if (typeof listId !== "string" || !listId) return "list_id must be a string";
+  const l = await db.prepare("SELECT owner_id FROM task_lists WHERE id = ?").bind(listId).first<{ owner_id: string | null }>();
+  if (!l) return "list_id: 존재하지 않는 목록입니다";
+  if ((l.owner_id ?? null) !== (ownerId ?? null)) return "list_id: 이 할 일의 담당자 목록이 아닙니다";
+  return null;
+}
+
+// 공통 필드 검증 (만들기·고치기). 보낸 키만 본다. 값이 있으면 정리한 값을, 틀리면 error를 돌려준다.
+function checkTaskFields(body: Record<string, unknown>): { error: string } | { details?: string | null; due_date?: string | null; due_time?: string | null; starred?: number } {
+  const out: { details?: string | null; due_date?: string | null; due_time?: string | null; starred?: number } = {};
+  if (body.details !== undefined) {
+    if (body.details === null || body.details === "") out.details = null;
+    else if (typeof body.details !== "string" || body.details.length > TASK_DETAILS_MAX) return { error: `details must be a string up to ${TASK_DETAILS_MAX} characters` };
+    else out.details = body.details;
+  }
+  if (body.due_date !== undefined) {
+    if (body.due_date === null || body.due_date === "") out.due_date = null;
+    else if (!isValidDate(body.due_date)) return { error: "due_date must be YYYY-MM-DD" };
+    else out.due_date = body.due_date;
+  }
+  if (body.due_time !== undefined) {
+    if (body.due_time === null || body.due_time === "") out.due_time = null;
+    else if (!isValidTime(body.due_time)) return { error: "due_time must be HH:MM" };
+    else out.due_time = body.due_time;
+  }
+  if (body.starred !== undefined) {
+    if (typeof body.starred !== "boolean" && body.starred !== 0 && body.starred !== 1) return { error: "starred must be a boolean" };
+    out.starred = body.starred ? 1 : 0;
+  }
+  return out;
+}
 
 app.post("/api/tasks", async (c) => {
   await ensureSeeded(c.env.DB);
   // 보안점검(2026-11-22): 할 일 만들기·완료·삭제는 로그인(또는 X-Admin-Secret) 필수. 이전에는 익명이 미지정 할 일을 만들고 지울 수 있었다.
   if (!(await loggedInOrAdmin(c))) return c.json({ ok: false, error: "로그인이 필요합니다." }, 401);
-  const body = await c.req.json().catch(() => ({})) as { title?: string; source?: string; ownerId?: unknown };
+  const body = await c.req.json().catch(() => ({})) as { title?: string; source?: string; ownerId?: unknown; list_id?: unknown; parent_id?: unknown; repeat_rule?: unknown } & Record<string, unknown>;
   if (typeof body.title !== "string" || body.title.trim().length < 1) return c.json({ ok: false, error: "title is required" }, 400);
   if (body.source !== undefined && body.source !== null && (typeof body.source !== "string" || body.source.length > 300)) return c.json({ ok: false, error: "source is invalid" }, 400);
+  // 제목은 지금까지처럼 200자로 자른다 (긴 액션 문장을 "할 일로 저장"하는 기존 흐름을 깨지 않는다). 고칠 때(PATCH)는 200자를 넘으면 거절한다.
+  const title = body.title.trim().slice(0, TASK_TITLE_MAX);
+  const f = checkTaskFields(body);
+  if ("error" in f) return c.json({ ok: false, error: f.error }, 400);
+  if (f.due_time && !f.due_date) return c.json({ ok: false, error: "due_time은 due_date가 있어야 지정할 수 있습니다" }, 400);
   // 0021: 소유자 = 만든 사람 (익명은 NULL = 미지정). hr_admin은 ownerId로 다른 사용자의 할 일을 만든다.
   const viewer = await getSessionUser(c.env, c.req.header("cookie"));
   const as = await resolveAsUser(c.env, viewer, body.ownerId);
   if (as.error) return c.json({ ok: false, error: "ownerId: 존재하지 않는 사용자입니다" }, 400);
-  const ownerId = as.target ? as.target.id : (viewer?.id ?? null);
-  const ownerName = as.target ? as.target.name : (viewer?.name ?? "미지정");
+  let ownerId = as.target ? as.target.id : (viewer?.id ?? null);
+  let ownerName = as.target ? as.target.name : (viewer?.name ?? "미지정");
+  let listId: string;
+  let parentId: string | null = null;
+  if (body.parent_id !== undefined && body.parent_id !== null && body.parent_id !== "") {
+    // 하위 작업: 1단계까지만. 담당자와 목록은 부모를 따른다. 반복은 설정할 수 없다 (Google Tasks와 같다).
+    if (typeof body.parent_id !== "string") return c.json({ ok: false, error: "parent_id must be a string" }, 400);
+    const parent = await c.env.DB.prepare("SELECT t.id, t.owner_id, t.list_id, t.parent_id, COALESCE(u.name, '미지정') AS owner_name FROM tasks t LEFT JOIN users u ON u.id = t.owner_id WHERE t.id = ?").bind(body.parent_id).first<{ id: string; owner_id: string | null; list_id: string | null; parent_id: string | null; owner_name: string }>();
+    if (!parent) return c.json({ ok: false, error: "parent_id: 존재하지 않는 할 일입니다" }, 400);
+    if (!canTouchTask(viewer, parent.owner_id)) return c.json({ ok: false, error: "forbidden" }, 403);
+    if (parent.parent_id) return c.json({ ok: false, error: "하위 작업에는 하위 작업을 만들 수 없습니다." }, 400);
+    if (body.repeat_rule !== undefined && body.repeat_rule !== null) return c.json({ ok: false, error: "하위 작업에는 반복을 설정할 수 없습니다." }, 400);
+    parentId = parent.id;
+    ownerId = parent.owner_id;
+    ownerName = parent.owner_name;
+    listId = parent.list_id ?? await ensureDefaultList(c.env.DB, ownerId);
+  } else if (body.list_id !== undefined && body.list_id !== null && body.list_id !== "") {
+    const err = await checkTaskList(c.env.DB, body.list_id, ownerId);
+    if (err) return c.json({ ok: false, error: err }, 400);
+    listId = body.list_id as string;
+  } else {
+    listId = await ensureDefaultList(c.env.DB, ownerId);
+  }
+  let ruleJson: string | null = null;
+  if (body.repeat_rule !== undefined && body.repeat_rule !== null) {
+    if (!f.due_date) return c.json({ ok: false, error: "반복은 날짜(due_date)가 있어야 설정할 수 있습니다." }, 400);
+    const v = validateRepeatRule(body.repeat_rule, f.due_date);
+    if ("error" in v) return c.json({ ok: false, error: v.error }, 400);
+    ruleJson = JSON.stringify(v.rule);
+  }
   const id = uid("task");
-  await c.env.DB.prepare("INSERT INTO tasks (id, title, source, owner_id) VALUES (?, ?, ?, ?)").bind(id, body.title.trim().slice(0, 200), body.source || null, ownerId).run();
-  return c.json({ ok: true, id, title: body.title.trim().slice(0, 200), source: body.source || null, owner_id: ownerId, owner_name: ownerName }, 201);
+  const now = Date.now();
+  // 순서: 새 할 일은 목록 맨 위(-시각), 새 하위 작업은 그 부모의 하위 작업 맨 아래(+시각).
+  await c.env.DB.prepare(
+    "INSERT INTO tasks (id, title, source, owner_id, list_id, details, due_date, due_time, starred, starred_at, repeat_rule, repeat_group, parent_id, position) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+  ).bind(id, title, body.source || null, ownerId, listId, f.details ?? null, f.due_date ?? null, f.due_date ? (f.due_time ?? null) : null, f.starred ?? 0, f.starred ? new Date(now).toISOString() : null, ruleJson, ruleJson ? uid("rg") : null, parentId, parentId ? now : -now).run();
+  const task = await readTaskOut(c.env.DB, id);
+  return c.json({ ...(task ?? {}), ok: true, id, title, source: body.source || null, owner_id: ownerId, owner_name: ownerName }, 201);
 });
 
 app.patch("/api/tasks/:id", async (c) => {
   await ensureSeeded(c.env.DB);
   if (!(await loggedInOrAdmin(c))) return c.json({ ok: false, error: "로그인이 필요합니다." }, 401); // 보안점검(2026-11-22)
   const id = c.req.param("id");
-  const body = await c.req.json().catch(() => ({})) as { done?: boolean };
-  const row = await c.env.DB.prepare("SELECT done, owner_id FROM tasks WHERE id = ?").bind(id).first<{ done: number; owner_id: string | null }>();
+  const raw = await c.req.json().catch(() => ({})) as unknown;
+  const body = (raw && typeof raw === "object" && !Array.isArray(raw) ? raw : {}) as Record<string, unknown>;
+  const row = await c.env.DB.prepare(`SELECT ${TASK_FULL_COLS} FROM tasks WHERE id = ?`).bind(id).first<TaskFull>();
   if (!row) return c.json({ ok: false, error: "task not found" }, 404);
   if (!canTouchTask(await getSessionUser(c.env, c.req.header("cookie")), row.owner_id)) return c.json({ ok: false, error: "forbidden" }, 403);
-  const done = typeof body.done === "boolean" ? (body.done ? 1 : 0) : (row.done ? 0 : 1);
-  await c.env.DB.prepare("UPDATE tasks SET done = ?, done_at = ? WHERE id = ?").bind(done, done ? new Date().toISOString() : null, id).run();
-  return c.json({ ok: true, id, done: done === 1 });
+  const db = c.env.DB;
+  const now = Date.now();
+  const nowIso = new Date(now).toISOString();
+  // 0046: 고칠 수 있는 필드. 하나도 없으면 지금까지처럼 완료 여부를 뒤집는다 (화면의 체크박스가 빈 본문으로 부른다).
+  const EDIT_KEYS = ["title", "details", "due_date", "due_time", "starred", "repeat_rule", "list_id", "parent_id", "position", "done"];
+  const hasEdit = EDIT_KEYS.some((k) => body[k] !== undefined);
+  if (body.done !== undefined && typeof body.done !== "boolean") return c.json({ ok: false, error: "done must be a boolean" }, 400);
+  const done = typeof body.done === "boolean" ? (body.done ? 1 : 0) : (hasEdit ? row.done : (row.done ? 0 : 1));
+
+  const sets: string[] = [];
+  const vals: unknown[] = [];
+  const set = (col: string, v: unknown) => { sets.push(`${col} = ?`); vals.push(v); };
+  const extra: D1PreparedStatement[] = []; // 같은 batch로 함께 실행할 문장 (하위 작업 이동·완료, 다음 회차)
+
+  if (body.title !== undefined) {
+    const t = typeof body.title === "string" ? body.title.trim() : "";
+    if (t.length < 1 || t.length > TASK_TITLE_MAX) return c.json({ ok: false, error: `title must be 1~${TASK_TITLE_MAX} characters` }, 400);
+    set("title", t);
+    row.title = t;
+  }
+  const f = checkTaskFields(body);
+  if ("error" in f) return c.json({ ok: false, error: f.error }, 400);
+  if (f.details !== undefined) { set("details", f.details); row.details = f.details; }
+  if (f.starred !== undefined && f.starred !== row.starred) { set("starred", f.starred); set("starred_at", f.starred ? nowIso : null); row.starred = f.starred; }
+
+  // 날짜·시간·반복: 날짜를 지우면 시간과 반복도 함께 지운다 (반복은 시작 날짜가 있어야 한다).
+  const newDue = f.due_date !== undefined ? f.due_date : row.due_date;
+  let newTime = f.due_time !== undefined ? f.due_time : row.due_time;
+  if (!newDue) {
+    if (f.due_time) return c.json({ ok: false, error: "due_time은 due_date가 있어야 지정할 수 있습니다" }, 400);
+    newTime = null;
+  }
+  let newRule: string | null = row.repeat_rule;
+  let newGroup: string | null = row.repeat_group;
+  if (body.repeat_rule !== undefined) {
+    if (body.repeat_rule === null) { newRule = null; newGroup = null; }
+    else {
+      if (!newDue) return c.json({ ok: false, error: "반복은 날짜(due_date)가 있어야 설정할 수 있습니다." }, 400);
+      const v = validateRepeatRule(body.repeat_rule, newDue);
+      if ("error" in v) return c.json({ ok: false, error: v.error }, 400);
+      newRule = JSON.stringify(v.rule);
+      if (!newGroup) newGroup = uid("rg");
+    }
+  } else if (!newDue && newRule) { newRule = null; newGroup = null; }
+  if (newDue !== row.due_date) set("due_date", newDue);
+  if (newTime !== row.due_time) set("due_time", newTime);
+  if (newRule !== row.repeat_rule) set("repeat_rule", newRule);
+  if (newGroup !== row.repeat_group) set("repeat_group", newGroup);
+
+  // 하위 작업으로 넣기(parent_id = 부모 id) · 최상위로 되돌리기(parent_id = null, Google Tasks의 Unindent)
+  let newParent: string | null = row.parent_id;
+  let newList: string | null = row.list_id;
+  let positionSet = false;
+  if (body.parent_id !== undefined) {
+    if (body.parent_id === null || body.parent_id === "") {
+      if (row.parent_id) { newParent = null; set("position", -now); positionSet = true; } // 최상위 맨 위로
+    } else {
+      if (typeof body.parent_id !== "string") return c.json({ ok: false, error: "parent_id must be a string" }, 400);
+      if (body.parent_id === id) return c.json({ ok: false, error: "parent_id: 자기 자신을 부모로 둘 수 없습니다" }, 400);
+      if (body.parent_id !== row.parent_id) {
+        const parent = await db.prepare("SELECT id, owner_id, list_id, parent_id FROM tasks WHERE id = ?").bind(body.parent_id).first<{ id: string; owner_id: string | null; list_id: string | null; parent_id: string | null }>();
+        if (!parent) return c.json({ ok: false, error: "parent_id: 존재하지 않는 할 일입니다" }, 400);
+        if (parent.parent_id) return c.json({ ok: false, error: "하위 작업에는 하위 작업을 만들 수 없습니다." }, 400);
+        if ((parent.owner_id ?? null) !== (row.owner_id ?? null)) return c.json({ ok: false, error: "parent_id: 담당자가 다른 할 일입니다" }, 400);
+        const kids = await db.prepare("SELECT COUNT(*) AS n FROM tasks WHERE parent_id = ?").bind(id).first<{ n: number }>();
+        if ((kids?.n ?? 0) > 0) return c.json({ ok: false, error: "하위 작업이 있는 할 일은 하위 작업으로 만들 수 없습니다." }, 400);
+        if (newRule) return c.json({ ok: false, error: "반복 할 일은 하위 작업으로 만들 수 없습니다." }, 400);
+        newParent = parent.id;
+        newList = parent.list_id;
+        set("position", now); positionSet = true; // 그 부모의 하위 작업 맨 아래로
+      }
+    }
+  }
+  if (newParent && newRule) return c.json({ ok: false, error: "하위 작업에는 반복을 설정할 수 없습니다." }, 400);
+
+  // 목록 이동. 하위 작업을 다른 목록으로 옮기면 부모에서 떨어져 그 목록의 최상위 할 일이 된다. 부모를 옮기면 하위 작업도 따라간다.
+  if (body.list_id !== undefined && body.list_id !== newList) {
+    const err = await checkTaskList(db, body.list_id, row.owner_id);
+    if (err) return c.json({ ok: false, error: err }, 400);
+    if (newParent) {
+      if (body.parent_id !== undefined && body.parent_id !== null && body.parent_id !== "") return c.json({ ok: false, error: "list_id: 하위 작업은 부모와 같은 목록에 있어야 합니다" }, 400);
+      newParent = null;
+      if (!positionSet) { set("position", -now); positionSet = true; }
+    }
+    newList = body.list_id as string;
+    extra.push(db.prepare("UPDATE tasks SET list_id = ? WHERE parent_id = ?").bind(newList, id));
+  }
+  if (newParent !== row.parent_id) set("parent_id", newParent);
+  if (newList !== row.list_id) set("list_id", newList);
+
+  if (body.position !== undefined) {
+    if (typeof body.position !== "number" || !Number.isSafeInteger(body.position)) return c.json({ ok: false, error: "position must be an integer" }, 400);
+    if (!positionSet) set("position", body.position);
+  }
+
+  // 완료 처리. 부모를 완료하면 하위 작업도 함께 완료한다. 완료를 취소하면 그 할 일만 돌아온다 (하위 작업은 완료로 남는다 — Google Tasks와 같은 비대칭).
+  let completed = 0;
+  let nextId: string | null = null;
+  if (done !== row.done) {
+    set("done", done);
+    set("done_at", done ? nowIso : null);
+    if (done) {
+      completed = 1;
+      if (!newParent) {
+        const kids = await db.prepare("SELECT COUNT(*) AS n FROM tasks WHERE parent_id = ? AND done = 0").bind(id).first<{ n: number }>();
+        completed += kids?.n ?? 0;
+        extra.push(db.prepare("UPDATE tasks SET done = 1, done_at = ? WHERE parent_id = ? AND done = 0").bind(nowIso, id));
+      }
+      // 반복 할 일: 다음 회차를 만든다. 같은 반복 그룹에 진행 중인 회차가 이미 있으면(완료 취소 뒤 다시 완료) 또 만들지 않는다.
+      const rule = !newParent ? parseRepeatRule(newRule) : null;
+      if (rule && newDue && newGroup) {
+        const g = await db.prepare("SELECT SUM(CASE WHEN done = 0 THEN 1 ELSE 0 END) AS open, SUM(CASE WHEN done = 1 THEN 1 ELSE 0 END) AS finished FROM tasks WHERE repeat_group = ? AND id != ?").bind(newGroup, id).first<{ open: number | null; finished: number | null }>();
+        const reached = rule.ends === "after" && (g?.finished ?? 0) + 1 >= (rule.occurrences ?? 1); // Ends: After N — 이번 완료까지 N회면 끝
+        const nextDue = (g?.open ?? 0) > 0 || reached ? null : nextRepeatDate(rule, newDue, kstToday(now));
+        if (nextDue) {
+          nextId = uid("task");
+          extra.push(db.prepare(
+            "INSERT INTO tasks (id, title, source, owner_id, list_id, details, due_date, due_time, starred, starred_at, repeat_rule, repeat_group, parent_id, position) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?)"
+          ).bind(nextId, row.title, row.source, row.owner_id, newList, row.details, nextDue, newTime, row.starred, row.starred ? nowIso : null, newRule, newGroup, -now));
+        }
+      }
+    }
+  }
+
+  const stmts: D1PreparedStatement[] = [];
+  if (sets.length) stmts.push(db.prepare(`UPDATE tasks SET ${sets.join(", ")} WHERE id = ?`).bind(...vals, id));
+  stmts.push(...extra);
+  if (stmts.length) await db.batch(stmts);
+  return c.json({ ok: true, id, done: done === 1, completed, next: nextId, task: await readTaskOut(db, id) });
 });
 
 app.delete("/api/tasks/:id", async (c) => {
@@ -1673,9 +2098,13 @@ app.delete("/api/tasks/:id", async (c) => {
   const row = await c.env.DB.prepare("SELECT owner_id FROM tasks WHERE id = ?").bind(id).first<{ owner_id: string | null }>();
   if (!row) return c.json({ ok: false, error: "task not found" }, 404);
   if (!canTouchTask(await getSessionUser(c.env, c.req.header("cookie")), row.owner_id)) return c.json({ ok: false, error: "forbidden" }, 403);
-  const res = await c.env.DB.prepare("DELETE FROM tasks WHERE id = ?").bind(id).run();
-  if ((res.meta.changes ?? 0) === 0) return c.json({ ok: false, error: "task not found" }, 404);
-  return c.json({ ok: true, id });
+  // 0046: 하위 작업도 함께 지운다.
+  const res = await c.env.DB.batch([
+    c.env.DB.prepare("DELETE FROM tasks WHERE parent_id = ?").bind(id),
+    c.env.DB.prepare("DELETE FROM tasks WHERE id = ?").bind(id),
+  ]);
+  if ((res[1]?.meta.changes ?? 0) === 0) return c.json({ ok: false, error: "task not found" }, 404);
+  return c.json({ ok: true, id, deleted: (res[0]?.meta.changes ?? 0) + (res[1]?.meta.changes ?? 0) });
 });
 
 // ---- deck (PPTX 초안, easy-slides식 신규 생성) ----
@@ -1980,9 +2409,9 @@ app.get("/api/library", async (c) => {
   const decks = isAdmin
     ? await c.env.DB.prepare(`SELECT ${deckCols} FROM decks LEFT JOIN users u ON u.id = decks.owner_id ORDER BY decks.created_at DESC LIMIT 100`).all()
     : await c.env.DB.prepare(`SELECT ${deckCols} FROM decks LEFT JOIN users u ON u.id = decks.owner_id WHERE ${dcl.clause} ORDER BY decks.created_at DESC LIMIT 100`).bind(...dcl.params).all();
-  const pols = await c.env.DB.prepare("SELECT id, title, section FROM policies ORDER BY id").all();
+  const pols = await c.env.DB.prepare("SELECT id, title, section, body FROM policies ORDER BY id").all();
   const lrs = reflectionScope(viewer);
-  const refls = await c.env.DB.prepare(`SELECT r.id, r.session_id, r.patterns, r.next_questions, r.mode, r.created_at, uc.name AS coach_name, ue.name AS coachee_name FROM reflections r LEFT JOIN users uc ON uc.id = r.coach_id LEFT JOIN users ue ON ue.id = r.coachee_id${lrs.clause ? ` WHERE ${lrs.clause}` : ""} ORDER BY r.created_at DESC LIMIT 20`).bind(...lrs.params).all();
+  const refls = await c.env.DB.prepare(`SELECT r.id, r.session_id, r.transcript, r.questions, r.patterns, r.next_questions, r.mode, r.created_at, uc.name AS coach_name, ue.name AS coachee_name FROM reflections r LEFT JOIN users uc ON uc.id = r.coach_id LEFT JOIN users ue ON ue.id = r.coachee_id${lrs.clause ? ` WHERE ${lrs.clause}` : ""} ORDER BY r.created_at DESC LIMIT 20`).bind(...lrs.params).all();
   // canDelete: 소유자 본인 또는 hr_admin (공용 owner_id NULL은 hr_admin만). owner_id 자체는 내보내지 않는다.
   // HR admin에게는 소유자 표시를 위해 owner(표시 이름)를 함께 보낸다. 공용이면 null → 화면에 '공용'.
   const mark = (r: any) => ({ ...r, owner_id: undefined, owner_email: undefined, owner_name: undefined, canDelete: !!viewer && (isAdmin || r.owner_id === viewer.id), owner: isAdmin ? (r.owner_id ? (r.owner_name || r.owner_email || r.owner_id) : null) : undefined });

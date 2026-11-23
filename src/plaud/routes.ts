@@ -17,7 +17,7 @@ import type { Context } from "hono";
 import { getSessionUser, sha256hex, type SessionUser } from "../auth";
 import { decryptToken, encryptToken } from "../calendar/crypto";
 import {
-  fmtClock, McpClient, McpError, noteToMarkdown, normalizeFiles, normalizeTranscript, type Segment,
+  fmtClock, McpClient, McpError, noteToMarkdown, normalizeFiles, normalizeTranscript, type PlaudFile, type Segment,
 } from "./mcp";
 import {
   buildAuthUrl, disconnect, exchangeCode, getAccessToken, loadAccount, maskEmail, pkceChallenge, PlaudError,
@@ -305,39 +305,48 @@ plaudApp.get("/files", async (c) => {
   const v = await requireUser(c);
   const page = Math.max(1, Math.min(1000, parseInt(c.req.query("page") || "1", 10) || 1));
   const pageSize = Math.max(10, Math.min(50, parseInt(c.req.query("page_size") || "20", 10) || 20));
-  const args: Record<string, unknown> = { page, page_size: pageSize };
+  // Plaud 쪽 페이지가 짧게 오는 경우가 있어(2026-11-23 27/63개), 서버가 전 페이지를 모아 직접 슬라이스한다.
+  const base: Record<string, unknown> = {};
   const q = (c.req.query("query") || "").trim().slice(0, 100);
-  if (q) args.query = q;
+  if (q) base.query = q;
   for (const k of ["date_from", "date_to"] as const) {
     const d = c.req.query(k);
     if (d) {
       if (!DATE_RE.test(d)) throw new PlaudHttpError(400, `${k}는 YYYY-MM-DD 형식이어야 합니다.`);
-      args[k] = d;
+      base[k] = d;
     }
   }
-  const raw = await withMcp(c, v.id, async (mcp) => {
+  const FETCH_SIZE = 50, MAX_PAGES = 10, MAX_FILES = 500;
+  const all = await withMcp(c, v.id, async (mcp) => {
     // 진단(임시): workspace_id 저장 — 실패해도 목록 조회는 계속한다.
     try {
       const u = await mcp.call("get_current_user");
       await setWorkspaceId(c.env, v.id, pickWorkspaceId(u));
-      if (u && typeof u === "object") console.log(`[plaud] get_current_user keys=${Object.keys(u as object).join(",")}`);
     } catch { /* 진단이 목록을 막지 않는다 */ }
-    return mcp.call("list_files", args);
+    const seen = new Map<string, PlaudFile>();
+    const counts: number[] = [];
+    // complete 키에 의존하지 않는다: 빈 페이지(또는 새로 얻은 id가 없는 페이지)가 나오거나 상한에 닿을 때까지 돈다.
+    for (let p = 1; p <= MAX_PAGES && seen.size < MAX_FILES; p++) {
+      const { files: got } = normalizeFiles(await mcp.call("list_files", { ...base, page: p, page_size: FETCH_SIZE }));
+      counts.push(got.length);
+      if (!got.length) break;
+      let added = 0;
+      for (const f of got) if (!seen.has(f.id)) { seen.set(f.id, f); added++; }
+      if (!added) break; // 같은 페이지를 되풀이하는 경우의 무한 반복 방지
+    }
+    console.log(`[plaud] list_files pages=${counts.join("/")} unique=${seen.size}`);
+    return [...seen.values()];
   });
-  // 진단(임시): 구조만 로그 — 제목·전사·요약 등 내용은 넣지 않는다.
-  if (raw && typeof raw === "object" && !Array.isArray(raw)) {
-    const r = raw as Record<string, unknown>;
-    console.log(`[plaud] list_files keys=${Object.keys(r).join(",")} data_len=${Array.isArray(r.data) ? r.data.length : "n/a"}`);
-  } else {
-    console.log(`[plaud] list_files type=${Array.isArray(raw) ? "array len=" + raw.length : typeof raw}`);
-  }
-  const { files, complete } = normalizeFiles(raw);
-  // 목록은 최신순으로 요청한다 (Plaud 기본 순서). 혹시 오름차순이면 아래에서 뒤집지 않고 그대로 보여 준다.
+  const ts = (f: PlaudFile): number => { const t = Date.parse(f.start_at || f.created_at || ""); return Number.isFinite(t) ? t : 0; };
+  // start_at → created_at 내림차순(최신순). 같으면 입력 순서 유지(sort는 안정 정렬).
+  const sorted = all.slice(0, MAX_FILES).sort((a, b) => ts(b) - ts(a));
+  const total = sorted.length;
+  const files = sorted.slice((page - 1) * pageSize, page * pageSize);
   const imp = await importedMap(c, v.id, files.map((f) => f.id));
   const trans = await transcribingMap(c, v.id, files.map((f) => f.id));
   const linked = await linkedRecordingMap(c, v.id, files.map((f) => f.id));
   return c.json({
-    ok: true, page, page_size: pageSize, has_more: files.length >= pageSize, complete,
+    ok: true, page, page_size: pageSize, total, has_more: page * pageSize < total,
     files: files.map((f) => ({ ...f, imported: imp.has(f.id), doc_id: imp.get(f.id) ?? null, recording_id: imp.has(f.id) ? null : trans.get(f.id) ?? null, linked_recording_id: linked.get(f.id) ?? null })),
   });
 });
@@ -350,6 +359,42 @@ plaudApp.get("/files/:id/transcript", async (c) => {
   const raw = await withMcp(c, v.id, (mcp) => mcp.call("get_transcript", { file_id: id, limit: 10 }));
   const { segments } = normalizeTranscript(raw);
   return c.json({ ok: true, file_id: id, has_transcript: segments.length > 0 });
+});
+
+// 녹음 파일 크기: Plaud API는 크기를 주지 않는다. get_file의 presigned URL(GET 서명이라 HEAD 불가)에
+// `Range: bytes=0-0` GET을 보내 Content-Range 전체 크기를 읽는다 (1바이트만 받음). 실패하면 {ok:false} — 화면은 크기를 그냥 안 보인다.
+plaudApp.get("/files/:id/size", async (c) => {
+  const v = await requireUser(c);
+  const id = c.req.param("id");
+  if (!FILE_ID_RE.test(id)) throw new PlaudHttpError(400, "녹음 id가 올바르지 않습니다.");
+  let url: string | null = null;
+  try {
+    url = await withMcp(c, v.id, async (mcp) => {
+      const raw = await mcp.call("get_file", { file_id: id });
+      const o = (raw && typeof raw === "object" ? raw : {}) as Record<string, unknown>;
+      const inner = o.file && typeof o.file === "object" ? (o.file as Record<string, unknown>) : {};
+      return findPresignedUrl(o, inner);
+    });
+  } catch (e) {
+    if (e instanceof PlaudHttpError && e.status === 409) throw e; // 연결 해제는 그대로 알린다
+    return c.json({ ok: false });
+  }
+  if (!url) return c.json({ ok: false });
+  try {
+    const res = await fetch(url, { headers: { Range: "bytes=0-0" }, signal: AbortSignal.timeout(8000), redirect: "follow" });
+    await res.body?.cancel().catch(() => {});
+    let size = NaN;
+    if (res.status === 206) {
+      const m = /\/(\d+)\s*$/.exec(res.headers.get("content-range") || "");
+      if (m) size = parseInt(m[1], 10);
+    } else if (res.status === 200) {
+      size = parseInt(res.headers.get("content-length") || "", 10); // Range를 무시한 서버: 전체 길이
+    }
+    if (!Number.isFinite(size) || size <= 0) return c.json({ ok: false });
+    return c.json({ ok: true, size_bytes: size });
+  } catch {
+    return c.json({ ok: false });
+  }
 });
 
 // ---- 가져오기 ----
@@ -390,6 +435,17 @@ function findPresignedUrl(...objs: Record<string, unknown>[]): string | null {
   return null;
 }
 
+/** mime → 저장 확장자. 알 수 없는 형식은 .bin (예전처럼 .ogg로 가정하지 않는다 — 전사기가 확장자로 형식을 판단한다). */
+function audioExtension(mime: string): string {
+  switch (mime) {
+    case "audio/mpeg": case "audio/mp3": case "audio/mpeg3": case "audio/x-mpeg": case "audio/x-mp3": return ".mp3";
+    case "audio/ogg": case "audio/opus": return ".ogg";
+    case "audio/wav": case "audio/x-wav": case "audio/wave": case "audio/vnd.wave": return ".wav";
+    case "audio/mp4": case "audio/x-m4a": case "audio/m4a": return ".m4a";
+    default: return ".bin";
+  }
+}
+
 /** 오디오를 받는다. Content-Length가 있으면 본문 스트림 그대로 (메모리에 올리지 않고 R2로), 없으면 한도 안에서 통째로 읽는다. URL·내용은 로그에 남기지 않는다. */
 async function fetchAudio(url: string): Promise<{ body: ReadableStream | ArrayBuffer; size: number; mime: string }> {
   let res: Response;
@@ -405,7 +461,10 @@ async function fetchAudio(url: string): Promise<{ body: ReadableStream | ArrayBu
     throw new PlaudHttpError(502, "Plaud 오디오를 받지 못했습니다. (주소가 만료되었을 수 있습니다. 다시 시도하세요.)", { code: "AUDIO_FETCH_FAILED" });
   }
   const len = parseInt(res.headers.get("content-length") || "", 10);
-  const mime = (res.headers.get("content-type") || "").startsWith("audio/") ? (res.headers.get("content-type") as string) : "audio/ogg";
+  // 실제 Content-Type을 그대로 쓴다 (2026-11-23: Plaud는 파일마다 ogg·mp3가 다르다. 예전에는 audio/ogg로 가정했다).
+  // 매개변수(; charset=…)는 떼고, 없거나 audio/*가 아니면 "알 수 없음"으로 둔다 — 파일 매직으로 추측하지 않는다.
+  const ct = (res.headers.get("content-type") || "").split(";")[0].trim().toLowerCase();
+  const mime = ct.startsWith("audio/") ? ct : "application/octet-stream";
   const tooBig = () => new PlaudHttpError(413, `오디오가 너무 큽니다 (최대 ${MAX_AUDIO_BYTES / 1048576}MB).`, { code: "AUDIO_TOO_LARGE" });
   if (Number.isFinite(len) && len > 0) {
     if (len > MAX_AUDIO_BYTES) { await res.body.cancel().catch(() => {}); throw tooBig(); }
@@ -490,7 +549,7 @@ plaudApp.post("/import", async (c) => {
       if (!url) throw new PlaudHttpError(502, "Plaud가 오디오 주소를 주지 않아 전사할 수 없습니다.", { code: "NO_AUDIO_URL" });
       const audio = await fetchAudio(url);
       const { recordingId } = await hooks.startTranscription(c.env, c.executionCtx, {
-        ownerId: v.id, name: `${name.replace(/\.[^.]+$/, "") || "Plaud 녹음"}.ogg`, body: audio.body, size: audio.size, mime: audio.mime,
+        ownerId: v.id, name: `${name.replace(/\.[^.]+$/, "") || "Plaud 녹음"}${audioExtension(audio.mime)}`, body: audio.body, size: audio.size, mime: audio.mime,
         durationMs: typeof f.duration === "number" ? f.duration : null, // Plaud duration은 ms (fmtClock과 같은 단위)
       });
       await db.prepare("UPDATE plaud_imports SET recording_id = ?, header = ?, title = ? WHERE user_id = ? AND plaud_file_id = ?")

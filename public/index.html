@@ -18,6 +18,7 @@
 <link rel="stylesheet" href="/chat.css" />
 <link rel="stylesheet" href="/workflow-canvas.css" />
 <link rel="stylesheet" href="/agents.css" />
+<link rel="stylesheet" href="/tasks.css" />
 <style>
   /* S4 관측 탭의 하위 탭 바 (M6). 기존 토큰만 쓴다. */
   .obs-subtabs{display:flex;gap:var(--space-2,8px);flex-wrap:wrap;margin:0 0 var(--space-4,16px);border-bottom:1px solid var(--obs-line,#e4e4e7)}
@@ -350,11 +351,18 @@
         <span><label for="taskOwnerFilter">사용자 필터</label><br><select id="taskOwnerFilter"><option value="">전체 사용자</option><option value="unassigned">미지정</option></select></span>
         <span><label for="newTaskOwner">새 할 일 담당자</label><br><select id="newTaskOwner"><option value="">— 사용자를 선택하세요 —</option></select></span>
       </div>
+      <!-- 0046 (2026-11-23): 목록 > 할 일 > 하위 작업. 그리기·동작은 /tasks.js -->
+      <div class="tk-lists" id="taskLists" role="tablist" aria-label="할 일 목록"></div>
+      <div class="tk-tools" id="taskTools"></div>
       <div class="btnrow">
-        <input type="text" id="newTaskTitle" placeholder="할 일을 입력하세요" style="flex:1" />
+        <input type="text" id="newTaskTitle" placeholder="할 일을 입력하세요" maxlength="200" style="flex:1" />
         <button class="primary" id="addTaskBtn">추가</button>
       </div>
       <div id="taskList"></div>
+      <details class="tk-done" id="taskDoneBox" hidden>
+        <summary id="taskDoneSum">완료됨 (0)</summary>
+        <div id="taskDoneList"></div>
+      </details>
     </div>
   </section>
 
@@ -388,7 +396,40 @@
       <input type="text" id="emailTo" placeholder="받는 사람 (쉼표로 구분)" />
       <input type="text" id="emailCc" placeholder="참조 (선택)" />
       <input type="text" id="emailSubject" placeholder="제목" />
-      <textarea id="emailBody" placeholder="본문"></textarea>
+      <!-- 간단 서식 편집 (2026-11-23): contenteditable + execCommand. 로직·살균은 public/email.js (emailRt*, emailSanitizeHtml). -->
+      <div class="rt-toolbar" id="emailToolbar" role="toolbar" aria-label="서식 도구 모음">
+        <select id="rtFont" class="rt-sel" aria-label="글꼴" title="글꼴" onchange="emailRtFont(this.value)">
+          <option value="sans">Sans Serif</option><option value="serif">Serif</option><option value="mono">Monospace</option>
+        </select>
+        <select id="rtSize" class="rt-sel" aria-label="글자 크기" title="글자 크기" onchange="emailRtSize(this.value)">
+          <option value="2">Small</option><option value="3" selected>Normal</option><option value="5">Large</option><option value="6">Huge</option>
+        </select>
+        <span class="rt-sep"></span>
+        <button type="button" class="secondary rt-btn" data-cmd="bold" title="굵게 (Ctrl+B)" aria-label="굵게"><b>B</b></button>
+        <button type="button" class="secondary rt-btn" data-cmd="italic" title="기울임 (Ctrl+I)" aria-label="기울임"><i>I</i></button>
+        <button type="button" class="secondary rt-btn" data-cmd="underline" title="밑줄 (Ctrl+U)" aria-label="밑줄"><u>U</u></button>
+        <button type="button" class="secondary rt-btn" data-cmd="strikeThrough" title="취소선" aria-label="취소선"><s>S</s></button>
+        <label class="rt-color" title="글자색"><span aria-hidden="true">A</span><input type="color" id="rtFore" value="#d93025" aria-label="글자색" /></label>
+        <label class="rt-color" title="배경색(형광펜)"><span aria-hidden="true" class="rt-hl">A</span><input type="color" id="rtBack" value="#fff475" aria-label="배경색(형광펜)" /></label>
+        <span class="rt-sep"></span>
+        <button type="button" class="secondary rt-btn" data-cmd="justifyLeft" title="왼쪽 정렬" aria-label="왼쪽 정렬">왼쪽</button>
+        <button type="button" class="secondary rt-btn" data-cmd="justifyCenter" title="가운데 정렬" aria-label="가운데 정렬">가운데</button>
+        <button type="button" class="secondary rt-btn" data-cmd="justifyRight" title="오른쪽 정렬" aria-label="오른쪽 정렬">오른쪽</button>
+        <span class="rt-sep"></span>
+        <button type="button" class="secondary rt-btn" data-cmd="insertOrderedList" title="번호 목록" aria-label="번호 목록">1.</button>
+        <button type="button" class="secondary rt-btn" data-cmd="insertUnorderedList" title="글머리 목록" aria-label="글머리 목록">•</button>
+        <button type="button" class="secondary rt-btn" data-cmd="indent" title="들여쓰기 늘이기" aria-label="들여쓰기 늘이기">들여쓰기</button>
+        <button type="button" class="secondary rt-btn" data-cmd="outdent" title="들여쓰기 줄이기" aria-label="들여쓰기 줄이기">내어쓰기</button>
+        <button type="button" class="secondary rt-btn" data-cmd="quote" title="인용" aria-label="인용">인용</button>
+        <button type="button" class="secondary rt-btn" data-cmd="link" title="링크 삽입 (Ctrl+K)" aria-label="링크 삽입">링크</button>
+        <button type="button" class="secondary rt-btn" data-cmd="clear" title="서식 지우기" aria-label="서식 지우기">서식 지우기</button>
+      </div>
+      <div class="rt-linkbar" id="emailLinkBar" style="display:none">
+        <input type="text" id="emailLinkUrl" placeholder="https:// 주소 또는 mailto:" aria-label="링크 주소" />
+        <button type="button" class="primary" id="emailLinkOk">적용</button>
+        <button type="button" class="secondary" id="emailLinkCancel">취소</button>
+      </div>
+      <div id="emailBody" class="rt-editor empty" contenteditable="true" role="textbox" aria-multiline="true" aria-label="본문" data-placeholder="본문"></div>
       <input type="hidden" id="emailReplyToId" />
       <div class="btnrow">
         <button class="primary" type="button" id="emailSendBtn" onclick="emailSend()">발송</button>
@@ -497,14 +538,14 @@
     <div class="about-hero">
       <h2>회의에서 코칭까지,<br>일이 스스로 이어집니다</h2>
       <p>녹음을 올리면 전사·요약·색인이 알아서 끝나고, 규정 질문에는 근거를 붙여 답합니다. 사람은 확인하고 결정하는 일만 합니다.</p>
-      <p class="small">서버 없이 Cloudflare Worker 하나로 돌아갑니다 · Cloudflare Developer Day Seoul 2026 Use Case 출품작</p>
+      <p class="small">서버 없이 Cloudflare Worker(메인 하나 + 문서 편집 전용 하나)로 돌아갑니다 · Cloudflare Developer Day Seoul 2026 Use Case 출품작</p>
       <div class="about-cta"><button type="button" class="primary" onclick="switchTab('pitch')">발표자료 보기</button><button type="button" class="secondary" onclick="switchTab('upload')">데모 따라 하기</button></div>
     </div>
     <div class="card">
       <h2>People OS는 무엇인가요</h2>
       <p>일잇 People OS는 HR 담당자, 코치, 코칭을 받는 구성원이 함께 쓰는 업무 공간입니다. 회의 녹음, 사내 규정, 업무 메일, 코칭 기록처럼 흩어져 있던 자료를 한곳에 모으고, AI가 그 자료를 읽어 다음 할 일을 준비합니다.</p>
       <p>녹음 파일을 올리면 전사본이 만들어지고, 요약과 액션 아이템이 붙고, 나중에 검색할 수 있게 색인됩니다. 이 과정에서 사람이 누르는 버튼은 "올리기" 하나입니다. 규정이 궁금하면 문장으로 물어봅니다. 답에는 어느 규정 몇 조를 근거로 했는지가 함께 나옵니다. 근거가 없으면 답을 만들지 않고, 담당자가 답을 달 수 있게 질문을 기록해 둡니다.</p>
-      <p>별도 서버나 컨테이너가 없습니다. 화면, API, 메일 수신, 비동기 처리, 예약 작업이 모두 Cloudflare Worker 하나 안에 있습니다.</p>
+      <p>별도 서버나 컨테이너가 없습니다. 화면, API, 메일 수신, 비동기 처리, 예약 작업이 모두 Cloudflare 메인 Worker 하나 안에 있고, 문서 편집만 전용 Worker 하나가 따로 맡습니다.</p>
     </div>
     <div class="card">
       <h2>왜 만들었나요</h2>
@@ -517,7 +558,7 @@
       <div class="pt-card"><h3>올리면 끝까지 갑니다</h3><p>녹음 한 번 올리면 전사, 요약, 색인이 순서대로 이어집니다. 중간에 실패하면 자동으로 다시 시도하고, 그래도 안 되면 어디서 멈췄는지 보여 줍니다.</p></div>
       <div class="pt-card"><h3>근거 없이는 답하지 않습니다</h3><p>모든 답에 출처 문서와 조문이 붙습니다. 근거를 찾지 못하면 "모른다"고 답하고 질문을 답변 대기 목록에 올립니다.</p></div>
       <div class="pt-card"><h3>물을수록 조직이 똑똑해집니다</h3><p>답변 대기 질문에 담당자가 답을 달면 그 답이 사내 지식으로 색인됩니다. 다음에 같은 질문이 오면 그 지식을 출처로 답합니다.</p></div>
-      <div class="pt-card"><h3>결정은 사람이 합니다</h3><p>워크플로우가 밖으로 보내는 메일·웹훅은 사람이 승인해야 나갑니다. 메일 답장은 AI가 초안까지만 쓰고, 워크플로우의 발송 단계는 승인 대기에서 멈춥니다. 발표 자료도 개요를 사람이 고친 뒤에 만듭니다.</p></div>
+      <div class="pt-card"><h3>결정은 사람이 합니다</h3><p>워크플로우가 밖으로 보내는 메일·웹훅은 사람이 승인해야 나갑니다. 메일 답장은 AI가 초안까지만 쓰고, 워크플로우의 발송 단계는 동기식이면 승인 대기에서 멈추고, 지연식이면 대기 동작에 쌓아두고 실행은 계속됩니다. 발표 자료도 개요를 사람이 고친 뒤에 만듭니다.</p></div>
     </div>
     <div class="card">
       <h2>무엇을 할 수 있나요</h2>
@@ -525,19 +566,20 @@
         <li><b>홈</b> — 안 읽은 메일, 해야 할 일, 최근 문서와 성찰, 아침 브리핑을 한 화면에서 봅니다. 아침 브리핑은 매일 07:00에 전날 기록을 모아 자동으로 만들어집니다.</li>
         <li><b>메일함</b> — <code>@peopleos.site</code> 주소로 온 메일이 내 메일함에 들어옵니다. AI 답장 초안을 받아 고쳐서 보낼 수 있고, 메일을 개인 업무 검색에 넣을 수 있습니다.</li>
         <li><b>결재함</b> — 기안하면 부서장과 HR 관리자 순서로 결재선이 자동으로 잡힙니다. 승인·반려·회수의 모든 기록이 감사 이력으로 남습니다.</li>
-        <li><b>캘린더</b> — 일정을 보고 만듭니다. 구글 캘린더 연동은 선택입니다.</li>
-        <li><b>할 일</b> — 요약에서 나온 액션을 한 번 눌러 할 일로 옮기고 체크합니다.</li>
-        <li><b>녹음전사 · 문서저장</b> — 음성 파일(최대 25MB)을 전사합니다. 긴 녹음은 구간으로 나눠 처리하고 진행 단계를 보여 줍니다. PDF, DOCX, XLSX, HWPX, 이미지 문서(최대 10MB)도 올려 색인합니다.</li>
+        <li><b>캘린더</b> — 일정을 보고 만듭니다. 구글 캘린더와 읽고 쓰기를 연동할 수 있고, 기한 있는 할 일을 달력에 표시합니다.</li>
+        <li><b>할 일</b> — 목록·하위 작업·반복·별표를 지원하는 할 일 목록입니다. 날짜와 기한을 달력에도 표시하고, 바꾸면 화면에 바로 반영됩니다. 요약에서 나온 액션도 한 번 눌러 할 일로 옮깁니다.</li>
+        <li><b>녹음전사 · 문서저장</b> — Plaud 녹음을 가져오거나 음성 파일(최대 25MB)을 올려 전사합니다. PPTX·엑셀·Word 문서는 새로 만들거나 기존 파일을 편집할 수 있습니다. 긴 녹음은 구간으로 나눠 처리하고 진행 단계를 보여 줍니다. PDF, DOCX, XLSX, HWPX, 이미지 문서(최대 10MB)도 올려 색인합니다.</li>
         <li><b>코칭 성찰</b> — 코치에게는 핵심 질문·반복 패턴·다음 세션 질문을, 코칭 대상에게는 자기 성찰 포인트와 기한이 붙은 액션 플랜을 만들어 줍니다. 같은 전사본에서 역할에 따라 다른 결과가 나옵니다.</li>
         <li><b>강의실</b> — 유튜브 강의와 사내 영상을 과정으로 묶어 수강하고 진도를 기록합니다. 사내 영상은 로그인한 사람에게만 스트리밍됩니다.</li>
-        <li><b>워크플로우</b> — 전사·요약·메일 초안·메일 발송 같은 단계를 이어 붙여 업무 흐름을 만듭니다. 큐가 단계를 순서대로 실행하고, 밖으로 나가는 메일·웹훅은 승인 대기에서 멈춥니다. 목표만 적으면 도구를 골라 쓰는 에이전트 단계, 조건 분기, 스케줄 실행, 캔버스 보기를 지원합니다.</li>
+        <li><b>워크플로우</b> — 전사·요약·메일 초안·메일 발송 같은 단계를 이어 붙여 업무 흐름을 만듭니다. 큐가 단계를 순서대로 실행하고, 밖으로 나가는 메일·웹훅은 사람이 승인해야 나갑니다(동기식은 승인 대기에서 멈추고, 지연식은 대기 동작에 쌓아둡니다). 목표만 적으면 도구를 골라 쓰는 에이전트 단계, 조건 분기, 스케줄 실행, 캔버스 보기를 지원합니다.</li>
+        <li><b>에이전트</b> — 내 어시스턴트와 채팅합니다. 규정·개인문서를 근거로 답하고, 메일 초안·할 일을 만들어 줍니다. 워크플로우에서 돌아가던 에이전트 실행 내역과 대기 동작 승인도 여기서 봅니다.</li>
         <li><b>개인 업무 검색</b> — 내가 올린 전사본·문서·메일에서만 답을 찾습니다. 다른 사람의 자료는 검색되지 않습니다.</li>
         <li><b>HR 규정 검색</b> — 사내 규정을 근거로 답합니다. 조문 단위로 출처를 보여 줍니다.</li>
-        <li><b>라이브러리</b> — 문서, 규정, 성찰, 답변 대기 질문을 모아 봅니다. 요약으로 PPTX 초안을 만들어 내려받습니다.</li>
+        <li><b>라이브러리</b> — 문서, 규정, 성찰, 답변 대기 질문을 모아 봅니다. 요약으로 PPTX 초안을 만들어 내려받습니다. 규정·성찰·답변 대기 카드를 누르면 전문을 전체 화면으로 봅니다.</li>
         <li><b>관측 · 평가</b> (HR 관리자) — AI가 답한 과정을 단계별로 추적하고, 골든 질문 세트로 품질을 새벽에 자동 평가하고(설정이 바뀌었거나 7일이 지났을 때), 낮은 점수와 회귀를 개선 목록으로 모읍니다.</li>
         <li><b>사용자 관리</b> (HR 관리자) — 계정을 만들고 역할(HR 관리자 / 일반, 코치 / 코칭 대상)을 정합니다.</li>
         <li><b>조직관리</b> (HR 관리자) — 부서와 부서장을 정하고 구성원의 소속·이름을 관리합니다.</li>
-        <li><b>채팅 · 알림</b> — 어느 화면에서든 우하단 버튼으로 동료와 1:1·그룹 대화를 합니다. 접속 중인지, 읽었는지, 이모지 반응이 보입니다. 승인할 일이 생기면 화면에 알림이 바로 뜹니다.</li>
+        <li><b>채팅 · 알림</b> — 어느 화면에서든 우하단 버튼으로 동료와 1:1·그룹 대화를 합니다. 접속 중인지, 읽었는지, 이모지 반응이 보입니다. 채팅방에서 영상 통화를 시작합니다. 승인할 일이 생기면 화면에 알림이 바로 뜹니다.</li>
       </ul>
     </div>
     <div class="card">
@@ -560,7 +602,7 @@
     </div>
     <div class="card">
       <h2>어떻게 만들었나요</h2>
-      <p>서버가 없습니다. Cloudflare Worker 하나가 화면, API, 메일 수신, 큐 처리, 예약 작업을 모두 맡습니다. 데이터는 D1, R2, KV, Vectorize 네 곳에 역할을 나눠 담고, 채팅방·알림·레이트 리미터처럼 한 자리에서 일관되게 처리할 일은 Durable Objects가 맡습니다. 전사부터 답변·평가까지의 AI는 전부 Workers AI에서 돕니다.</p>
+      <p>서버가 없습니다. Cloudflare 메인 Worker 하나가 화면, API, 메일 수신, 큐 처리, 예약 작업을 모두 맡고, 문서 편집은 전용 Worker 하나가 맡습니다. 데이터는 D1, R2, KV, Vectorize 네 곳에 역할을 나눠 담고, 채팅방·알림·레이트 리미터처럼 한 자리에서 일관되게 처리할 일은 Durable Objects가 맡습니다. 전사부터 답변·평가까지의 AI는 전부 Workers AI에서 돕니다.</p>
       <p><a href="#pitch/architecture" onclick="switchTab('pitch/architecture');return false">발표자료에서 구조 자세히 보기 →</a></p>
     </div>
   </section>
@@ -585,6 +627,7 @@
 <!-- S4 관측 · 평가 모듈: common.js가 먼저 (PeopleOSObs 네임스페이스·obsFetch). 아래 인라인
      스크립트가 첫 switchTab(location.hash)에서 바로 mount하므로 defer 없이 그 앞에 둔다. -->
 <script src="/ui-dialog.js"></script><!-- 페이지 내 확인 대화상자·토스트 (2026-11-21): 아래 화면 스크립트 전부가 쓴다 (2026-11-22 confirm() 전부 교체) -->
+<script src="/tasks.js"></script><!-- 할 일 탭 (2026-11-23, 목록·하위 작업·반복): loadTasks·addTask를 정의한다 -->
 <script src="/obs/common.js"></script>
 <script src="/obs/traces.js"></script>
 <script src="/obs/evals.js"></script>
@@ -592,7 +635,7 @@
 <script src="/obs/workflows.js"></script>
 <script src="/obs/assistant.js"></script>
 <script src="/obs/datasets.js"></script>
-<script src="/email.js"></script>
+<script src="/email-rt.js"></script><script src="/email.js"></script>
 <script src="/pitch.js"></script>
 <script src="/agent-activity.js"></script>
 <script src="/lms-player.js"></script>
@@ -1443,42 +1486,8 @@ async function loadHome() {
       : '<p class="empty">아직 브리핑이 없습니다.</p>';
   } catch { $('homeDigest').innerHTML = '<p class="empty">다이제스트를 불러오지 못했습니다.</p>'; }
 }
-async function loadTasks() {
-  const admin = isAdminUser();
-  $('taskAdminBar').style.display = admin ? '' : 'none';
-  if (admin) {
-    // 사용자 필터·담당자 드롭다운 (관리자 본인을 기본값으로 두지 않는다).
-    const users = await getPerspectiveUsers();
-    const keepF = $('taskOwnerFilter').value, keepO = $('newTaskOwner').value;
-    $('taskOwnerFilter').innerHTML = '<option value="">전체 사용자</option><option value="unassigned">미지정</option>' + users.map(u => `<option value="${esc(u.id)}">${esc(u.name || u.email)} (${esc(u.email)})</option>`).join('');
-    $('newTaskOwner').innerHTML = userOptions(users, '— 사용자를 선택하세요 —');
-    if (keepF === 'unassigned' || users.some(u => u.id === keepF)) $('taskOwnerFilter').value = keepF;
-    if (users.some(u => u.id === keepO)) $('newTaskOwner').value = keepO;
-  }
-  const f = admin ? $('taskOwnerFilter').value : '';
-  const j = await api('/api/tasks' + (f ? '?owner=' + encodeURIComponent(f) : ''));
-  if (!j.ok) return;
-  $('taskList').innerHTML = j.tasks.length
-    ? j.tasks.map(taskRow).join('')
-    : '<p class="empty">할 일이 없습니다.</p>';
-  taskSrcResolve($('taskList'));
-}
+// 0046 (2026-11-23): 할 일 탭의 loadTasks·addTask는 /tasks.js로 옮겼다 (목록·하위 작업·반복). 아래 toggleTask·deleteTask는 홈 카드의 taskRow가 쓴다.
 $('taskOwnerFilter').onchange = () => loadTasks();
-async function addTask() {
-  const title = $('newTaskTitle').value.trim();
-  if (!title) return;
-  const body = { title };
-  if (isAdminUser()) {
-    // 관리자는 담당자를 직접 골라 그 사용자의 할 일로 만든다 (본인 계정에 쌓지 않는다).
-    const owner = $('newTaskOwner').value;
-    if (!owner) { alert('새 할 일 담당자를 선택하세요.'); return; }
-    body.ownerId = owner;
-  }
-  const j = await api('/api/tasks', { method: 'POST', body: JSON.stringify(body) });
-  if (!j.ok) { alert('할 일을 만들지 못했습니다: ' + (j.error || '')); return; }
-  $('newTaskTitle').value = '';
-  loadTasks(); loadHome();
-}
 async function toggleTask(id) {
   await api('/api/tasks/' + id, { method: 'PATCH', body: JSON.stringify({}) });
   loadTasks(); loadHome();
@@ -1574,12 +1583,18 @@ function fmtMs(ms) {
 }
 // 지식 공백 큐 (C5-b): 근거 없는 질문·👎 피드백 질문 카드. open이면 답 작성 폼,
 // answered/resolved면 게시된 암묵지 문서 제목과 상태를 보여준다.
+let libGaps = [];
+function gapMeta(gap) {
+  const srcBadge = gap.source === 'downvote' ? '<span class="badge">아쉬움 피드백</span>' : '<span class="badge warn">근거 없음</span>';
+  return `<div class="meta">${srcBadge} ${fmtMs(gap.asked_at)} · ${gap.count}회 질문됨 · 질문자: <b>${esc(gap.asker_name || '익명')}</b></div>`;
+}
 function gapsSection(gaps) {
+  libGaps = gaps;
   if (!gaps.length) return '<h3>답변 대기 질문</h3><p class="empty">답변 대기 중인 질문이 없습니다.</p>';
   const openN = gaps.filter(g => g.status === 'open').length;
-  const cards = gaps.map(gap => {
-    const srcBadge = gap.source === 'downvote' ? '<span class="badge">아쉬움 피드백</span>' : '<span class="badge warn">근거 없음</span>';
-    const meta = `<div class="meta">${srcBadge} ${fmtMs(gap.asked_at)} · ${gap.count}회 질문됨 · 질문자: <b>${esc(gap.asker_name || '익명')}</b></div>`;
+  const doneN = gaps.length - openN;
+  const cardOf = gap => {
+    const meta = gapMeta(gap);
     if (gap.status === 'open') {
       // 2026-11-22 사용자 결정: 암묵지 게시는 hr_admin 전용 (서버도 403으로 막는다). 일반 사용자에게는 폼 대신 안내만 보인다.
       if (!currentUser || currentUser.role !== 'hr_admin') {
@@ -1589,9 +1604,13 @@ function gapsSection(gaps) {
     }
     const badge = gap.status === 'resolved' ? '<span class="badge ok">해결됨</span>' : '<span class="badge">답변 게시됨</span>';
     const note = gap.status === 'resolved' ? '같은 질문에 암묵지 출처로 답변합니다.' : '검증 중 — 근거가 잡히면 해결됨으로 바뀝니다.';
-    return `<div class="libcard"><h3>${esc(gap.question)}</h3>${meta}<p>${badge} ${esc(gap.doc_title || '')}</p><p class="small">${note}</p></div>`;
-  }).join('');
-  return `<h3>답변 대기 질문 ${openN}건</h3><div class="libgrid">${cards}</div>`;
+    const idx = libGaps.indexOf(gap);
+    return `<div class="libcard libcard-click" tabindex="0" role="button" onclick="openLibDetail('gap',${idx})" onkeydown="if(event.key==='Enter')openLibDetail('gap',${idx})"><h3>${esc(gap.question)}</h3>${meta}<p>${badge} ${esc(gap.doc_title || '')}</p><p class="small">${note}</p></div>`;
+  };
+  const openCards = gaps.filter(g => g.status === 'open').map(cardOf).join('');
+  const doneCards = gaps.filter(g => g.status !== 'open').map(cardOf).join('');
+  return (openN ? `<h3>답변 대기 ${openN}건</h3><div class="libgrid">${openCards}</div>` : '<h3>답변 대기</h3><p class="empty">답변 대기 중인 질문이 없습니다.</p>') +
+    (doneN ? `<h3>해결됨 ${doneN}건</h3><div class="libgrid">${doneCards}</div>` : '');
 }
 async function publishGap(id) {
   const ans = $('gap-answer-' + id).value.trim();
@@ -1648,16 +1667,18 @@ async function refreshLib() {
     ...j.documents.map(d => ({ id: d.id, title: d.title, type: d.kind === 'transcript' ? 'transcript' : 'upload', created_at: d.created_at, size: d.size, canDelete: d.canDelete, owner: d.owner, failed: d.extract_status === 'failed', err: d.extract_error, isCoaching: !!d.is_coaching, hasSource: !!d.has_source, sourceKind: d.source_kind || null })),
     ...(j.decks || []).map(d => ({ id: d.id, title: d.title, type: 'deck', created_at: d.created_at, size: d.size, canDelete: d.canDelete, owner: d.owner })),
   ];
-  const pols = j.policies.map(p => `<div class="libcard"><h3>${esc(p.title)}</h3><p>${esc(p.section)}</p><div class="meta">HR 규정</div></div>`).join('');
-  const refls = j.reflections.map(r => {
+  libPols = j.policies; libRefls = j.reflections;
+  const pols = j.policies.map((p, i) => `<div class="libcard libcard-click" tabindex="0" role="button" onclick="openLibDetail('pol',${i})" onkeydown="if(event.key==='Enter')openLibDetail('pol',${i})"><h3>${esc(p.title)}</h3><p>${esc(p.section)}</p><div class="meta">HR 규정</div></div>`).join('');
+  const refls = j.reflections.map((r, i) => {
     let pats = [];
     try { pats = JSON.parse(r.patterns || '[]'); } catch { pats = []; }
     // 참여자 (0020): 둘 다 NULL(기존·익명 성찰)이면 날짜만.
     const who = (r.coach_name || r.coachee_name) ? `코치: ${esc(r.coach_name || '—')} · 코칭 대상: ${esc(r.coachee_name || '—')} · ` : '';
-    return `<div class="libcard"><h3>${r.mode === 'coachee' ? '코칭 대상 자기 성찰' : '코칭 성찰'}</h3><p>${esc(pats[0] || '')}</p><div class="meta">${who}${fmtDate(r.created_at)}</div></div>`;
+    return `<div class="libcard libcard-click" tabindex="0" role="button" onclick="openLibDetail('refl',${i})" onkeydown="if(event.key==='Enter')openLibDetail('refl',${i})"><h3>${r.mode === 'coachee' ? '코칭 대상 자기 성찰' : '코칭 성찰'}</h3><p>${esc(pats[0] || '')}</p><div class="meta">${who}${fmtDate(r.created_at)}</div></div>`;
   }).join('');
   const openGaps = gaps.filter(g => g.status === 'open').length;
   $('libResult').innerHTML =
+    `<style>.libcard-click{cursor:pointer}.libcard-click:hover{border-color:#888}.lib-detail-body{white-space:pre-wrap;line-height:1.6}</style><div id="libDetail" style="display:none"></div><div id="libMain">` +
     `<div class="obs-subtabs" role="tablist" aria-label="라이브러리">
       <button type="button" role="tab" data-libtab="files" aria-selected="true" onclick="setLibTab('files')">파일 목록</button>
       <button type="button" role="tab" data-libtab="policies" aria-selected="false" onclick="setLibTab('policies')">규정 ${j.policies.length}건</button>
@@ -1667,11 +1688,51 @@ async function refreshLib() {
     `<div data-libpanel="files"><h3>파일 목록</h3><div id="libFiles"></div></div>` +
     `<div data-libpanel="policies" style="display:none"><h3>규정 ${j.policies.length}건</h3><div class="libgrid">${pols}</div></div>` +
     `<div data-libpanel="reflections" style="display:none"><h3>성찰 ${j.reflections.length}건</h3><div class="libgrid">${refls || '<p class="empty">성찰이 없습니다.</p>'}</div></div>` +
-    `<div data-libpanel="gaps" style="display:none">${gapsHtml}</div>`;
+    `<div data-libpanel="gaps" style="display:none">${gapsHtml}</div></div>`;
   setLibTab(libTab);
   renderLibFiles();
   // 게시 확인 문구는 다시 그릴 때마다 복원한다 (없으면 비워둔다).
   restorePublishNotice();
+}
+let libPols = [], libRefls = [];
+function jsonList(s) {
+  let v = [];
+  try { v = JSON.parse(s || '[]'); } catch { v = s ? [String(s)] : []; }
+  if (!Array.isArray(v)) v = v ? [v] : [];
+  return v.map(x => typeof x === 'string' ? x : JSON.stringify(x)).filter(Boolean);
+}
+function openLibDetail(kind, i) {
+  const d = $('libDetail'), m = $('libMain'); if (!d || !m) return;
+  let html;
+  if (kind === 'gap') {
+    const g = libGaps[i]; if (!g || g.status === 'open') return;
+    const badge = g.status === 'resolved' ? '<span class="badge ok">해결됨</span>' : '<span class="badge">답변 게시됨</span>';
+    html = `<button class="secondary" onclick="closeLibDetail()">← 답변 대기 목록</button><h2>${esc(g.question)}</h2><p>${badge}</p>${gapMeta(g)}` +
+      `<h3>게시된 문서</h3><p>${esc(g.doc_title || '—')}</p>` +
+      `<h3>게시한 답변</h3>${g.answer ? `<div class="lib-detail-body">${esc(g.answer)}</div>` : '<p class="empty">답변 본문이 없습니다.</p>'}`;
+  } else if (kind === 'pol') {
+    const p = libPols[i]; if (!p) return;
+    html = `<button class="secondary" onclick="closeLibDetail()">← 규정 목록</button><h2>${esc(p.title)}</h2><p class="small muted">${esc(p.section || '')}</p><div class="lib-detail-body">${esc(p.body || '')}</div>`;
+  } else {
+    const r = libRefls[i]; if (!r) return;
+    const who = (r.coach_name || r.coachee_name) ? `코치: ${esc(r.coach_name || '—')} · 코칭 대상: ${esc(r.coachee_name || '—')} · ` : '';
+    const ul = a => a.length ? `<ul>${a.map(x => `<li>${esc(x)}</li>`).join('')}</ul>` : '<p class="empty">없음</p>';
+    const qs = jsonList(r.questions);
+    const pats = jsonList(r.patterns);
+    const typeName = r.mode === 'coachee' ? '코칭 대상 자기 성찰' : '코칭 성찰';
+    html = `<button class="secondary" onclick="closeLibDetail()">← 성찰 목록</button><h2>${esc(pats[0] || typeName)}</h2><p class="small muted">${esc(typeName)}</p><div class="meta">${who}${fmtDate(r.created_at)}</div>` +
+      `<h3>패턴</h3>${ul(pats)}` +
+      (qs.length ? `<h3>질문</h3>${ul(qs)}` : '') +
+      `<h3>다음 질문</h3>${ul(jsonList(r.next_questions))}` +
+      `<h3>전사문</h3><div class="lib-detail-body">${esc(r.transcript || '')}</div>`;
+  }
+  d.innerHTML = html; d.style.display = ''; m.style.display = 'none';
+  window.scrollTo(0, 0);
+}
+function closeLibDetail() {
+  const d = $('libDetail'), m = $('libMain'); if (!d || !m) return;
+  d.style.display = 'none'; d.innerHTML = ''; m.style.display = '';
+  setLibTab(libTab);
 }
 let libItems = [], libFilter = 'all';
 const LIB_TYPES = { transcript: '전사본', upload: '업로드 문서', deck: '덱' };

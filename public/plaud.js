@@ -29,6 +29,7 @@ async function plaudLoad() {
   else if (!j.ok) plaudState.status = 'error';
   else { plaudState.status = j.status; plaudState.email = j.email || null; }
   plaudState.err = '';
+  plaudRenderSeq++; // 탭에 들어올 때마다 새 회차 — 이전에 실패한 크기 조회를 다시 시도한다
   plaudRender();
   if (plaudState.status === 'connected') plaudLoadFiles(1);
 }
@@ -44,6 +45,7 @@ async function plaudLoadFiles(page) {
     plaudRender(); return;
   }
   plaudState.page = page; plaudState.hasMore = !!j.has_more;
+  plaudState.total = typeof j.total === 'number' ? j.total : null;
   plaudState.files = page === 1 ? j.files : plaudState.files.concat(j.files);
   await plaudLoadRecs(j.files);
   for (const f of j.files) {
@@ -53,6 +55,43 @@ async function plaudLoadFiles(page) {
     if (f.recording_id && !f.imported && !row.polling) { row.tr = 'no'; row.busy = true; row.recId = f.recording_id; plaudPoll(f.id); }
   }
   plaudRender();
+  plaudPumpSizes(); // 목록을 먼저 그린 뒤 백그라운드로 크기 조회
+}
+
+// ---- 파일 크기 (제목 옆 "(35.5MB)") ----
+// Plaud API는 크기를 주지 않아 서버가 presigned URL의 Range GET으로 읽는다. 목록 렌더링과 별개로 백그라운드에서 동시 4개까지 조회하고 rows에 캐시한다.
+const PLAUD_MAX_IMPORT_BYTES = 40 * 1024 * 1024;
+let plaudSizeActive = 0;
+// 목록을 (탭 전환 등으로) 새로 그린 회차 번호. 실패한 행은 다음 회차에 한 번 다시 조회한다.
+let plaudRenderSeq = 0;
+
+function plaudFmtSize(b) {
+  if (typeof b !== 'number' || !isFinite(b) || b <= 0) return '';
+  return b >= 1048576 ? (b / 1048576).toFixed(1) + 'MB' : Math.max(1, Math.round(b / 1024)) + 'KB';
+}
+
+function plaudSizeHtml(st) {
+  if (!st || typeof st.size !== 'number') return '';
+  const over = st.size > PLAUD_MAX_IMPORT_BYTES;
+  return ` <span class="small plaud-size"${over ? ' style="color:#c62828;font-weight:600" title="가져오기 상한 40MB를 넘습니다"' : ''}>(${esc(plaudFmtSize(st.size))})</span>`;
+}
+
+function plaudPumpSizes() {
+  for (const f of plaudState.files) {
+    if (plaudSizeActive >= 4) return;
+    const st = plaudState.rows[f.id];
+    if (!st || typeof st.size === 'number') continue; // 캐시된 행은 다시 묻지 않는다
+    if (st.sizeState === 'loading' && Date.now() - (st.sizeAt || 0) < 60000) continue; // 조회 중 (60초 넘게 멈춘 행만 재시도)
+    if (st.sizeState === 'failed' && st.sizeFailRender === plaudRenderSeq) continue; // 같은 렌더 회차에서는 실패를 되풀이하지 않는다
+    st.sizeState = 'loading'; st.sizeAt = Date.now(); plaudSizeActive++;
+    plaudCall('/api/plaud/files/' + encodeURIComponent(f.id) + '/size').then(j => {
+      if (j.ok && typeof j.size_bytes === 'number' && j.size_bytes > 0) {
+        st.size = j.size_bytes; st.sizeState = 'done';
+        const el = document.querySelector('[data-plaud-title="' + (window.CSS && CSS.escape ? CSS.escape(f.id) : f.id) + '"]');
+        if (el) { el.querySelectorAll('.plaud-size').forEach(x => x.remove()); el.insertAdjacentHTML('beforeend', plaudSizeHtml(st)); }
+      } else { st.sizeState = 'failed'; st.sizeFailRender = plaudRenderSeq; } // 표시하지 않는다 (에러 토스트 없음)
+    }).catch(() => { st.sizeState = 'failed'; st.sizeFailRender = plaudRenderSeq; }).finally(() => { plaudSizeActive--; plaudPumpSizes(); });
+  }
 }
 
 // 파이프라인·예상 뉴런 표시용: Whisper로 전사한 Plaud 행(linked_recording_id)이 있을 때만 녹음 목록을 받아 id로 찾는다.
@@ -101,7 +140,9 @@ function plaudRender() {
       plaudListHtml();
   }
   box.innerHTML = html;
-  const on = (id, fn) => { const x = $(id); if (x) x.onclick = fn; };
+  // 목록이 그려질 때마다(탭 전환 포함) 크기가 없는 행을 백그라운드로 조회한다. 렌더링은 기다리지 않는다.
+  if (s === 'connected' && plaudState.files.length) plaudPumpSizes();
+  const on =(id, fn) => { const x = $(id); if (x) x.onclick = fn; };
   on('plaudRetry', plaudLoad);
   on('plaudRefresh', () => { plaudState.msg = ''; plaudLoadFiles(1); });
   on('plaudConnect', plaudConnect);
@@ -132,11 +173,12 @@ function plaudListHtml() {
         : `<button type="button" class="btn-link" data-plaud-check="${esc(f.id)}">전사 확인</button>`;
       btn = `<button class="primary" data-plaud-import="${esc(f.id)}"${st.busy ? ' disabled' : ''}>${st.busy ? '가져오는 중…' : '가져오기'}</button>`;
     }
-    return `<div class="taskrow"><span class="t-title">${esc(f.name)}</span>${badge}` +
+    return `<div class="taskrow"><span class="t-title" data-plaud-title="${esc(f.id)}">${esc(f.name)}${plaudSizeHtml(st)}</span>${badge}` +
       `<span class="t-src">${esc(when ? fmtDate(when) : '')}${f.duration_ms != null ? ' · ' + esc(plaudFmtDur(f.duration_ms)) : ''}</span>${btn}` +
       (st.note ? `<div class="small" style="flex-basis:100%">${esc(st.note)}</div>` : '') + '</div>' + plaudPipelineHtml(f, st);
   }).join('');
-  return `<div id="plaudList">${rows}</div>` +
+  return (plaudState.total != null ? `<p class="small" id="plaudTotal">총 ${plaudState.total}개</p>` : '') +
+    `<div id="plaudList">${rows}</div>` +
     (plaudState.hasMore ? `<div class="btnrow"><button class="secondary" id="plaudMore"${plaudState.loading ? ' disabled' : ''}>더 보기</button></div>` : '');
 }
 
