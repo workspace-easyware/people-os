@@ -115,3 +115,12 @@
 .cal-badge-google{background:var(--cat-sky);color:#fff}
 .cal-grid .fc .fc-list-event .cal-badge-google{background:var(--cat-sky);border:0;color:#fff}
 .cal-grid .fc .fc-list-event.cal-ev-google .fc-list-event-dot{border-color:var(--cat-sky)}
+
+/* 할 일 (2026-11-23) — 연한 노랑 면 + 점선 테두리 + 체크 아이콘. 누르면 할 일 탭으로 간다. 기한 지난 것은 빨강. */
+.cal-dot-task{background:var(--color-warn-bg);border:1.5px dashed var(--cat-amber);box-sizing:border-box;border-radius:50%}
+.cal-grid .fc .cal-ev-task{background:var(--color-warn-bg);border:1px dashed var(--cat-amber);color:var(--color-text)}
+.cal-task-ico{display:inline-flex;flex:none;align-self:center;color:var(--cat-amber)}
+.cal-grid .fc .cal-ev-task-over{background:var(--color-err-bg);border-color:var(--color-err);color:var(--color-err)}
+.cal-grid .fc .cal-ev-task-over .cal-task-ico{color:var(--color-err)}
+.cal-grid .fc .fc-list-event.cal-ev-task .fc-list-event-dot{border-color:var(--cat-amber);border-style:dashed}
+.cal-grid .fc .fc-list-event.cal-ev-task-over .cal-ev-inner{color:var(--color-err)}

@@ -14,7 +14,7 @@ const CAL_LIB = '/vendor/fullcalendar/index.global.min.js';
 const CAL_LIB_KO = '/vendor/fullcalendar/ko.global.min.js';
 
 let calObj = null, calMode = 'month', calLibPromise = null, calMq = null, calSeq = 0;
-let calFilter = { mine: true, team: true, google: true };
+let calFilter = { mine: true, team: true, tasks: true, google: true };
 // C4: 구글 일정은 별도 이벤트 소스. 구글 호출은 탭 열기·새로고침 버튼·보이는 기간 이동 때만 (자동 폴링 없음).
 // 같은 기간은 캐시를 재사용해, 필터 토글·일정 저장 같은 자체 일정 갱신이 구글을 다시 부르지 않는다.
 let calGCache = null; // { key, events, status } — status: 'connected' | 'needs_reconnect' | 'not_connected' | 'unconfigured' | 'error'
@@ -59,8 +59,32 @@ function calToFcEvent(ev) {
     ? Object.assign(base, { allDay: true, start: ev.start_date, end: ev.end_date })
     : Object.assign(base, { allDay: false, start: calUtcToWall(ev.start_at), end: calUtcToWall(ev.end_at) });
 }
+/** 할 일 이벤트 색: 보통 = 연한 노랑·주황 테두리·어두운 글자, 기한 지남 = 연한 빨강·빨강 테두리·빨강 글자. */
+function calTaskColors(over) {
+  return over
+    ? { backgroundColor: '#fdecea', borderColor: '#b3261e', textColor: '#b3261e' }
+    : { backgroundColor: '#fff4d6', borderColor: '#d97706', textColor: '#14233a' };
+}
+/** 할 일 → FullCalendar 이벤트. due_date·due_time은 이미 KST 벽시계 값이다. 시간이 있으면 30분짜리, 없으면 종일. */
+function calTaskToFc(t, today, nowHm) {
+  const over = t.due_date < today || (t.due_date === today && !!t.due_time && t.due_time < nowHm);
+  const raw = { source: 'task', id: t.id, title: t.title, sub: !!t.parent_id, overdue: over };
+  // 색은 FullCalendar 이벤트 속성으로 준다 (인라인 스타일이라 테마 기본 파랑·흰 글자를 이긴다). CSS 클래스는 점선·범례·목록 보기용.
+  const base = Object.assign({ id: 'task:' + t.id, title: t.title, extendedProps: { raw }, editable: false, startEditable: false, durationEditable: false }, calTaskColors(over));
+  if (!t.due_time) return Object.assign(base, { allDay: true, start: t.due_date });
+  const start = t.due_date + 'T' + t.due_time + ':00';
+  const end = new Date(Date.parse(start + 'Z') + 30 * 60_000).toISOString().slice(0, 19);
+  return Object.assign(base, { allDay: false, start, end });
+}
+/** 달력에 올릴 할 일: 미완료 + 날짜 있음 + 보이는 기간(from 이상, to 미만 — 둘 다 'YYYY-MM-DD'). 하위 작업도 포함. */
+function calTasksToFc(tasks, from, to, today, nowHm) {
+  return (tasks || [])
+    .filter((t) => !t.done && /^\d{4}-\d{2}-\d{2}$/.test(t.due_date || '') && t.due_date >= from && t.due_date < to)
+    .map((t) => calTaskToFc(/^\d{2}:\d{2}$/.test(t.due_time || '') ? t : Object.assign({}, t, { due_time: null }), today, nowHm));
+}
 function calEventClasses(ev) {
   if (ev.source === 'google') return ['cal-ev', 'cal-ev-google'];
+  if (ev.source === 'task') return ev.overdue ? ['cal-ev', 'cal-ev-task', 'cal-ev-task-over'] : ['cal-ev', 'cal-ev-task'];
   const c = ['cal-ev', ev.visibility === 'team' ? 'cal-ev-team' : 'cal-ev-private'];
   if (ev.category === 'coaching') c.push('cal-ev-coaching');
   return c;
@@ -112,9 +136,10 @@ async function calendarOpen(sub) {
       '<button type="button" class="primary cal-add" id="calAdd">+ 일정 추가</button></div></div>' +
       '<div class="cal-filters"><label><input type="checkbox" id="calFMine" checked /> 내 일정</label>' +
       '<label><input type="checkbox" id="calFTeam" checked /> 팀 일정</label>' +
+      '<label><input type="checkbox" id="calFTasks" checked /> 할 일</label>' +
       '<label><input type="checkbox" id="calFGoogle" checked /> 구글</label>' +
       '<button type="button" class="secondary" id="calGRefresh">구글 새로고침</button>' +
-      '<span class="cal-legend small"><i class="cal-dot cal-dot-private"></i>내 일정 <i class="cal-dot cal-dot-team"></i>팀 공유(<b>팀</b> 배지) <i class="cal-dot cal-dot-coaching"></i>코칭(보라 띠) <i class="cal-dot cal-dot-google"></i>구글(<b>G</b> 배지, 읽기 전용)</span></div>' +
+      '<span class="cal-legend small"><i class="cal-dot cal-dot-private"></i>내 일정 <i class="cal-dot cal-dot-team"></i>팀 공유(<b>팀</b> 배지) <i class="cal-dot cal-dot-coaching"></i>코칭(보라 띠) <i class="cal-dot cal-dot-task"></i>할 일(체크 표시·점선, 누르면 할 일 탭) <i class="cal-dot cal-dot-google"></i>구글(<b>G</b> 배지, <span id="calLegendGoogle">읽기 전용</span>)</span></div>' +
       '<div class="cal-msg" id="calMsg" role="status"></div>' +
       '<div class="cal-msg" id="calGMsg" role="status"></div>' +
       '<div id="calGrid" class="cal-grid"></div></div>';
@@ -127,6 +152,7 @@ async function calendarOpen(sub) {
     $('calAdd').onclick = () => calShowForm(null, { date: calTodayKst(), time: '09:00' });
     $('calFMine').onchange = (e) => { calFilter.mine = e.target.checked; calRefetch(); };
     $('calFTeam').onchange = (e) => { calFilter.team = e.target.checked; calRefetch(); };
+    $('calFTasks').onchange = (e) => { calFilter.tasks = e.target.checked; calRefetch(); };
     $('calFGoogle').onchange = (e) => { calFilter.google = e.target.checked; calRefetch(); };
     $('calGRefresh').onclick = calGoogleManualRefresh;
   }
@@ -179,9 +205,10 @@ function calInit() {
     dayCellContent: (a) => a.dayNumberText.replace('일', ''),
     moreLinkContent: (a) => '+' + a.num + '개',
     noEventsContent: () => '이 기간에 일정이 없습니다',
-    // 두 개의 독립된 소스: 자체 일정이 먼저 그려지고, 구글이 느리거나 실패해도 자체 일정은 그대로 보인다.
+    // 세 개의 독립된 소스: 자체 일정이 먼저 그려지고, 할 일·구글이 느리거나 실패해도 자체 일정은 그대로 보인다.
     eventSources: [
       { events: (info, ok, fail) => calFetchRange(info).then(ok, fail) },
+      { events: (info, ok) => calFetchTasks(info).then(ok, () => ok([])) },
       { events: (info, ok) => calFetchGoogle(info).then(ok, () => ok([])) },
     ],
     eventClassNames: (a) => calEventClasses(a.event.extendedProps.raw),
@@ -189,7 +216,8 @@ function calInit() {
     eventClick: (a) => {
       a.jsEvent.preventDefault();
       const raw = a.event.extendedProps.raw;
-      if (raw.source === 'google') calShowGoogleDetail(raw); else calShowDetail(raw);
+      if (raw.source === 'task') { if (window.openTaskDetail) window.openTaskDetail(raw.id); } // 할 일 탭으로 가서 펼친다
+      else if (raw.source === 'google') calShowGoogleDetail(raw); else calShowDetail(raw);
     },
     dateClick: (a) => calShowForm(null, a.allDay ? { date: a.dateStr.slice(0, 10), allDay: true } : { date: a.dateStr.slice(0, 10), time: a.dateStr.slice(11, 16) }),
     datesSet: (a) => { $('calTitle').textContent = calTitleOf(a.view); },
@@ -228,6 +256,20 @@ async function calFetchRange(info) {
   return (j.events || [])
     .filter((e) => (e.visibility === 'team' ? calFilter.team : (e.owner_id === uid ? calFilter.mine : false)))
     .map(calToFcEvent);
+}
+
+// ---------- 할 일 소스 (2026-11-23) ----------
+// 할 일 탭과 같은 범위를 그대로 쓴다: GET /api/tasks (본인 + 미지정, 관리자는 할 일 탭의 사용자 필터 기준).
+// 할 일 수가 적어 캐시 없이 기간이 바뀔 때마다 다시 읽는다. 실패하면 빈 배열 (자체 일정에는 영향 없음).
+async function calFetchTasks(info) {
+  if (!calFilter.tasks) return [];
+  const sel = currentUser && currentUser.role === 'hr_admin' ? $('taskOwnerFilter') : null;
+  const owner = sel ? sel.value : '';
+  let j;
+  try { j = await api('/api/tasks' + (owner ? '?owner=' + encodeURIComponent(owner) : '')); } catch { j = { ok: false }; }
+  if (!j || !j.ok) return [];
+  const now = calMsToWall(Date.now());
+  return calTasksToFc(j.tasks, info.start.toISOString().slice(0, 10), info.end.toISOString().slice(0, 10), j.today || now.slice(0, 10), now.slice(11, 16));
 }
 
 // ---------- 구글 일정 소스 (C4) ----------
@@ -325,12 +367,21 @@ function calEventContent(arg) {
     const b = document.createElement('span');
     b.className = 'cal-badge cal-badge-google'; b.textContent = 'G'; b.title = '구글 캘린더 (읽기 전용)';
     wrap.appendChild(b);
+  } else if (ev.source === 'task') {
+    // Lucide circle-check (선 아이콘). 고정 문자열이라 innerHTML로 넣어도 된다 — 제목은 아래에서 textContent로.
+    const b = document.createElement('span');
+    b.className = 'cal-task-ico'; b.title = ev.overdue ? '할 일 (기한 지남)' : '할 일';
+    b.style.color = calTaskColors(ev.overdue).borderColor; // 아이콘 색 = 테두리 색 (주황 / 빨강)
+    b.innerHTML = '<svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><path d="m9 12 2 2 4-4"/></svg>';
+    wrap.appendChild(b);
   } else if (ev.visibility === 'team') {
     const b = document.createElement('span');
     b.className = 'cal-badge'; b.textContent = '팀';
     wrap.appendChild(b);
   }
-  if (arg.timeText && !arg.event.allDay && !String(arg.view.type).startsWith('list')) {
+  // 시간 격자(주·일 보기)의 할 일은 30분 칸이라 "14:00 - 14:30"을 붙이면 제목이 한 글자만 남는다. 시각은 격자 눈금이 보여 준다.
+  const taskInGrid = ev.source === 'task' && String(arg.view.type).startsWith('timeGrid');
+  if (arg.timeText && !arg.event.allDay && !String(arg.view.type).startsWith('list') && !taskInGrid) {
     const t = document.createElement('span');
     t.className = 'cal-ev-time'; t.textContent = arg.timeText;
     wrap.appendChild(t);
@@ -659,6 +710,9 @@ function calGoogleRender() {
   el.innerHTML = html;
   const b = el.querySelector('[data-g=info]');
   if (b) b.onclick = calGooglePanel;
+  // 범례의 구글 권한 표시도 연결 상태에 맞춘다 (쓰기 동의 전에는 "읽기 전용", 후에는 "읽기 + 구글에 저장").
+  const lg = $('calLegendGoogle');
+  if (lg) lg.textContent = calGoogleCanWrite() ? '읽기 + 구글에 저장' : '읽기 전용';
 }
 
 function calGooglePanel() {

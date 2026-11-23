@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 760 1500" width="760" height="1500" role="img" aria-labelledby="arch-title arch-desc" lang="ko">
   <title id="arch-title">People OS 아키텍처 — 진입점은 넷, 서버는 Worker 둘</title>
-  <desc id="arch-desc">4층 구조. 1층 들어오는 길: 브라우저(HR 담당자·코치·코칭 대상)는 HTTPS로 fetch에, 외부 메일은 Email Routing(peopleos.site catch-all)을 거쳐 email에, 시간은 Cron Triggers(07:00·03:00·15분마다 KST)를 거쳐 scheduled에 들어온다. 질문 폼은 Turnstile로 봇을 확인한다(라이브 동작). 2층: 이 화살표가 모두 본체 Worker(people-os)로 모인다. 진입점은 fetch(Hono API와 화면·웹훅), email, scheduled, queue 네 개이고, 모듈은 인증·역할, 문서·전사, 질문(RAG), 코칭, 메일함, 관측·평가, 결재, 강의실, 워크플로우, 에이전트(Think), 채팅, 문서 편집이다. 서비스 바인딩으로 편집 Worker(people-os-doc-editor, PPTX·XLSX 편집, RPC 전용)가 붙는다. Worker는 Queues(people-os-pipeline, 재시도 3회 후 DLQ)에 메시지를 보내고 queue 진입점으로 다시 받는다. 메일 발송은 Cloudflare 밖의 Resend API를 HTTP로 부른다. 3층 AI: 모든 AI 호출은 AI Gateway(people-os, 용도 태그·캐시·로그)를 지나 Workers AI(Whisper, bge-m3, Qwen3.8-27b, toMarkdown, Clef, Llama 4 Scout)로 간다. 4층 데이터: Worker가 바인딩으로 D1(people-os-db), R2(people-os-files), KV(CACHE), Vectorize(people-os-index-m3), Durable Objects 7종(AgentSession·WorkflowAgent·ThinkAgent·AssistantAgent·ChatRoom·NotificationHub·RateLimiter)을 바로 쓴다. 녹음 한 건의 길: ① 업로드(fetch) ② R2에 원본 저장 ③ Whisper 구간 전사 ④ Queues로 넘김 ⑤ 요약·임베딩 ⑥ D1·Vectorize 저장. 실선은 라이브에서 확인한 연결, 점선은 코드는 있지만 라이브 확인 전인 연결, 회색 점선 상자는 Cloudflare 밖이다. 2026-11-22 코드 기준, 라이브 People OS 40194b95, 편집 Worker 2828a924.</desc>
+  <desc id="arch-desc">4층 구조. 1층 들어오는 길: 브라우저(HR 담당자·코치·코칭 대상)는 HTTPS로 fetch에, 외부 메일은 Email Routing(peopleos.site catch-all)을 거쳐 email에, 시간은 Cron Triggers(07:00·03:00·15분마다 KST)를 거쳐 scheduled에 들어온다. 질문 폼은 Turnstile로 봇을 확인한다(라이브 동작). 2층: 이 화살표가 모두 본체 Worker(people-os)로 모인다. 진입점은 fetch(Hono API와 화면·웹훅), email, scheduled, queue 네 개이고, 모듈은 인증·역할, 문서·전사, 질문(RAG), 코칭, 메일함, 관측·평가, 결재, 강의실, 워크플로우, 에이전트(Think), 채팅, 문서 편집이다. 서비스 바인딩으로 편집 Worker(people-os-doc-editor, PPTX·XLSX·DOCX 편집, RPC 전용)가 붙는다. Worker는 Queues 3개(people-os-pipeline, people-os-docx-jobs, people-os-doc-jobs, 재시도 3회 후 DLQ)에 메시지를 보내고 queue 진입점으로 다시 받는다. 메일 발송은 Cloudflare 밖의 Resend API를 HTTP로 부른다. 3층 AI: 모든 AI 호출은 AI Gateway(people-os, 용도 태그·캐시·로그)를 지나 Workers AI(Whisper, bge-m3, Qwen3.8-27b, toMarkdown, Clef, Llama 4 Scout)로 간다. 4층 데이터: Worker가 바인딩으로 D1(people-os-db), R2(people-os-files), KV(CACHE), Vectorize(people-os-index-m3), Durable Objects 8종(AgentSession·WorkflowAgent·ThinkAgent·AssistantAgent·ChatRoom·NotificationHub·RateLimiter·DocJobRunner)을 바로 쓴다. 녹음 한 건의 길: ① 업로드(fetch) ② R2에 원본 저장 ③ Whisper 구간 전사 ④ Queues로 넘김 ⑤ 요약·임베딩 ⑥ D1·Vectorize 저장. 실선은 라이브에서 확인한 연결, 점선은 코드는 있지만 라이브 확인 전인 연결, 회색 점선 상자는 Cloudflare 밖이다. 2026-11-23 코드 기준.</desc>
 
   <defs>
     <style>
@@ -45,7 +45,7 @@
 
   <!-- 머리 -->
   <text x="20" y="44" class="h1">People OS 아키텍처</text>
-  <text x="740" y="44" class="note" text-anchor="end">2026-11-21 코드 기준</text>
+  <text x="740" y="44" class="note" text-anchor="end">2026-11-23 코드 기준</text>
   <text x="20" y="74" class="lead">진입점은 넷, 서버는 Worker 둘</text>
 
   <!-- 범례 -->
@@ -143,7 +143,7 @@
   <rect x="386" y="678" width="163" height="34" rx="17" class="pill"/><text x="467.5" y="701" class="mod c">채팅</text>
   <rect x="561" y="678" width="163" height="34" rx="17" class="pill"/><text x="642.5" y="701" class="mod c">문서 편집</text>
 
-  <text x="36" y="732" class="ws">서비스 바인딩 DOC_EDITOR → people-os-doc-editor · PPTX·XLSX 편집 (RPC 전용)</text>
+  <text x="36" y="732" class="ws">서비스 바인딩 DOC_EDITOR → people-os-doc-editor · PPTX·XLSX·DOCX 편집 (RPC 전용)</text>
 
   <!-- Worker 아래: AI 길, 메일 발송, 큐, 데이터 바인딩 -->
   <line x1="133" y1="740" x2="133" y2="936" class="ln dash" marker-end="url(#ah)"/>
@@ -162,10 +162,12 @@
   <text x="582" y="770" class="note" text-anchor="end">보냄</text>
   <line x1="664" y1="790" x2="664" y2="744" class="ln dash" marker-end="url(#ah)"/>
   <text x="672" y="770" class="note">깨움</text>
-  <rect x="514" y="790" width="226" height="86" rx="10" class="box dash"/>
-  <text x="627" y="818" class="bt2 c">Queues</text>
+  <rect x="514" y="790" width="226" height="134" rx="10" class="box dash"/>
+  <text x="627" y="818" class="bt2 c">Queues 3개</text>
   <text x="627" y="842" class="bm m c">people-os-pipeline</text>
   <text x="627" y="865" class="bs c">전사·평가·워크플로우 · 3회 → DLQ</text>
+  <text x="627" y="892" class="bm m c">people-os-docx-jobs</text>
+  <text x="627" y="914" class="bm m c">people-os-doc-jobs</text>
   <circle cx="718" cy="812" r="13" class="badge"/><text x="718" y="817" class="bn">4</text>
 
   <!-- 데이터 바인딩 줄기 (AI 층 옆을 지나 4층으로) -->
@@ -203,7 +205,7 @@
   <text x="54" y="1202" class="lh">데이터</text>
 
   <rect x="20" y="1216" width="720" height="274" rx="14" fill="#f8fbff" stroke="#c3d2e4" stroke-width="1.5"/>
-  <text x="36" y="1246" class="bm m">env.DB · FILES · CACHE · VECTOR · DO 7종</text>
+  <text x="36" y="1246" class="bm m">env.DB · FILES · CACHE · VECTOR · DO 8종</text>
 
   <rect x="32" y="1260" width="210" height="100" rx="10" class="box"/>
   <text x="137" y="1292" class="bt c">D1</text>
@@ -232,5 +234,5 @@
   <text x="501.5" y="1410" class="bt c">Durable Objects</text>
   <text x="501.5" y="1432" class="bm c" style="font-size:14px">AgentSession · WorkflowAgent · ThinkAgent</text>
   <text x="501.5" y="1450" class="bm c" style="font-size:14px">AssistantAgent · ChatRoom · NotificationHub</text>
-  <text x="501.5" y="1468" class="bm c" style="font-size:14px">RateLimiter</text>
+  <text x="501.5" y="1468" class="bm c" style="font-size:14px">RateLimiter · DocJobRunner</text>
 </svg>

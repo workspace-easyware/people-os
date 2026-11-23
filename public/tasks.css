@@ -1,0 +1,82 @@
+/* 할 일 탭 — 목록 > 할 일 > 하위 작업 (Google Tasks 패리티, 2026-11-23). 토큰은 styles.css :root를 쓴다. */
+
+/* 목록 전환: 전체 / 별표 / 목록들 / 새 목록 */
+.tk-lists{display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin:var(--space-3) 0 var(--space-2)}
+.tk-chip{display:inline-flex;align-items:center;gap:6px;height:28px;padding:0 10px;border:1px solid var(--color-line-strong);border-radius:var(--radius-pill);background:var(--color-surface);color:var(--color-text-2);font-size:var(--text-sm);font-weight:var(--weight-medium);line-height:1;white-space:nowrap;max-width:260px;transition:background var(--transition),border-color var(--transition),color var(--transition)}
+.tk-chip>span{overflow:hidden;text-overflow:ellipsis}
+.tk-chip:hover{background:var(--color-surface-code);color:var(--color-text)}
+.tk-chip.on{background:var(--color-primary-soft);border-color:var(--color-primary-line);color:var(--color-primary);font-weight:var(--weight-bold)}
+.tk-chip .tk-n{color:var(--color-muted);font-weight:var(--weight-regular);font-variant-numeric:tabular-nums}
+.tk-chip.on .tk-n{color:var(--color-primary)}
+.tk-chip.tk-new{border-style:dashed;color:var(--color-muted)}
+.tk-sep{width:1px;height:18px;background:var(--color-line);margin:0 2px}
+
+/* 도구 줄: 현재 목록 이름·이름 변경·삭제 + 정렬 */
+.tk-tools{display:flex;flex-wrap:wrap;gap:8px;align-items:center;justify-content:space-between;margin:0 0 var(--space-2);min-height:var(--control-h)}
+.tk-tools .tk-cur{display:flex;align-items:center;gap:4px;min-width:0;font-size:var(--text-base);font-weight:var(--weight-bold);color:var(--color-text)}
+.tk-tools .tk-cur>span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.tk-tools .tk-sort{display:flex;align-items:center;gap:6px;font-size:var(--text-xs);color:var(--color-muted)}
+.tk-in{height:var(--control-h);padding:0 8px;border:1px solid var(--color-line-strong);border-radius:var(--radius-sm);background:#fff;color:var(--color-text);font-size:var(--text-sm)}
+.tk-in:focus{outline:none;border-color:var(--color-accent);box-shadow:var(--focus-ring)}
+input.tk-in[type=number]{width:72px}
+
+/* 아이콘 버튼 (16px Lucide 선 아이콘) */
+.tk-ib{display:inline-flex;align-items:center;justify-content:center;width:28px;height:28px;flex:none;padding:0;border:0;border-radius:var(--radius-sm);background:transparent;color:var(--color-muted);transition:background var(--transition),color var(--transition)}
+.tk-ib:hover{background:var(--color-surface-code);color:var(--color-text)}
+.tk-ib:disabled{opacity:.4;cursor:not-allowed}
+.tk-ib:disabled:hover{background:transparent;color:var(--color-muted)}
+.tk-ib.tk-star.on{color:var(--cat-amber)}
+.tk-ib.tk-star.on svg{fill:currentColor}
+.tk-ib.tk-del:hover{background:var(--color-err-bg);color:var(--color-danger)}
+
+/* 할 일 행 */
+#tab-tasks .taskrow{flex-wrap:nowrap;align-items:flex-start}
+#tab-tasks .taskrow input[type=checkbox]{margin-top:6px}
+#tab-tasks .taskrow .badge,#tab-tasks .taskrow .t-src{margin-top:4px}
+.tk-row.tk-sub{padding-left:36px}
+.tk-row.tk-open{background:var(--color-surface-tint);border-bottom-color:transparent;border-radius:var(--radius-sm) var(--radius-sm) 0 0}
+.tk-main{flex:1;min-width:0;display:block;text-align:left;border:0;background:transparent;padding:3px 0;color:inherit;font-size:var(--text-sm);line-height:var(--leading-sm)}
+.tk-main .t-title{display:block;overflow-wrap:break-word}
+.tk-meta{display:flex;flex-wrap:wrap;gap:4px 10px;align-items:center;margin-top:2px;color:var(--color-muted);font-size:var(--text-xs);line-height:18px}
+.tk-meta .tk-note{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:100%}
+.tk-due{display:inline-flex;align-items:center;gap:4px;font-variant-numeric:tabular-nums;white-space:nowrap}
+.tk-due svg{width:12px;height:12px;flex:none}
+.tk-due.tk-over{color:var(--color-err);font-weight:var(--weight-medium)}
+.taskrow.done .tk-meta{text-decoration:none}
+
+/* 상세 (행 아래로 펼친다 — 저장 버튼 없이 바로 반영) */
+.tk-detail{margin:0 -8px 4px;padding:10px 12px 12px 36px;background:var(--color-surface-tint);border-bottom:1px solid var(--line);border-radius:0 0 var(--radius-sm) var(--radius-sm);display:grid;gap:8px}
+.tk-detail.tk-sub{padding-left:64px}
+.tk-detail input[type=text]{font-size:var(--text-base);font-weight:var(--weight-medium)}
+.tk-detail textarea{min-height:60px;font-size:var(--text-sm);resize:vertical}
+.tk-line{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
+.tk-line button.secondary{margin-top:0;height:28px;padding:0 10px}
+.tk-line .tk-in{height:28px}
+.tk-line .tk-grow{flex:1}
+.tk-line label{font-size:var(--text-xs);color:var(--color-muted)}
+
+/* 클릭 잠금: 서버 응답으로 줄이 바뀌는 순간에만 잠깐 건다 (tasks.js lock(), 0.3초) */
+.tk-lock{pointer-events:none}
+
+/* 완료됨 (접힌 섹션) */
+.tk-done{margin-top:var(--space-3);border-top:1px solid var(--line);padding-top:var(--space-2)}
+.tk-done>summary{cursor:pointer;font-size:var(--text-sm);font-weight:var(--weight-medium);color:var(--color-text-2);padding:6px 0;user-select:none}
+.tk-done>summary:hover{color:var(--color-text)}
+
+/* 대화상자 (.ui-dlg-back / .ui-dlg 위에 폼을 얹는다) */
+.tk-dlg{display:grid;gap:12px;margin-top:var(--space-3)}
+.tk-dlg .tk-line{gap:8px}
+.tk-dlg .tk-lbl{width:64px;flex:none;font-size:var(--text-sm);color:var(--color-text-2)}
+.tk-dlg input[type=text]{flex:1;width:auto}
+.tk-dlg label.tk-radio{display:inline-flex;align-items:center;gap:6px;font-size:var(--text-sm);color:var(--color-text)}
+.tk-opts{display:grid;gap:8px}
+.tk-wd{display:flex;gap:4px}
+.tk-wd button{width:32px;height:32px;padding:0;border:1px solid var(--color-line-strong);border-radius:50%;background:#fff;color:var(--color-text-2);font-size:var(--text-xs);font-weight:var(--weight-medium)}
+.tk-wd button.on{background:var(--color-primary);border-color:var(--color-primary);color:#fff}
+.tk-err{color:var(--color-err);font-size:var(--text-xs);min-height:18px}
+.ui-dlg-btns .tk-left{margin-right:auto}
+
+@media (max-width:640px){
+  .tk-row.tk-sub{padding-left:24px}
+  .tk-detail,.tk-detail.tk-sub{padding-left:12px}
+}
