@@ -125,7 +125,10 @@ function emailRenderBody(box, m) {
     f.setAttribute('referrerpolicy', 'no-referrer');
     f.title = '메일 본문';
     const csp = `<meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src data:; style-src 'unsafe-inline'; font-src data:">`;
-    f.srcdoc = csp + '<base target="_blank">' + m.body_html;
+    // 보안점검(2026-11-22) Low: 보낸 쪽이 넣은 <meta http-equiv>(refresh로 프레임을 바깥 사이트로 보냄 — 열람 확인·IP 노출)와 <base>를 뺀다.
+    // 스크립트는 sandbox·CSP가 이미 막는다. 이 치환은 그 위에 얹는 보조 방어다.
+    const bodyHtml = String(m.body_html).replace(/<meta\b[^>]*>/gi, '').replace(/<base\b[^>]*>/gi, '');
+    f.srcdoc = csp + '<base target="_blank">' + bodyHtml;
     f.onload = () => { try { f.style.height = Math.min(1600, Math.max(200, f.contentDocument ? f.contentDocument.body.scrollHeight + 24 : 480)) + 'px'; } catch { f.style.height = '480px'; } };
     box.appendChild(f);
     const note = document.createElement('p');

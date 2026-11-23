@@ -12,7 +12,7 @@ import PptxGenJS from "pptxgenjs";
 import { LLM_MODEL, responseText, runAsk } from "../ask-pipeline";
 import { aiGatewayOptions } from "../ai-gateway";
 import { createTraceSink } from "../obs/trace"; // ask_rag·ask_personal 트레이스 (2026-11-21 브라우저 회귀 3번)
-import { EMAIL_DOMAIN, localPartFor, sendEmail } from "../email/send";
+import { DAILY_SEND_LIMIT, dailySendLimitReached, EMAIL_DOMAIN, localPartFor, sendEmail } from "../email/send";
 import { localReflect, localSummarize, uid } from "../lib";
 import { MAX_INSTRUCTION, parseSourceRef, runPptxEdit } from "../pptx/edit"; // pptx_edit 노드 (2026-11-21)
 import { MAX_XLSX_INSTRUCTION, parseXlsxSource, runXlsxEdit } from "../xlsx/edit"; // xlsx_edit 노드 (2026-11-21)
@@ -413,6 +413,8 @@ async function sendEmailNode(ctx: NodeContext, cfg: Cfg): Promise<NodeResult> {
     return { status: "waiting_approval", output: { to, subject } };
   }
   if (!ctx.env.RESEND_API_KEY) throw new NodeError("Resend 미설정: 메일 발송이 아직 준비되지 않았습니다 (RESEND_API_KEY).");
+  // 보안점검(2026-11-22) Medium: 하루 발송 상한 (메일함 발송과 합산, src/email/send.ts DAILY_SEND_LIMIT). 승인된 발송에도 적용한다.
+  if (await dailySendLimitReached(ctx.env.DB, ctx.user.id)) throw new NodeError(`하루에 보낼 수 있는 메일 수(${DAILY_SEND_LIMIT}통)를 넘었습니다.`);
   const fromAddr = `${localPartFor(ctx.user.email)}@${EMAIL_DOMAIN}`;
   const providerId = (await sendEmail(ctx.env, { from: fromAddr, to, subject, text })).id;
   // 보낸 메일 기록 (POST /api/email/send와 같은 열). 기록 실패는 발송 성공을 뒤집지 않는다.
@@ -562,7 +564,9 @@ function ipv4Parts(h: string): number[] | null {
 }
 function blockedIpv4(p: number[]): boolean {
   const [a, b] = p;
-  return a === 10 || a === 127 || a === 0 || (a === 172 && b >= 16 && b <= 31) || (a === 192 && b === 168) || (a === 169 && b === 254);
+  if (a === 10 || a === 127 || a === 0 || (a === 172 && b >= 16 && b <= 31) || (a === 192 && b === 168) || (a === 169 && b === 254)) return true;
+  // 보안점검(2026-11-22) Low: 빠져 있던 특수 대역 — 100.64.0.0/10(CGNAT), 192.0.0.0/24, 198.18.0.0/15(벤치마크), 224.0.0.0/4(멀티캐스트), 240.0.0.0/4(예약·브로드캐스트).
+  return (a === 100 && b >= 64 && b <= 127) || (a === 192 && b === 0 && p[2] === 0) || (a === 198 && (b === 18 || b === 19)) || a >= 224;
 }
 /** IPv6 문자열 → 8개 16비트 그룹. 형식이 아니면 null. (URL 파서가 이미 정규화·압축해 둔 형태를 받는다. 끝의 점-십진 IPv4도 처리.) */
 function ipv6Groups(h: string): number[] | null {
@@ -589,6 +593,10 @@ function blockedIpv6(g: number[]): boolean {
   if (g.slice(0, 7).every((n) => n === 0) && g[7] === 1) return true; // ::1
   if ((g[0] & 0xffc0) === 0xfe80) return true; // fe80::/10 링크 로컬
   if ((g[0] & 0xfe00) === 0xfc00) return true; // fc00::/7 ULA
+  if ((g[0] & 0xffc0) === 0xfec0) return true; // fec0::/10 사이트 로컬 (폐기된 대역, 보안점검 2026-11-22)
+  if ((g[0] & 0xff00) === 0xff00) return true; // ff00::/8 멀티캐스트
+  // 2002::/16 (6to4): 둘째·셋째 그룹이 IPv4다.
+  if (g[0] === 0x2002 && blockedIpv4([(g[1] >> 8) & 255, g[1] & 255, (g[2] >> 8) & 255, g[2] & 255])) return true;
   // IPv4를 품은 주소는 안쪽 IPv4로 다시 판정한다: ::ffff:a.b.c.d (매핑), ::a.b.c.d (호환), 64:ff9b::/96 (NAT64)
   const embedded = [(g[6] >> 8) & 255, g[6] & 255, (g[7] >> 8) & 255, g[7] & 255];
   const mapped = g.slice(0, 5).every((n) => n === 0) && g[5] === 0xffff;

@@ -35,7 +35,11 @@
     document.head.appendChild(s);
   }
 
-  function secret() { try { return sessionStorage.getItem(SECRET_KEY) || ""; } catch (e) { return ""; } }
+  // 보안점검(2026-11-22) Medium: 관리자 시크릿을 sessionStorage에 두지 않는다 (이 화면의 메모리에만 — 새로고침하면 사라진다).
+  // 이전에는 sessionStorage + 입력란 value에 남아 XSS가 한 번 나면 읽을 수 있었다. hr_admin 세션이면 시크릿 없이도 쓰기가 된다.
+  var memSecret = "";
+  try { sessionStorage.removeItem(SECRET_KEY); } catch (e) { /* 예전에 저장된 값 정리 */ }
+  function secret() { return memSecret; }
 
   async function api(method, path, body) {
     var headers = {};
@@ -76,14 +80,14 @@
       status.className = state.err ? "ds-err" : "ds-muted";
     }
 
-    var secretInput = h("input", { type: "password", placeholder: "관리자 시크릿 (쓰기용)", autocomplete: "off", value: secret() });
+    var secretInput = h("input", { type: "password", placeholder: "관리자 시크릿 (쓰기용)", autocomplete: "off" });
     secretInput.addEventListener("change", function () {
-      try { sessionStorage.setItem(SECRET_KEY, secretInput.value.trim()); } catch (e) { /* 저장 불가 */ }
+      memSecret = secretInput.value.trim();
     });
 
     var seedBtn = h("button", { type: "button", text: "골든 시드 실행", onclick: async function () {
       try {
-        try { sessionStorage.setItem(SECRET_KEY, secretInput.value.trim()); } catch (e) { /* noop */ }
+        memSecret = secretInput.value.trim();
         var r = await api("POST", "/datasets/seed");
         setMsg("시드 완료: 추가 " + r.inserted + " · 건너뜀 " + r.skipped + " (멱등)", false);
         await loadList(r.datasetId);

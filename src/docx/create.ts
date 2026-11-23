@@ -487,6 +487,17 @@ export function closeTruncatedJson(s: string): string | null {
 }
 
 /** 진단용: 원래 JSON.parse 오류 문구와 오류 위치 앞뒤 80자. */
+/** 로그용 (보안점검 2026-11-22): 내용을 지운 JSON "모양". 구조 문자({}[]":,)와 공백은 그대로, 그 밖의 글자 덩어리는 x 하나로. */
+function logShape(s: string): string {
+  return s.replace(/[^\s{}\[\]":,]+/g, "x");
+}
+/** 로그용: JSON.parse 오류 문구에서 종류(영문 앞부분)와 위치만 남긴다 — 문구에 섞여 나오는 원문 조각은 뺀다. */
+function logParseError(msg: string): string {
+  const kind = /^[A-Za-z ]+/.exec(msg)?.[0].trim() || "parse error";
+  const pos = /position (\d+)/.exec(msg)?.[1];
+  return pos ? `${kind} @${pos}` : kind;
+}
+
 function jsonParseProblem(text: string): { error: string; around: string } | null {
   const cleaned = text.replace(/<think>[\s\S]*?<\/think>/g, "").replace(/```json\s*/gi, "").replace(/```\s*/g, "");
   const start = cleaned.indexOf("{");
@@ -755,8 +766,10 @@ export async function planDocxDef(
       phCells: ph ? ph.cells : null, phItems: ph ? ph.items : null, phParagraphs: ph ? ph.paragraphs : null,
       finish: typeof finish === "string" ? finish : null, chars: text.length,
       completionTokens: typeof usage?.completion_tokens === "number" ? usage.completion_tokens : null,
-      sections: obj && Array.isArray(obj.sections) ? obj.sections.length : null, head: text.slice(0, 200), tail: text.slice(-200),
-      ...(obj ? {} : (() => { const p = jsonParseProblem(text); return { parseError: p?.error ?? null, parseAround: p?.around ?? null }; })()),
+      // 보안점검(2026-11-22) Medium: 모델이 쓴 문서 내용(이름·인사 수치가 들어갈 수 있다)을 로그에 싣지 않는다 (src/obs/log.ts 규칙).
+      // 괄호 진단에 필요한 "모양"만 남긴다 — 글자·숫자 덩어리는 x로 바꾸고 JSON 구조 문자({}[]":,)만 그대로 둔다.
+      sections: obj && Array.isArray(obj.sections) ? obj.sections.length : null, head: logShape(text.slice(0, 200)), tail: logShape(text.slice(-200)),
+      ...(obj ? {} : (() => { const p = jsonParseProblem(text); return { parseError: p?.error ? logParseError(p.error) : null, parseAround: p?.around ? logShape(p.around) : null }; })()),
     });
     if (def) return { ok: true, def, attempts: attempt };
     if (finish === "length") break; // 잘린 것은 다시 시켜도 같다
@@ -800,7 +813,8 @@ export async function loadDocxImages(env: DocxEnv, docIds: string[], reader: Doc
     const row = await env.DB.prepare("SELECT title, source_r2_key AS key, owner_id FROM documents WHERE id = ?").bind(id)
       .first<{ title: string; key: string | null; owner_id: string | null }>();
     if (!row) return { ok: false, status: 404, error: `이미지 문서 ${id}를 찾을 수 없습니다.`, code: "image_not_found" };
-    if (row.owner_id && row.owner_id !== reader.id && !reader.admin) return { ok: false, status: 403, error: `이미지 문서 ${id}를 읽을 권한이 없습니다.`, code: "image_forbidden" };
+    // 보안점검(2026-11-22) Low: 남의 문서는 없는 문서와 같은 404로 답한다 (id 존재 여부를 알려 주지 않는다 — 편집 원본 로더와 같은 규칙).
+    if (row.owner_id && row.owner_id !== reader.id && !reader.admin) return { ok: false, status: 404, error: `이미지 문서 ${id}를 찾을 수 없습니다.`, code: "image_not_found" };
     const head = row.key ? await env.FILES.head(row.key) : null;
     if (!row.key || !head) return { ok: false, status: 404, error: `"${row.title}"에는 원본 파일이 없습니다 (이미지 파일로 올린 문서만 넣을 수 있습니다).`, code: "image_not_found" };
     const mb = (n: number) => (n / 1048576).toFixed(1);

@@ -25,6 +25,7 @@ import {
   randomToken,
   recordLoginFailure,
   revokeSessions,
+  secretMatches,
   sha256hex,
   timingSafeEqual,
   type AuthEnv,
@@ -90,7 +91,8 @@ authApp.post("/bootstrap", async (c) => {
   const email = typeof body.email === "string" ? body.email.trim().toLowerCase() : "";
   const name = typeof body.name === "string" ? body.name.trim() : "";
   const password = typeof body.password === "string" ? body.password : "";
-  if (!c.env.BOOTSTRAP_SECRET || secret !== c.env.BOOTSTRAP_SECRET) return fail(c, 403, "초기 설정 정보를 확인해 주세요.");
+  // 보안점검(2026-11-22): 상수 시간 비교 (이전에는 !== 비교였다). 미설정이면 secretMatches가 항상 거부한다 (fail-closed).
+  if (!secretMatches(c.env.BOOTSTRAP_SECRET, secret)) return fail(c, 403, "초기 설정 정보를 확인해 주세요.");
   if (!isValidEmail(email) || !name || name.length > 100 || !passwordOk(password)) {
     return fail(c, 400, "이메일·이름·비밀번호(12~128자)를 확인해 주세요.");
   }

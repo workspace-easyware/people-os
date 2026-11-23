@@ -101,6 +101,15 @@ export async function updateWorkflow(
 /** runs·steps까지 함께 삭제. 없거나 타인 소유면 false. */
 export async function deleteWorkflow(db: DB, ownerId: string, id: string): Promise<boolean> {
   if (!(await getWorkflow(db, ownerId, id))) return false;
+  // 보안점검(2026-11-22) Low: 아직 결정되지 않은 대기 동작(queued)을 함께 지운다. 이전에는 워크플로우를 지운 뒤에도
+  // 그 run의 대기 메일·웹훅을 승인해 보낼 수 있었다. 0042 이전 DB(테이블 없음)에서는 건너뛴다.
+  try {
+    await db.prepare(
+      "DELETE FROM workflow_pending_actions WHERE status = 'queued' AND owner_id = ? AND run_id IN (SELECT id FROM workflow_runs WHERE workflow_id = ? AND owner_id = ?)",
+    ).bind(ownerId, id, ownerId).run();
+  } catch (e) {
+    if (!/no such table/i.test(e instanceof Error ? e.message : String(e))) throw e;
+  }
   await db.batch([
     db.prepare("DELETE FROM workflow_run_steps WHERE run_id IN (SELECT id FROM workflow_runs WHERE workflow_id = ? AND owner_id = ?)").bind(id, ownerId),
     db.prepare("DELETE FROM workflow_runs WHERE workflow_id = ? AND owner_id = ?").bind(id, ownerId),

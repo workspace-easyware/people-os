@@ -48,6 +48,19 @@ export async function sendEmail(env: { RESEND_API_KEY?: string }, input: SendInp
   return { id: json.id };
 }
 
+// 보안점검(2026-11-22) Medium: 사용자 1명이 24시간 동안 보낼 수 있는 메일 수 (메일함 발송 + 워크플로우 send_email 합산).
+// 이전에는 상한이 없어 계정 하나(또는 탈취된 세션)가 회사 도메인으로 메일을 무제한 보낼 수 있었다.
+// 보낸 메일은 두 경로 모두 emails(direction='out', owner_id)에 남으므로 그 행 수로 센다. 일정 알림·결재 알림(시스템 발신)은 세지 않는다.
+export const DAILY_SEND_LIMIT = 200;
+
+/** 하루 발송 상한을 넘었으면 true. 세는 쿼리가 실패하면 보내지 않는다 (fail-closed). */
+export async function dailySendLimitReached(db: D1Database, ownerId: string): Promise<boolean> {
+  const since = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+  const row = await db.prepare("SELECT COUNT(*) AS n FROM emails WHERE owner_id = ? AND direction = 'out' AND created_at > ?")
+    .bind(ownerId, since).first<{ n: number }>();
+  return (row?.n ?? 0) >= DAILY_SEND_LIMIT;
+}
+
 /** 사용자 이메일 앞자리 → 발신 로컬 파트 (영숫자·.-_만). */
 export function localPartFor(email: string): string {
   const lp = (email.split("@")[0] || "").toLowerCase().replace(/[^a-z0-9._\-]/g, "");

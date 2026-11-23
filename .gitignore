@@ -7,5 +7,12 @@ dist/
 # local miniflare state from verification harnesses
 files/**/state/v3/
 files/**/state-*/v3/
+# 보안점검(2026-11-22): 검증 하네스가 남긴 임시 자격증명·세션 파일 (실수로 git add 하지 않게)
+files/workflow-verify/decisions-2026-11-22/h/
+files/workflow-verify/decisions-2026-11-22/pw-new.json
+files/workflow-verify/**/sess-*.json
+files/workflow-verify/**/jar-*.txt
+files/workflow-verify/**/bf-seed.txt
+files/workflow-verify/**/.wrangler-state/
 __pycache__/
 *.pyc

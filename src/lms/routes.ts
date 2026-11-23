@@ -286,7 +286,9 @@ lmsApp.post("/admin/lessons", async (c) => {
     r2Key = b.r2_key.trim();
     // 전체 점검(2026-11-18) P2: 같은 버킷에 개인 녹음·문서 원본·메일 원문·덱·트레이스가 함께 있다.
     // 그 경로를 강의 영상으로 등록하면 로그인한 모든 사용자에게 스트리밍된다 — 개인 데이터 경로는 거부한다.
-    if (/^(recordings|docs|documents|emails|decks|traces|obs)\//i.test(r2Key)) return fail(c, 400, "이 경로의 객체는 강의 영상으로 등록할 수 없습니다.");
+    // 보안점검(2026-11-22): meetings/(화상회의 전사 원문)를 차단 목록에 추가. "../"·"//"·선행 "/"가 든 키도 거절한다.
+    if (/^\/|\.\.|\/\//.test(r2Key)) return fail(c, 400, "객체 키 형식이 올바르지 않습니다.");
+    if (/^(recordings|docs|documents|emails|decks|traces|obs|meetings)\//i.test(r2Key)) return fail(c, 400, "이 경로의 객체는 강의 영상으로 등록할 수 없습니다.");
     const head = await c.env.FILES.head(r2Key);
     if (!head) return fail(c, 400, "R2에 해당 객체가 없습니다.");
     sizeBytes = head.size;

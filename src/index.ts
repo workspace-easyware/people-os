@@ -629,17 +629,32 @@ async function resolveAsUser(env: Env, viewer: { id: string; role: string } | nu
   return { target: u };
 }
 
+// 보안점검(2026-11-22): 공용 풀(owner_id NULL = HR 규정 검색의 근거)에 쓸 수 있는 호출자인지.
+// hr_admin 세션 또는 X-Admin-Secret(운영 스크립트, 세션 없음)만 true. 호출 전에 loggedInOrAdmin을 통과했으므로
+// false이면 viewer는 반드시 있는 일반 사용자다.
+function sharedPoolWriter(c: Context<{ Bindings: Env }>, viewer: { id: string; role: string } | null): boolean {
+  if (viewer) return viewer.role === "hr_admin";
+  return adminAllowed(c.env, c.req.header("x-admin-secret"));
+}
+
 // ---- documents ----
 app.post("/api/documents", async (c) => {
   await ensureSeeded(c.env.DB);
+  // 보안점검(2026-11-22) High: 문서 만들기는 로그인(또는 X-Admin-Secret) 필수. 이전에는 익명 요청이 공용 풀(owner NULL)에
+  // 문서를 만들어 HR 규정 검색의 근거를 오염시킬 수 있었다 (R2·임베딩 비용도 무제한). 화면은 원래 로그인 뒤에만 이 API를 부른다.
+  if (!(await loggedInOrAdmin(c))) return c.json({ ok: false, error: "로그인이 필요합니다." }, 401);
   // 파일 업로드: multipart/form-data (C5 Phase 3 파서 라우팅).
   const ct = c.req.header("content-type") || "";
   if (ct.includes("multipart/form-data")) return handleDocumentFileUpload(c);
   const body = await c.req.json().catch(() => ({})) as { title?: string; content?: string; kind?: string; personal?: boolean; is_coaching?: boolean; asUserId?: unknown };
-  if (!body.content || body.content.trim().length < 3) return c.json({ ok: false, error: "content is required" }, 400);
+  if (typeof body.content !== "string" || body.content.trim().length < 3) return c.json({ ok: false, error: "content is required" }, 400);
+  // 보안점검(2026-11-22): 입력 상한·종류 allowlist. 본문은 파일 업로드와 같은 10MB(글자 수 기준), 종류는 아는 값만.
+  if (body.content.length > MAX_DOC_BYTES) return c.json({ ok: false, error: "본문은 10MB 이하만 올릴 수 있습니다" }, 413);
+  if (body.title !== undefined && typeof body.title !== "string") return c.json({ ok: false, error: "title must be a string" }, 400);
   const id = uid("doc");
-  const title = body.title || body.content.slice(0, 40);
+  const title = (body.title || body.content.slice(0, 40)).slice(0, 200);
   const kind = body.kind || "transcript";
+  if (kind !== "transcript" && kind !== "file" && kind !== "tacit") return c.json({ ok: false, error: "kind must be transcript, file or tacit" }, 400);
   // 2026-11-22 사용자 결정: 암묵지는 hr_admin만 만든다 — 게시 엔드포인트를 돌아가는 길(kind:"tacit" 직접 입력)도 같은 규칙.
   if (kind === "tacit") {
     const denied = await tacitPublishDenied(c);
@@ -651,7 +666,11 @@ app.post("/api/documents", async (c) => {
   const viewer = await getSessionUser(c.env, c.req.header("cookie"));
   const as = await resolveAsUser(c.env, viewer, body.asUserId);
   if (as.error) return c.json({ ok: false, error: as.error }, 400);
-  const ownerId = as.target ? as.target.id : kind === "transcript" ? (viewer?.id ?? null) : (body.personal === true ? (viewer?.id ?? null) : null);
+  // 보안점검(2026-11-22) High: 공용 풀(owner NULL)에 쓰는 것은 hr_admin(또는 X-Admin-Secret)만. 일반 사용자의 문서는 personal 값과 무관하게
+  // 항상 본인 소유가 된다 — 암묵지 게시를 hr_admin 전용으로 한 결정(2026-11-22)을 kind:"file" 공용 입력으로 돌아갈 수 없게 한다.
+  // 화면은 일반 사용자 업로드에 원래 personal:true만 보낸다 (공용은 관리자 관점 선택 "__shared__"뿐).
+  const sharedWriter = sharedPoolWriter(c, viewer);
+  const ownerId = as.target ? as.target.id : !sharedWriter ? viewer!.id : kind === "transcript" ? (viewer?.id ?? null) : (body.personal === true ? (viewer?.id ?? null) : null);
   const r2Key = `documents/${id}.txt`;
   let r2Stored = false;
   try {
@@ -705,7 +724,8 @@ async function handleDocumentFileUpload(c: Context<{ Bindings: Env }>) {
   // 관점 선택: hr_admin이 asUserId를 보내면 그 사용자의 개인 문서로 만든다.
   const as = await resolveAsUser(c.env, viewer, form.get("asUserId"));
   if (as.error) return c.json({ ok: false, error: as.error }, 400);
-  const ownerId = as.target ? as.target.id : (form.get("personal") as string | null) === "true" && viewer ? viewer.id : null;
+  // 보안점검(2026-11-22) High: 공용 풀 쓰기는 hr_admin(또는 X-Admin-Secret)만 — 일반 사용자의 파일은 personal 값과 무관하게 본인 소유.
+  const ownerId = as.target ? as.target.id : !sharedPoolWriter(c, viewer) ? viewer!.id : (form.get("personal") as string | null) === "true" && viewer ? viewer.id : null;
   const bytes = new Uint8Array(await f.arrayBuffer());
   const detected = detectDocumentFormat(bytes);
   const ext = (f.name.split(".").pop() || "bin").toLowerCase().replace(/[^a-z0-9]/g, "") || "bin";
@@ -820,6 +840,8 @@ app.post("/api/documents/:id/summarize", async (c) => {
   // 전체 점검(2026-11-18) P0: 요약·액션이 응답에 실리므로 다운로드와 같은 읽기 게이트를 둔다
   // (공용 또는 소유자 또는 hr_admin). 이전에는 남의 개인 전사본 id로 요약을 받아 볼 수 있었다.
   const sumViewer = await getSessionUser(c.env, c.req.header("cookie"));
+  // 보안점검(2026-11-22): 요약은 LLM을 부르고 문서 행(summary·actions)을 덮어쓰므로 익명에게 열지 않는다 (공용 문서도 로그인 필요).
+  if (!sumViewer && !adminAllowed(c.env, c.req.header("x-admin-secret"))) return c.json({ ok: false, error: "로그인이 필요합니다." }, 401);
   if (!canRead(sumViewer, doc.owner_id)) return c.json({ ok: false, error: "forbidden" }, 403);
   const r = await summarizeDocument(c.env, id);
   return c.json({ ok: true, id, title: doc.title, summary: r.summary, actions: r.actions, engine: r.engine });
@@ -831,6 +853,9 @@ app.post("/api/documents/:id/summarize", async (c) => {
 // 전사본을 지어내지 않는다.
 app.post("/api/transcribe", async (c) => {
   await ensureSeeded(c.env.DB);
+  // 보안점검(2026-11-22) High: 로그인(또는 X-Admin-Secret) 필수. 이전에는 익명이 25MB 음성을 올려 R2·Whisper를 무제한으로 쓰고
+  // 그 전사본이 공용 풀(owner NULL)에 들어갔다.
+  if (!(await loggedInOrAdmin(c))) return c.json({ ok: false, error: "로그인이 필요합니다." }, 401);
   const form = await c.req.raw.formData().catch(() => null);
   if (!form) return c.json({ ok: false, error: "multipart form-data is required" }, 400);
   const file = form.get("file");
@@ -876,6 +901,7 @@ app.post("/api/transcribe", async (c) => {
 // 개인별 RAG 격리: hr_admin은 전체, 그 외는 공용(owner_id NULL) + 본인 것만.
 app.get("/api/recordings", async (c) => {
   await ensureSeeded(c.env.DB);
+  if (!(await loggedInOrAdmin(c))) return c.json({ ok: false, error: LOGIN_REQUIRED }, 401); // 익명 읽기 차단 (SEC-EX-015)
   const viewer = await getSessionUser(c.env, c.req.header("cookie"));
   const isAdmin = viewer?.role === "hr_admin";
   const { clause, params } = docOwnerClause(viewer, "recordings");
@@ -893,6 +919,7 @@ app.get("/api/recordings", async (c) => {
 
 app.get("/api/recordings/:id", async (c) => {
   await ensureSeeded(c.env.DB);
+  if (!(await loggedInOrAdmin(c))) return c.json({ ok: false, error: LOGIN_REQUIRED }, 401); // 익명 읽기 차단 (SEC-EX-015): 공용 녹음 전사본도 로그인 뒤에만
   const row = await c.env.DB.prepare("SELECT id, title, provider, model, object_key, mime_type, size, transcript, transcript_status, progress, pipeline_stage, pipeline_error, doc_id, owner_id, created_at FROM recordings WHERE id = ?").bind(c.req.param("id"))
     .first<{ id: string; title: string; provider: string; model: string; object_key: string; mime_type: string; size: number; transcript: string | null; transcript_status: string; progress: string | null; doc_id: string | null; owner_id: string | null; created_at: string }>();
   if (!row) return c.json({ ok: false, error: "recording not found" }, 404);
@@ -915,6 +942,8 @@ app.post("/api/recordings/:id/advance", async (c) => {
   const ownerRow = await c.env.DB.prepare("SELECT owner_id FROM recordings WHERE id = ?").bind(c.req.param("id")).first<{ owner_id: string | null }>();
   if (!ownerRow) return c.json({ ok: false, error: "recording not found" }, 404);
   const advViewer = await getSessionUser(c.env, c.req.header("cookie"));
+  // 보안점검(2026-11-22): 전사 이어가기는 Whisper를 부르므로 익명에게 열지 않는다 (공용 녹음도 로그인 필요).
+  if (!advViewer && !adminAllowed(c.env, c.req.header("x-admin-secret"))) return c.json({ ok: false, error: "로그인이 필요합니다." }, 401);
   if (ownerRow.owner_id && (!advViewer || (advViewer.id !== ownerRow.owner_id && advViewer.role !== "hr_admin"))) {
     return c.json({ ok: false, error: "forbidden" }, 403);
   }
@@ -940,6 +969,7 @@ app.post("/api/recordings/:id/retry", async (c) => {
   if (!row) return c.json({ ok: false, error: "recording not found" }, 404);
   // 소유자 게이트: 남의 녹음을 다시 전사시키는 것을 막는다.
   const retryViewer = await getSessionUser(c.env, c.req.header("cookie"));
+  if (!retryViewer && !adminAllowed(c.env, c.req.header("x-admin-secret"))) return c.json({ ok: false, error: "로그인이 필요합니다." }, 401); // 보안점검(2026-11-22): 익명 재전사 금지
   if (row.owner_id && (!retryViewer || (retryViewer.id !== row.owner_id && retryViewer.role !== "hr_admin"))) {
     return c.json({ ok: false, error: "forbidden" }, 403);
   }
@@ -966,6 +996,7 @@ app.post("/api/recordings/:id/pipeline-retry", async (c) => {
   if (!row) return c.json({ ok: false, error: "recording not found" }, 404);
   // 소유자 게이트: 남의 녹음 파이프라인을 다시 돌리는 것을 막는다.
   const pipeViewer = await getSessionUser(c.env, c.req.header("cookie"));
+  if (!pipeViewer && !adminAllowed(c.env, c.req.header("x-admin-secret"))) return c.json({ ok: false, error: "로그인이 필요합니다." }, 401); // 보안점검(2026-11-22): 익명 파이프라인 재시도 금지
   if (row.owner_id && (!pipeViewer || (pipeViewer.id !== row.owner_id && pipeViewer.role !== "hr_admin"))) {
     return c.json({ ok: false, error: "forbidden" }, 403);
   }
@@ -1102,12 +1133,23 @@ async function verifyTacitEvidence(
   return { resolved: false, sources: [] };
 }
 
+// 보안점검(2026-11-22): 질문 입력 검증 (타입·길이). 이전에는 길이 상한이 없어 익명이 수 MB짜리 질문으로 임베딩·LLM·캐시(KV 키 512바이트 초과 →
+// D1 cache 테이블)를 쓸 수 있었다. sessionId는 캐시 키·DO 이름에 들어가므로 200자로 막는다. 통과면 null.
+const MAX_QUESTION_CHARS = 2000;
+function askInputError(body: { question?: unknown; sessionId?: unknown }): string | null {
+  if (typeof body.question !== "string" || body.question.trim().length < 2) return "question is required";
+  if (body.question.length > MAX_QUESTION_CHARS) return `질문은 ${MAX_QUESTION_CHARS}자까지 입력할 수 있습니다.`;
+  if (body.sessionId !== undefined && body.sessionId !== null && (typeof body.sessionId !== "string" || body.sessionId.length > 200)) return "sessionId is invalid";
+  return null;
+}
+
 // ---- ask (RAG) ----
 app.post("/api/ask", async (c) => {
   await ensureSeeded(c.env.DB);
   const body = await c.req.json().catch(() => ({})) as { question?: string; sessionId?: string; turnstileToken?: string; force?: boolean };
-  if (!body.question || body.question.trim().length < 2) return c.json({ ok: false, error: "question is required" }, 400);
-  const question = body.question.trim();
+  const askInput = askInputError(body);
+  if (askInput) return c.json({ ok: false, error: askInput }, 400);
+  const question = body.question!.trim();
   const sessionId = body.sessionId || uid("sess");
   // 처리 시간 측정 (C7): 시작 시각을 runAsk에 넘긴다 (timings.total은 Turnstile·레이트 리밋 포함).
   const t0 = Date.now();
@@ -1123,7 +1165,9 @@ app.post("/api/ask", async (c) => {
   // 제한이 걸리지 않았다. 로그인 사용자는 사용자 id 버킷을, 익명은 기존 세션 버킷에 더해 IP 버킷을 함께 본다.
   // (정상 사용자는 같은 sessionId를 계속 쓰므로 세션 버킷이 먼저 닳는다 — 응답·수치는 기존과 같다.)
   const viewer = await getSessionUser(c.env, c.req.header("cookie"));
-  const rateKey = viewer ? `user:${viewer.id}` : (sessionId || clientIp || "anon");
+  // 보안점검(2026-11-22) Medium: 익명 키에 "sess:" 접두를 붙인다. 이전에는 sessionId를 그대로 키로 써서, 익명이 sessionId에
+  // "user:<남의 id>"·"personal:<id>"·"ip:<주소>"를 넣어 남의 버킷을 대신 소진시킬 수 있었다 (그 사용자는 429).
+  const rateKey = viewer ? `user:${viewer.id}` : `sess:${sessionId || clientIp || "anon"}`;
   let rate = await checkAskRateLimit(c.env, rateKey);
   if (rate.allowed && !viewer && clientIp) {
     const ipRate = await checkAskRateLimit(c.env, `ip:${clientIp}`);
@@ -1204,14 +1248,15 @@ app.post("/api/personal/ask", async (c) => {
   const viewer = await getSessionUser(c.env, c.req.header("cookie"));
   if (!viewer) return c.json({ ok: false, error: "login required" }, 401);
   const body = await c.req.json().catch(() => ({})) as { question?: string; sessionId?: string; force?: boolean; asUserId?: unknown };
-  if (!body.question || body.question.trim().length < 2) return c.json({ ok: false, error: "question is required" }, 400);
+  const askInput = askInputError(body);
+  if (askInput) return c.json({ ok: false, error: askInput }, 400);
   // 관점 선택: hr_admin이 asUserId를 보내면 그 사용자의 개인 풀을 검색한다.
   // DO 세션 키·트레이스 user_id는 실제 요청자(viewer) 그대로 — 검색 범위만 바뀐다.
   const as = await resolveAsUser(c.env, viewer, body.asUserId);
   if (as.error) return c.json({ ok: false, error: as.error }, 400);
   const scopeViewer = as.target ? { id: as.target.id, role: as.target.role } : viewer;
   const scopeOther = !!as.target && as.target.id !== viewer.id;
-  const question = body.question.trim();
+  const question = body.question!.trim();
   const rawSession = (body.sessionId || "").replace(/^personal:/, "");
   const sessionId = `personal:${rawSession || uid("sess")}`;
   const t0 = Date.now();
@@ -1245,6 +1290,13 @@ app.post("/api/feedback", async (c) => {
   if (body.rating !== "up" && body.rating !== "down") return c.json({ ok: false, error: "rating must be 'up' or 'down'" }, 400);
   const row = await c.env.DB.prepare("SELECT id, question, user_id FROM ask_events WHERE id = ?").bind(body.eventId).first<{ id: string; question: string; user_id: string | null }>();
   if (!row) return c.json({ ok: false, error: "event not found" }, 404);
+  // 보안점검(2026-11-22): 로그인 사용자의 질문(user_id 있음)에는 그 사용자(또는 hr_admin·X-Admin-Secret)만 피드백을 남긴다.
+  // 익명 질문(HR 규정 검색)은 기존처럼 eventId를 아는 사람이 남긴다. 남의 질문은 존재를 감추려고 같은 404.
+  if (row.user_id) {
+    const fbViewer = await getSessionUser(c.env, c.req.header("cookie"));
+    const own = !!fbViewer && (fbViewer.id === row.user_id || fbViewer.role === "hr_admin");
+    if (!own && !adminAllowed(c.env, c.req.header("x-admin-secret"))) return c.json({ ok: false, error: "event not found" }, 404);
+  }
   await c.env.DB.prepare("UPDATE ask_events SET feedback = ?, feedback_comment = ?, feedback_at = datetime('now') WHERE id = ?")
     .bind(body.rating, (body.comment || "").slice(0, 500) || null, body.eventId).run();
   // S4: 👍/👎를 trace_scores(user_feedback)에도 남긴다 (스키마 미적용이면 조용히 건너뜀).
@@ -1265,6 +1317,11 @@ app.post("/api/feedback", async (c) => {
 });
 
 // 로그인 세션 또는 X-Admin-Secret(운영 스크립트·관측 화면) 중 하나면 통과.
+// 익명 읽기 차단 (2026-11-22, SEC-EX-015 해소 — 사용자 결정 "읽기도 로그인 필수"): 공용(owner_id NULL) 데이터를 돌려주는 읽기 라우트
+// (/api/home·library·tasks·recordings·documents/coaching·문서·덱 내려받기·seed)도 이 게이트를 지난다. 이전에는 익명이 공용 문서·미지정 할 일·
+// 참여자 없는 성찰을 읽었다. 익명에게 남는 것은 /api/ask(+그 답의 whatif·피드백)·health·config·seed-status·/api/auth/*·웹훅뿐이다.
+// X-Admin-Secret 호출은 세션이 없으므로 예전 익명과 같은 범위(공용만)를 본다.
+const LOGIN_REQUIRED = "로그인이 필요합니다.";
 async function loggedInOrAdmin(c: Context<{ Bindings: Env }>): Promise<boolean> {
   if (adminAllowed(c.env, c.req.header("x-admin-secret"))) return true;
   return (await getSessionUser(c.env, c.req.header("cookie"))) !== null;
@@ -1412,9 +1469,16 @@ function cleanActions(v: unknown, max: number): CoacheeAction[] {
 
 app.post("/api/coaching/reflect", async (c) => {
   await ensureSeeded(c.env.DB);
+  // 보안점검(2026-11-22) High: 로그인(또는 X-Admin-Secret) 필수. 이전에는 익명이 LLM을 무제한으로 부르고, 그 성찰이 참여자 없는 행으로
+  // 저장돼 모두에게(익명 포함) 보였다. 화면은 로그인 뒤에만 이 탭을 연다. X-Admin-Secret 호출은 기존 코치 모드 그대로.
+  if (!(await loggedInOrAdmin(c))) return c.json({ ok: false, error: "로그인이 필요합니다." }, 401);
   const body = await c.req.json().catch(() => ({})) as { transcript?: string; sessionId?: string; counterpartId?: unknown };
+  if (body.transcript !== undefined && typeof body.transcript !== "string") return c.json({ ok: false, error: "transcript must be a string" }, 400);
+  if (body.sessionId !== undefined && (typeof body.sessionId !== "string" || body.sessionId.length > 200)) return c.json({ ok: false, error: "sessionId is invalid" }, 400);
   const transcript = body.transcript || coachingTranscript();
   if (transcript.trim().length < 10) return c.json({ ok: false, error: "transcript is required" }, 400);
+  // 전사본 전체가 reflections 행에 저장된다 (LLM에는 앞 4000자만). D1 행 한도를 넘지 않게 500,000자로 막는다.
+  if (transcript.length > 500_000) return c.json({ ok: false, error: "전사본이 너무 깁니다 (500,000자까지)." }, 413);
   const viewer = await getSessionUser(c.env, c.req.header("cookie"));
   // 참여자 (0020): 작성자 쪽은 항상 서버의 세션 사용자 id. 상대방만 요청의 counterpartId에서 오며,
   // users에 있는 id일 때만 쓴다 (없으면 조용히 NULL). 클라이언트의 coach_id/coachee_id는 읽지 않는다.
@@ -1492,7 +1556,8 @@ app.get("/api/home", async (c) => {
   await ensureSeeded(c.env.DB);
   // 목록 조회는 RAG 검색과 다르다: hr_admin은 관리자 탭에서 전체 문서를 본다.
   // (RAG 검색에서는 hr_admin도 본인 개인 문서만 본다 — vectorUserFilter 참조.)
-  // 일반 사용자·익명은 공용 + 본인 것만 본다. 문서 카운트도 같은 범위로 센다.
+  // 일반 사용자는 공용 + 본인 것만 본다. 문서 카운트도 같은 범위로 센다.
+  if (!(await loggedInOrAdmin(c))) return c.json({ ok: false, error: LOGIN_REQUIRED }, 401); // 익명 읽기 차단 (SEC-EX-015)
   const viewer = await getSessionUser(c.env, c.req.header("cookie"));
   const isAdmin = viewer?.role === "hr_admin";
   const { clause: docClause, params: docParams } = docOwnerClause(viewer, "documents");
@@ -1555,6 +1620,7 @@ function reflectionScope(viewer: { id: string; role: string } | null): { clause:
 // hr_admin: 전체 + ?owner=<userId> | ?owner=unassigned 필터. 그 외: 본인 + 미지정만 (필터 무시).
 app.get("/api/tasks", async (c) => {
   await ensureSeeded(c.env.DB);
+  if (!(await loggedInOrAdmin(c))) return c.json({ ok: false, error: LOGIN_REQUIRED }, 401); // 익명 읽기 차단 (SEC-EX-015)
   const viewer = await getSessionUser(c.env, c.req.header("cookie"));
   const tc = taskOwnerClause(viewer);
   const conds: string[] = tc.clause ? [tc.clause] : [];
@@ -1571,8 +1637,11 @@ app.get("/api/tasks", async (c) => {
 
 app.post("/api/tasks", async (c) => {
   await ensureSeeded(c.env.DB);
+  // 보안점검(2026-11-22): 할 일 만들기·완료·삭제는 로그인(또는 X-Admin-Secret) 필수. 이전에는 익명이 미지정 할 일을 만들고 지울 수 있었다.
+  if (!(await loggedInOrAdmin(c))) return c.json({ ok: false, error: "로그인이 필요합니다." }, 401);
   const body = await c.req.json().catch(() => ({})) as { title?: string; source?: string; ownerId?: unknown };
-  if (!body.title || body.title.trim().length < 1) return c.json({ ok: false, error: "title is required" }, 400);
+  if (typeof body.title !== "string" || body.title.trim().length < 1) return c.json({ ok: false, error: "title is required" }, 400);
+  if (body.source !== undefined && body.source !== null && (typeof body.source !== "string" || body.source.length > 300)) return c.json({ ok: false, error: "source is invalid" }, 400);
   // 0021: 소유자 = 만든 사람 (익명은 NULL = 미지정). hr_admin은 ownerId로 다른 사용자의 할 일을 만든다.
   const viewer = await getSessionUser(c.env, c.req.header("cookie"));
   const as = await resolveAsUser(c.env, viewer, body.ownerId);
@@ -1586,6 +1655,7 @@ app.post("/api/tasks", async (c) => {
 
 app.patch("/api/tasks/:id", async (c) => {
   await ensureSeeded(c.env.DB);
+  if (!(await loggedInOrAdmin(c))) return c.json({ ok: false, error: "로그인이 필요합니다." }, 401); // 보안점검(2026-11-22)
   const id = c.req.param("id");
   const body = await c.req.json().catch(() => ({})) as { done?: boolean };
   const row = await c.env.DB.prepare("SELECT done, owner_id FROM tasks WHERE id = ?").bind(id).first<{ done: number; owner_id: string | null }>();
@@ -1598,6 +1668,7 @@ app.patch("/api/tasks/:id", async (c) => {
 
 app.delete("/api/tasks/:id", async (c) => {
   await ensureSeeded(c.env.DB);
+  if (!(await loggedInOrAdmin(c))) return c.json({ ok: false, error: "로그인이 필요합니다." }, 401); // 보안점검(2026-11-22)
   const id = c.req.param("id");
   const row = await c.env.DB.prepare("SELECT owner_id FROM tasks WHERE id = ?").bind(id).first<{ owner_id: string | null }>();
   if (!row) return c.json({ ok: false, error: "task not found" }, 404);
@@ -1610,6 +1681,8 @@ app.delete("/api/tasks/:id", async (c) => {
 // ---- deck (PPTX 초안, easy-slides식 신규 생성) ----
 app.post("/api/deck", async (c) => {
   await ensureSeeded(c.env.DB);
+  // 보안점검(2026-11-22): 덱 만들기는 로그인(또는 X-Admin-Secret) 필수. 이전에는 익명이 R2에 공용 덱을 무제한으로 만들 수 있었다.
+  if (!(await loggedInOrAdmin(c))) return c.json({ ok: false, error: "로그인이 필요합니다." }, 401);
   const body = await c.req.json().catch(() => ({})) as { title?: string; summary?: string[]; actions?: string[]; bullets?: string[]; source?: string; outline?: unknown };
   // S3: 개요가 오면 개요를 우선으로 쓴다 (고친 문구가 그대로 .pptx에 들어감).
   // 개요가 없으면 기존 요약/액션/bullets 경로 그대로.
@@ -1638,6 +1711,7 @@ app.post("/api/deck", async (c) => {
 
 app.get("/api/deck/:id", async (c) => {
   await ensureSeeded(c.env.DB);
+  if (!(await loggedInOrAdmin(c))) return c.json({ ok: false, error: LOGIN_REQUIRED }, 401); // 익명 읽기 차단 (SEC-EX-015): 공용 덱도 로그인 뒤에만
   const id = c.req.param("id");
   const row = await c.env.DB.prepare("SELECT id, title, r2_key, bytes, owner_id FROM decks WHERE id = ?").bind(id).first<{ id: string; title: string; r2_key: string; bytes: number; owner_id: string | null }>();
   if (!row) return c.json({ ok: false, error: "deck not found" }, 404);
@@ -1888,7 +1962,8 @@ app.get("/api/docx/versions", async (c) => {
 app.get("/api/library", async (c) => {
   await ensureSeeded(c.env.DB);
   // 목록 조회는 RAG 검색과 다르다: hr_admin은 관리자 탭에서 전체 문서를 본다.
-  // (RAG 검색에서는 hr_admin도 본인 개인 문서만 본다.) 일반 사용자·익명은 공용 + 본인 것만.
+  // (RAG 검색에서는 hr_admin도 본인 개인 문서만 본다.) 일반 사용자는 공용 + 본인 것만.
+  if (!(await loggedInOrAdmin(c))) return c.json({ ok: false, error: LOGIN_REQUIRED }, 401); // 익명 읽기 차단 (SEC-EX-015)
   const viewer = await getSessionUser(c.env, c.req.header("cookie"));
   const isAdmin = viewer?.role === "hr_admin";
   const { clause, params } = docOwnerClause(viewer, "documents");
@@ -1933,6 +2008,7 @@ function attachment(title: string, ext: string) {
 // (읽기 범위는 canRead·라이브러리 목록과 같다).
 app.get("/api/documents/coaching", async (c) => {
   await ensureSeeded(c.env.DB);
+  if (!(await loggedInOrAdmin(c))) return c.json({ ok: false, error: LOGIN_REQUIRED }, 401); // 익명 읽기 차단 (SEC-EX-015): 전사본 본문이 나간다
   const viewer = await getSessionUser(c.env, c.req.header("cookie"));
   const isAdmin = viewer?.role === "hr_admin";
   const { clause, params } = docOwnerClause(viewer, "documents");
@@ -1974,6 +2050,7 @@ app.get("/api/users/coaching", async (c) => {
 
 app.get("/api/documents/:id/download", async (c) => {
   await ensureSeeded(c.env.DB);
+  if (!(await loggedInOrAdmin(c))) return c.json({ ok: false, error: LOGIN_REQUIRED }, 401); // 익명 읽기 차단 (SEC-EX-015): 공용 문서도 로그인 뒤에만
   const row = await c.env.DB.prepare("SELECT id, title, kind, content, r2_key, source_r2_key, owner_id FROM documents WHERE id = ?").bind(c.req.param("id"))
     .first<{ id: string; title: string; kind: string; content: string; r2_key: string | null; source_r2_key: string | null; owner_id: string | null }>();
   if (!row) return c.json({ ok: false, error: "document not found" }, 404);
@@ -2107,8 +2184,10 @@ app.get("/api/debug-ai", async (c) => {
   return c.json({ ok: true, ...out });
 });
 
+// 익명 읽기 차단 (SEC-EX-015): 규정 7건 전문과 샘플 전사본이 나가므로 로그인 뒤에만. 화면은 업로드·성찰 탭의 "샘플 불러오기"에서만 부른다.
 app.get("/api/seed", async (c) => {
   await ensureSeeded(c.env.DB);
+  if (!(await loggedInOrAdmin(c))) return c.json({ ok: false, error: LOGIN_REQUIRED }, 401);
   return c.json({ ok: true, sampleTranscript: sampleTranscript(), coachingTranscript: coachingTranscript(), policies: policies() });
 });
 
@@ -2279,7 +2358,8 @@ app.route("/api", authApp);
 // 전체 점검(2026-11-18) P0: 관측·평가 API 전체를 관리자 전용으로 잠근다 (hr_admin 세션 또는 X-Admin-Secret).
 // 이전에는 "읽기 공개(마스킹)" 설계였는데, 개인 업무 검색(origin=personal) 트레이스의 답변·문서 제목과 질문자 이름이
 // 로그인 없이 읽혔고, 평가 실행·공백 승격·프롬프트 초안·사람 점수 같은 쓰기 경로도 익명으로 열려 있었다.
-// 화면의 관측 탭은 원래 hr_admin에게만 보이므로 정상 사용 흐름은 그대로다. 되돌리려면 이 app.use 블록만 지우면 된다.
+// 화면의 관측 탭은 원래 hr_admin에게만 보이므로 정상 사용 흐름은 그대로다.
+// 보안점검(2026-11-22): 이 블록을 지우면 안 된다 — 하위 앱의 읽기·평가 실행·점수 쓰기 핸들러 상당수는 자체 검사가 없어 이 미들웨어가 유일한 게이트다.
 app.use("/api/obs/*", async (c, next) => {
   const cookie = c.req.header("cookie");
   if (await isAdminRequest(c.env, cookie, c.req.header("x-admin-secret"))) return next();
@@ -2456,8 +2536,44 @@ async function startPlaudTranscription(env: Env, ctx: { waitUntil(p: Promise<unk
   return { recordingId: id };
 }
 
+// 보안점검(2026-11-22) High: Worker가 내는 모든 응답(API·다운로드·콜백 화면)에 보안 헤더를 붙인다.
+// 이전에는 정적 파일(public/_headers)에만 nosniff·X-Frame-Options·Referrer-Policy가 있었고 API 응답에는 아무것도 없었으며,
+// HSTS·CSP는 어디에도 없었다. 정적 파일 쪽은 public/_headers에 같은 값을 둔다 (정적 요청은 Worker를 거치지 않는다).
+// - HSTS: 1년. includeSubDomains는 붙이지 않는다 (peopleos.site의 다른 하위 도메인 상태를 확인하지 못했다).
+// - CSP: JSON 응답은 아무것도 불러오지 못하게(default-src 'none'), 그 밖(HTML 콜백 화면·파일 내려받기·영상)은 화면을 깨지 않는 범위
+//   (다른 사이트의 iframe 삽입·<base> 바꿔치기·플러그인·바깥 폼 전송 차단)만. script-src는 인라인 스크립트·onclick이 많아 아직 못 넣는다 (RESULT.md SEC-EX).
+// - WebSocket 업그레이드(101)는 건드리지 않는다. 이미 있는 헤더는 덮어쓰지 않는다 (라우트가 정한 값 우선).
+const BASE_SECURITY_HEADERS: Array<[string, string]> = [
+  ["Strict-Transport-Security", "max-age=31536000"],
+  ["X-Content-Type-Options", "nosniff"],
+  ["X-Frame-Options", "SAMEORIGIN"],
+  ["Referrer-Policy", "strict-origin-when-cross-origin"],
+];
+const CSP_JSON = "default-src 'none'; frame-ancestors 'none'";
+const CSP_OTHER = "frame-ancestors 'self'; base-uri 'self'; object-src 'none'; form-action 'self'";
+function withSecurityHeaders(res: Response): Response {
+  if (res.status === 101 || (res as unknown as { webSocket?: unknown }).webSocket) return res;
+  const apply = (h: Headers) => {
+    for (const [k, v] of BASE_SECURITY_HEADERS) if (!h.has(k)) h.set(k, v);
+    if (!h.has("Content-Security-Policy")) {
+      h.set("Content-Security-Policy", (h.get("content-type") || "").toLowerCase().startsWith("application/json") ? CSP_JSON : CSP_OTHER);
+    }
+  };
+  try {
+    apply(res.headers);
+    return res;
+  } catch {
+    // 헤더를 바꿀 수 없는 응답 (DO·ASSETS·R2 응답을 그대로 중계한 경우): 본문 스트림은 그대로 두고 헤더만 새로 만든다.
+    const headers = new Headers(res.headers);
+    apply(headers);
+    return new Response(res.body, { status: res.status, statusText: res.statusText, headers });
+  }
+}
+
 export default {
-  fetch: app.fetch,
+  async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
+    return withSecurityHeaders(await app.fetch(request, env, ctx));
+  },
   // 메일 수신 (2026-11-17): Email Routing(peopleos.site catch-all → people-os) → 원문 R2 → 파싱 → D1.
   async email(message: ForwardableEmailMessage, env: Env, _ctx: ExecutionContext) {
     await handleInboundEmail(message, env);

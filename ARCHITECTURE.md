@@ -83,7 +83,7 @@
 - **로그인 시도 제한**: 이메일+IP 해시 기준 15분 창에 8회 실패.
 - **최초 관리자**: `POST /api/bootstrap` — `BOOTSTRAP_SECRET`이 있고 사용자가 0명일 때만. 비밀번호 설정 링크는 1회용·24시간.
 - **역할**: `hr_admin` / `user` (관리자 권한), 그와 별개로 `coach` / `coachee` (코칭 역할, 기본 `coachee`). 사이드바 메뉴 분기는 `public/index.html`에 있습니다.
-- **익명 접근**: 질문(HR 규정 검색)은 로그인 없이도 호출됩니다. 익명은 공용 풀만 봅니다. 개인 업무 검색은 로그인 필수.
+- **익명 접근**: 질문(HR 규정 검색)은 로그인 없이도 호출됩니다. 익명에게 열린 것은 이 질문 창뿐이며 공용 풀의 답변만 받습니다. 홈·라이브러리·할 일·녹음·문서 내려받기 같은 읽기와 개인 업무 검색은 로그인 필수 (익명 401, 2026-11-22).
 - **메뉴 순서(사용자 지정)**: 홈, 메일함, 결재함, 캘린더, 할 일, 녹음전사.문서저장, 코칭 리플렉션, 강의실, 워크플로우, 에이전트, 개인 업무 검색, HR 규정 검색, 라이브러리, 관측·평가, 사용자 관리, 조직관리, 소개, 발표자료. (채팅은 플로팅 위젯.)
 
 ### 2.2 질문 (RAG) 11단계
@@ -566,7 +566,7 @@
 | 비밀번호 | PBKDF2-SHA256 10만 회 + 서버 페퍼 HMAC. 페퍼 없으면 거부 |
 | 세션 | 해시만 저장, HttpOnly·Secure·SameSite=Strict, 7일. 비밀번호 변경·초기화 시 전체 무효화 |
 | 로그인 제한 | 이메일+IP 해시, 15분 8회 |
-| 소유자 격리(D1) | `docOwnerClause`/`docOwnerClauseForPool`. 익명은 공용만 |
+| 소유자 격리(D1) | `docOwnerClause`/`docOwnerClauseForPool`. 로그인 사용자는 공용 + 본인 것. 익명은 목록·내려받기를 읽지 못한다 (2026-11-22부터 401 — 익명에게 공용 풀이 닿는 길은 HR 규정 검색 `/api/ask` 답변뿐) |
 | 소유자 격리(벡터) | 메타데이터 `user_id` 필터를 서버에서 강제. 개인 풀에서 viewer가 없으면 아무것도 안 맞는 필터 |
 | 녹음·전사본 | 소유자 있는 녹음은 소유자 본인 또는 `hr_admin`만 (조회·advance·retry·pipeline-retry) |
 | 세션 대화 격리 | DO·D1 세션 키에 viewer id |
@@ -582,7 +582,7 @@
 
 **시크릿 목록 (이름만, 값은 어디에도 두지 않음)**: `ADMIN_SECRET`, `BOOTSTRAP_SECRET`, `PASSWORD_PEPPER` (필수 수준), `RESEND_API_KEY` (메일 발송), `TURNSTILE_SECRET` (선택), `AIG_LOGS_TOKEN` (비용 동기화, 선택), `RTK_API_TOKEN` (화상회의). `wrangler.toml`의 `CF_ACCOUNT_ID`는 비밀이 아닌 `[vars]`입니다.
 
-**공개 읽기 경로**: `GET /api/health`는 로그인 없이 응답하며 바인딩 존재 여부(불리언)만 돌려줍니다. 호출 시 스키마 보장·Vectorize 시딩 워밍업도 합니다. `/api/seed-status`는 시딩 상태만 돌려줍니다. `/api/config`는 Turnstile 사이트 키(공개 값)만 돌려줍니다.
+**공개 읽기 경로**: `GET /api/health`는 로그인 없이 응답하며 바인딩 존재 여부(불리언)만 돌려줍니다. 호출 시 스키마 보장·Vectorize 시딩 워밍업도 합니다. `/api/seed-status`는 시딩 상태만 돌려줍니다. `/api/config`는 Turnstile 사이트 키(공개 값)만 돌려줍니다. 그 밖의 읽기(`/api/home`·`/api/library`·`/api/tasks`·`/api/recordings`·`/api/documents/coaching`·문서·덱 내려받기·`/api/seed`)는 2026-11-22부터 로그인(또는 `X-Admin-Secret`)이 필요하며 익명은 401입니다. **배포 스모크 기준: 익명 `/api/home`은 401** (이전 200).
 
 ---
 

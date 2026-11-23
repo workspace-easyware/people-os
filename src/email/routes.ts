@@ -16,7 +16,7 @@ import type { Context } from "hono";
 import { getSessionUser, isAdminRequest, type SessionUser } from "../auth";
 import { ingestRawEmail, MAX_RAW_BYTES } from "./inbound";
 import { extractAddresses, normalizeSubject } from "./mime";
-import { EMAIL_DOMAIN, localPartFor, ResendNotConfigured, sendEmail } from "./send";
+import { DAILY_SEND_LIMIT, dailySendLimitReached, EMAIL_DOMAIN, localPartFor, ResendNotConfigured, sendEmail } from "./send";
 import { uid } from "../lib";
 
 export type EmailRouteEnv = {
@@ -186,13 +186,16 @@ emailApp.post("/send", async (c) => {
   const b = await readJson(c);
   const to = addrList(b.to);
   const cc = addrList(b.cc);
-  const subject = typeof b.subject === "string" ? b.subject.trim().slice(0, 300) : "";
+  // 보안점검(2026-11-22): 제목의 줄바꿈을 지운다 (헤더 주입 방어 — 워크플로우 send_email과 같은 처리).
+  const subject = typeof b.subject === "string" ? b.subject.replace(/[\r\n]+/g, " ").trim().slice(0, 300) : "";
   const text = typeof b.text === "string" ? b.text.slice(0, 100_000) : "";
   const html = typeof b.html === "string" && b.html.trim() ? b.html.slice(0, 200_000) : undefined;
   if (!to.length) return fail(c, 400, "받는 사람 주소가 올바르지 않습니다.");
   if (to.length + cc.length > 20) return fail(c, 400, "받는 사람은 20명까지입니다.");
   if (!subject) return fail(c, 400, "제목을 입력하세요.");
   if (!text.trim() && !html) return fail(c, 400, "본문을 입력하세요.");
+  // 보안점검(2026-11-22) Medium: 하루 발송 상한 (src/email/send.ts DAILY_SEND_LIMIT).
+  if (await dailySendLimitReached(c.env.DB, v.id)) return fail(c, 429, `하루에 보낼 수 있는 메일 수(${DAILY_SEND_LIMIT}통)를 넘었습니다. 내일 다시 시도해 주세요.`);
 
   let threadId: string | null = null;
   const headers: Record<string, string> = {};

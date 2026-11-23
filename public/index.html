@@ -1307,7 +1307,9 @@ function copySummary() {
   if (navigator.clipboard) navigator.clipboard.writeText(text).then(() => alert('요약을 복사했습니다.'));
   else alert(text);
 }
-function esc(s) { return String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); }
+// 보안점검(2026-11-22) High: 따옴표도 이스케이프한다. 이전에는 & < >만 바꿔서, 속성 안에 esc()를 쓴 곳
+// (예: 라이브러리 목록의 data-title="${esc(x.title)}")에서 제목의 "로 속성을 닫고 이벤트 핸들러를 넣을 수 있었다 (저장형 XSS).
+function esc(s) { return String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;'); }
 // 브리핑 본문(AI가 마크다운으로 쓰기도 함) → 안전한 HTML. 이스케이프 후 제목·목록·굵게만 변환한다 (의존성 없음).
 function renderDigestBody(md) {
   const inline = (t) => esc(t).replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>').replace(/`([^`]+)`/g, '$1');
@@ -1696,7 +1698,7 @@ function renderLibFiles() {
     const editable = x.type === 'deck' || (x.type === 'upload' && x.hasSource && !x.failed && (x.sourceKind === 'pptx' || x.sourceKind === 'xlsx' || x.sourceKind === 'docx' || !x.sourceKind));
     const editCall = x.sourceKind === 'docx' ? `openDocxEdit('${esc(x.id)}', this.dataset.title)` : `openDocEdit('${x.type}','${esc(x.id)}', this.dataset.title)`;
     const editBtn = currentUser && editable
-      ? `<button class="secondary" onclick="${editCall}" data-title="${esc(x.title)}">편집본 만들기</button> `
+      ? `<button class="secondary" onclick="${editCall}" data-title="${escAttr(x.title)}">편집본 만들기</button> `
       : currentUser && x.type === 'upload' && x.hasSource && !x.failed
         ? `<span class="small muted" title="편집본 만들기는 PPTX·XLSX·DOCX만 됩니다">편집 미지원 형식</span> ` : '';
     // 문서 행의 제목을 누르면 요약 화면(녹음전사·문서저장 > 문서)으로 열린다 (덱·변환 실패 문서 제외).

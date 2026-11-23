@@ -394,6 +394,9 @@ export class ThinkAgent extends Think<Env> {
       this.log("toolBlocked", { tool: name, why, toolCallId: ctx.toolCallId });
       return { action: "block", reason };
     };
+    // 보안점검(2026-11-22) Low: 이 단계에 허용된 도구(job.tools)인지 실행 직전에 다시 본다. 이전에는 activeTools로 좁히기만 해서,
+    // 모델이 등록은 됐지만 꺼 둔 도구를 부르면 SDK 동작에 기대야 했다 (AssistantAgent·ResearchAgent·legacy는 이미 다시 확인한다).
+    if (!job.tools.includes(name as ToolNodeType)) return block("tool_not_allowed", "이 단계에서 쓸 수 없는 도구입니다.");
     const cur = this.stop();
     if (cur) return block(cur, cur === "approval_required" ? "다른 동작이 승인을 기다리고 있어 실행하지 않았습니다." : "한도에 걸려 더 실행하지 않습니다.");
     if (Date.now() - this.num("activeSinceMs") > this.limits().timeoutMs) {

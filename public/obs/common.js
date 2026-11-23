@@ -27,7 +27,8 @@
   fill('config', { base: '', fixtures: null, adminSecret: null });
 
   function esc(s) {
-    return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    // 보안점검(2026-11-22): 따옴표도 이스케이프한다 (속성 안에 esc만 쓴 곳의 속성 탈출 방어 — index.html esc와 같은 규칙).
+    return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
   }
   function escAttr(s) { return esc(s).replace(/"/g, '&quot;').replace(/'/g, '&#39;'); }
 
