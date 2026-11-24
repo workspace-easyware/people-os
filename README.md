@@ -172,13 +172,14 @@ npx wrangler dev --local
 
 | 리소스 | 이름·설정 |
 |---|---|
+| Workers | 메인 `people-os` + 문서 편집 전용 `people-os-doc-editor` (`pptx-editor/`, 본체보다 먼저 배포) |
 | D1 | `people-os-db` — `migrations/` 0001~0046 적용 |
 | Durable Objects | 클래스 8개 (`wrangler.toml`의 `[[migrations]]` 태그 v1~v3) — 배포할 때 자동 적용 |
 | Cron Triggers | `0 22 * * *`(07:00 KST), `0 18 * * *`(03:00 KST), `*/15 * * * *`(워크플로우 스케줄) |
 | KV | 네임스페이스 1개 (바인딩 `CACHE`) |
 | R2 | `people-os-files` |
 | Vectorize | `people-os-index-m3`, **1024차원**, 코사인 |
-| Queues | `people-os-pipeline`, `people-os-pipeline-dlq` |
+| Queues | `people-os-pipeline`, `people-os-pipeline-dlq`, `people-os-docx-jobs`, `people-os-doc-jobs` |
 | AI Gateway | `people-os` (CLI로 만들 수 없음 — 대시보드에서 생성) |
 | Email Routing | 선택 — 쓰려면 도메인의 catch-all을 Worker로 연결하고 `EMAIL_DOMAIN`(`src/email/send.ts`)을 바꿉니다 |
 
@@ -194,12 +195,21 @@ npx wrangler dev --local
 | `RESEND_API_KEY` | 메일 발송 (선택) | 발송 503 |
 | `TURNSTILE_SECRET` | 질문 폼 봇 확인 (선택) | 검증 건너뜀 |
 | `AIG_LOGS_TOKEN` | AI Gateway 비용 동기화 (선택) | 동기화 안내 오류만 |
+| `RTK_API_TOKEN` | 화상회의 (RealtimeKit) (선택) | 화상회의 생성 불가 |
 | `GOOGLE_CLIENT_ID` | 캘린더 구글 연동 OAuth (선택) | 구글 연동 꺼짐 |
 | `GOOGLE_CLIENT_SECRET` | 캘린더 구글 연동 OAuth (선택) | 구글 연동 꺼짐 |
 | `GCAL_TOKEN_KEY` | 구글 토큰 암호화 키 (선택) | 구글 연동 꺼짐 |
 
 ```bash
+# 큐를 먼저 만듭니다 (없으면 배포 시 바인딩 오류):
+npx wrangler queues create people-os-pipeline
+npx wrangler queues create people-os-pipeline-dlq
+npx wrangler queues create people-os-docx-jobs
+npx wrangler queues create people-os-doc-jobs
 npx wrangler d1 migrations apply people-os-db --remote
+# 문서 편집 전용 Worker를 먼저 배포합니다 (본체가 서비스 바인딩 DOC_EDITOR로 부릅니다).
+# 시크릿이 필요 없고 공개 주소도 없습니다 (서비스 바인딩으로만 호출):
+cd pptx-editor && npx wrangler deploy && cd ..
 npx wrangler deploy
 # 최초 관리자 생성 (사용자가 0명일 때만 동작):
 #   POST /api/bootstrap  { secret, email, name, password(12~128자) }
