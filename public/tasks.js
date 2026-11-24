@@ -363,11 +363,15 @@
     var tail = t.done
       ? '<button type="button" class="tk-ib tk-del" data-act="delete" title="삭제" aria-label="삭제">' + ico('trash') + '</button>'
       : '<button type="button" class="tk-ib tk-star' + (t.starred ? ' on' : '') + '" data-act="star" title="' + (t.starred ? '별표 해제' : '별표') + '" aria-label="' + (t.starred ? '별표 해제' : '별표') + '" aria-pressed="' + !!t.starred + '">' + ico('star') + '</button>';
-    var main = '<span class="t-title">' + esc(t.title) + '</span>' + (meta.length ? '<span class="tk-meta">' + meta.join('') + '</span>' : '');
+    // 모바일 2줄 행: 담당자·출처 사본(.m-only)을 메타 줄 안에 둔다 (데스크톱은 .m-only가 숨김, 원본은 모바일에서 숨김).
+    var src = taskSrcHtml(t.source);
+    var mcopy = owner.replace('class="badge', 'class="m-only badge') + src.replace('class="t-src', 'class="m-only t-src');
+    var main = '<span class="t-title">' + esc(t.title) + '</span>' +
+      (meta.length || mcopy ? '<span class="tk-meta' + (meta.length ? '' : ' tk-mo') + '">' + meta.join('') + mcopy + '</span>' : '');
     return '<div class="taskrow tk-row' + (sub ? ' tk-sub' : '') + (t.done ? ' done' : '') + (open ? ' tk-open' : '') + '" data-id="' + id + '">' +
       '<input type="checkbox" data-act="toggle" aria-label="' + (t.done ? '완료 취소' : '완료') + '"' + (t.done ? ' checked' : '') + ' />' +
       (t.done ? '<div class="tk-main">' + main + '</div>' : '<button type="button" class="tk-main" data-act="open" aria-expanded="' + open + '">' + main + '</button>') +
-      owner + taskSrcHtml(t.source) + tail + '</div>' + (open ? detailHtml(t) : '');
+      owner + src + tail + '</div>' + (open ? detailHtml(t) : '');
   }
 
   function detailHtml(t) {
