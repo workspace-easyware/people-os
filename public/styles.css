@@ -227,6 +227,9 @@ button.iconbtn:hover{color:var(--color-danger);background:var(--color-err-bg)}
 .taskrow .t-title{flex:1;min-width:0;overflow-wrap:break-word}
 .taskrow.done .t-title{text-decoration:line-through;color:var(--color-muted)}
 .taskrow .t-src{color:var(--color-muted);font-size:var(--text-xs);white-space:nowrap;font-variant-numeric:tabular-nums}
+/* 홈 행 메타 래퍼 (2026-11-25): 데스크톱에서는 박스를 만들지 않아 기존 배치 그대로. 모바일 2줄 배치는 아래 @media(max-width:760px) 안에서만 켠다. */
+.taskrow .t-meta{display:contents}
+.taskrow .m-only{display:none}
 .t-title .email-dot{display:inline-block;margin-right:8px;vertical-align:1px}
 
 /* §9 라이브러리 카드 */
@@ -314,6 +317,29 @@ li.decisive-src{border-left:3px solid var(--color-ok-line)}
   #homeEmail .taskrow .t-title{flex:1 1 100%;display:-webkit-box;-webkit-line-clamp:1;line-clamp:1;-webkit-box-orient:vertical;overflow:hidden;font-size:var(--text-base);line-height:1.45}
   #homeEmail .taskrow .badge{max-width:60%;overflow:hidden;text-overflow:ellipsis}
   #homeEmail .taskrow .t-src{margin-left:auto;flex-shrink:0}
+  /* 홈 2줄 행 (2026-11-25): 1줄째 제목(최대 2줄), 2줄째 메타 한 줄(· 구분, 12px 회색). 메일 카드는 위 규칙 그대로. */
+  :is(#homeTasks,#homeDocs,#homeRefl,#homeWorkflow,#homeAgentActivity) .taskrow{display:grid;grid-template-columns:minmax(0,1fr);gap:2px 10px;align-items:center;min-height:48px}
+  :is(#homeTasks,#homeDocs,#homeRefl,#homeWorkflow,#homeAgentActivity) .taskrow .t-title{grid-column:1/-1;grid-row:1;min-width:0;font-size:var(--text-base);line-height:1.45}
+  :is(#homeTasks,#homeDocs,#homeRefl,#homeWorkflow,#homeAgentActivity) .taskrow .t-meta{display:block;grid-column:1/-1;grid-row:2;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:var(--text-xs);line-height:18px;color:var(--color-muted)}
+  :is(#homeTasks,#homeDocs,#homeRefl,#homeWorkflow,#homeAgentActivity) .taskrow .t-meta>*{display:inline;background:none;border:0;border-radius:0;padding:0;font-size:var(--text-xs);line-height:18px;font-weight:400;color:var(--color-muted);vertical-align:baseline}
+  :is(#homeTasks,#homeDocs,#homeRefl,#homeWorkflow,#homeAgentActivity) .taskrow .t-meta>[hidden]{display:none}
+  :is(#homeTasks,#homeDocs,#homeRefl,#homeWorkflow,#homeAgentActivity) .taskrow .t-meta>*:not([hidden])~*:not([hidden])::before{content:"·";margin:0 6px}
+  /* 할 일: 체크박스 | 제목+메타 | 삭제 */
+  #homeTasks .taskrow{grid-template-columns:auto minmax(0,1fr) auto}
+  #homeTasks .taskrow>input[type=checkbox]{grid-column:1;grid-row:1/3;width:22px;height:22px;margin:0 2px}
+  #homeTasks .taskrow>.badge{display:none}
+  #homeTasks .taskrow .t-title,#homeTasks .taskrow .t-meta{grid-column:2}
+  #homeTasks .taskrow>.iconbtn{grid-column:3;grid-row:1/3;min-width:44px;height:44px}
+  /* 에이전트 활동: 앞쪽 출처 배지는 메타 줄의 사본으로 대체. 제목 블록(what + result)은 2줄 */
+  #homeAgentActivity .taskrow>.badge{display:none}
+  #homeAgentActivity .taskrow .t-title .small{font-size:var(--text-xs);line-height:1.45}
+  .taskrow .m-only{display:inline}
+  /* 브리핑: 내용은 그대로, 여백만 */
+  #homeDigest p,#homeDigest li{line-height:1.7}
+  #homeDigest p{margin:0 0 10px}
+  #homeDigest ul{margin:0 0 10px;padding-left:20px}
+  #homeDigest li{margin-bottom:4px}
+  #homeDigest p.small:last-child{margin-top:12px;margin-bottom:0}
 }
 
 /* 페이지 내 확인 대화상자·토스트 (public/ui-dialog.js, 2026-11-21 — 네이티브 confirm 대체) */

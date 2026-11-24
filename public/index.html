@@ -1385,7 +1385,9 @@ function fmtDate(s) {
 function taskRow(t) {
   // 0021: 담당자 이름 (owner_id NULL → "미지정").
   const owner = `<span class="badge${t.owner_id ? '' : ' warn'}" title="담당자">${esc(t.owner_name || '미지정')}</span>`;
-  return `<div class="taskrow${t.done ? ' done' : ''}"><input type="checkbox" ${t.done ? 'checked' : ''} onchange="toggleTask('${t.id}')" />${owner}<span class="t-title">${esc(t.title)}</span>${taskSrcHtml(t.source)}<button class="iconbtn" title="삭제" onclick="deleteTask('${t.id}')">×</button></div>`;
+  // 모바일 홈: 메타(담당자·출처)를 한 줄로 모으려고 담당자 사본을 .t-meta 안에 둔다 (데스크톱은 .m-only가 숨김, 원본 배지는 모바일에서 숨김).
+  const ownerM = owner.replace('class="badge', 'class="m-only badge');
+  return `<div class="taskrow${t.done ? ' done' : ''}"><input type="checkbox" ${t.done ? 'checked' : ''} onchange="toggleTask('${t.id}')" />${owner}<span class="t-title">${esc(t.title)}</span><span class="t-meta">${ownerM}${taskSrcHtml(t.source)}</span><button class="iconbtn" title="삭제" onclick="deleteTask('${t.id}')">×</button></div>`;
 }
 // 할 일 출처 표시: 내부 식별자(`workflow:<id>` 등 "종류:영숫자 id" 꼴)는 그대로 보여주지 않는다.
 // 워크플로우는 이름을 알아내면 이름으로 바꾸고(taskSrcResolve), 모르면 출처를 숨긴 채 둔다. 사람이 쓴 출처(문서 제목 등)는 그대로다.
@@ -1453,7 +1455,7 @@ async function loadHome() {
   void emP;
   const adminHome = isAdminUser();
   $('homeDocs').innerHTML = j.recentDocuments.length
-    ? j.recentDocuments.map(d => `<div class="taskrow"><span class="t-title">${esc(d.title)}</span><span class="badge">${esc(d.kind)}</span>${adminHome ? `<span class="badge" title="소유자">${esc(d.owner_name || '공용')}</span>` : ''}<span class="t-src">${fmtDate(d.created_at)}</span></div>`).join('')
+    ? j.recentDocuments.map(d => `<div class="taskrow"><span class="t-title">${esc(d.title)}</span><span class="t-meta"><span class="badge">${esc(d.kind)}</span>${adminHome ? `<span class="badge" title="소유자">${esc(d.owner_name || '공용')}</span>` : ''}<span class="t-src">${fmtDate(d.created_at)}</span></span></div>`).join('')
     : '<p class="empty">아직 문서가 없습니다.</p>';
   // 0021: 사용자별 집계 (hr_admin 전용 — 서버가 byUser를 hr_admin에게만 준다).
   $('homeByUserCard').style.display = j.byUser ? '' : 'none';
@@ -1473,7 +1475,7 @@ async function loadHome() {
         let pats = [];
         try { pats = JSON.parse(r.patterns || '[]'); } catch { pats = []; }
         const who = adminHome ? `<span class="badge" title="코치 → 코칭 대상">${esc(r.coach_name || '미지정')} → ${esc(r.coachee_name || '미지정')}</span>` : '';
-        return `<div class="taskrow"><span class="t-title">${esc(pats[0] || '성찰')}</span>${who}<span class="t-src">${fmtDate(r.created_at)}</span></div>`;
+        return `<div class="taskrow"><span class="t-title">${esc(pats[0] || '성찰')}</span><span class="t-meta">${who}<span class="t-src">${fmtDate(r.created_at)}</span></span></div>`;
       }).join('')
     : '<p class="empty">아직 성찰이 없습니다.</p>';
   lmsHomeCard();

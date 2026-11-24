@@ -840,8 +840,9 @@ async function wfHomeCard(box) {
     for (const r of runs) {
       box.append(wfEl('div', { class: 'taskrow', style: 'cursor:pointer', onclick: () => switchTab('workflow/' + r.workflow_id + '?run=' + r.id) },
         wfEl('span', { class: 't-title', text: r.wfName }),
-        wfBadge(WF_RUN_KO[r.status] || r.status, wfRunCls(r.status)),
-        wfEl('span', { class: 't-src', text: wfFmtTime(r.started_at) })));
+        wfEl('span', { class: 't-meta' },
+          wfBadge(WF_RUN_KO[r.status] || r.status, wfRunCls(r.status)),
+          wfEl('span', { class: 't-src', text: wfFmtTime(r.started_at) }))));
     }
   } catch { box.textContent = ''; }
 }

@@ -72,8 +72,11 @@
         '<span class="badge">' + h(SOURCE_LABEL[it.source] || it.source) + '</span>' +
         '<span class="t-title">' + h(it.what) + '<br><span class="small">' + h(it.result) +
         (it.needsReview && it.reviewHint ? ' — ' + h(it.reviewHint) : '') + '</span></span>' +
+        '<span class="t-meta">' +
+        // 모바일 메타 한 줄용 출처 라벨 사본 (데스크톱은 .m-only가 숨기고, 원래 앞쪽 배지는 모바일에서 숨긴다)
+        '<span class="m-only badge">' + h(SOURCE_LABEL[it.source] || it.source) + '</span>' +
         owner + statusBadge(it) +
-        '<span class="t-src">' + h(when(it.at)) + '</span></div>';
+        '<span class="t-src">' + h(when(it.at)) + '</span></span></div>';
     }).join('');
     if (canGo) {
       el.querySelectorAll('[data-agent-tab]').forEach(function (row) {
