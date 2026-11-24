@@ -135,6 +135,7 @@ async function apvAct(action) {
   // 2026-11-22: 네이티브 confirm() → 페이지 내 대화상자 (자동화·내장 브라우저에서 확인창 없이 취소되던 문제).
   if (action === 'FORCE_REJECT' && !(await uiConfirm('완료된 문서를 강제 반려합니다. 계속할까요?', { title: '강제 반려', okText: '강제 반려', danger: true }))) return;
   if (action === 'RECALL' && !(await uiConfirm('회수하면 결재선이 처음으로 돌아갑니다. 계속할까요?', { title: '문서 회수', okText: '회수' }))) return;
+  if (action === 'APPROVE' && !(await uiConfirm('승인합니다. 계속할까요?', { title: '승인', okText: '승인' }))) return;
   if (!apvDoc || apvDoc.id !== d.id) return; // 대화상자가 떠 있는 동안 다른 문서로 옮겨 갔으면 하지 않는다
   document.querySelectorAll('#apvDetailCard .apv-actions button').forEach(b => b.disabled = true);
   let j;
@@ -143,6 +144,7 @@ async function apvAct(action) {
   if (!j.ok) { apvRenderDetail(d, j.error || '처리하지 못했습니다.'); return; }
   if (j.document) apvRenderDetail(j.document); else apvBack();
   apvHome();
+  if (action === 'APPROVE') ntfToast({ title: '승인했습니다' });
 }
 
 // ---- 새 기안 · 수정 ----
