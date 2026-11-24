@@ -708,7 +708,7 @@ function switchTab(name, fromHash) {
   if (name === 'upload') { setUpPane('voice'); loadRecordings(); renderPerspectives(); }
   if (name === 'personal') renderPerspectives();
   if (name === 'tasks') loadTasks();
-  if (name === 'library') refreshLib();
+  if (name === 'library') libRefreshP = refreshLib();
   if (name === 'email') emailOpen();
   if (name === 'approval') apvOpen(sub);
   if (name === 'coaching') loadCoachingPickers();
@@ -1387,7 +1387,9 @@ function taskRow(t) {
   const owner = `<span class="badge${t.owner_id ? '' : ' warn'}" title="담당자">${esc(t.owner_name || '미지정')}</span>`;
   // 모바일 홈: 메타(담당자·출처)를 한 줄로 모으려고 담당자 사본을 .t-meta 안에 둔다 (데스크톱은 .m-only가 숨김, 원본 배지는 모바일에서 숨김).
   const ownerM = owner.replace('class="badge', 'class="m-only badge');
-  return `<div class="taskrow${t.done ? ' done' : ''}"><input type="checkbox" ${t.done ? 'checked' : ''} onchange="toggleTask('${t.id}')" />${owner}<span class="t-title">${esc(t.title)}</span><span class="t-meta">${ownerM}${taskSrcHtml(t.source)}</span><button class="iconbtn" title="삭제" onclick="deleteTask('${t.id}')">×</button></div>`;
+  // 행 전체를 누르면 할 일 탭에서 해당 할 일을 펼친다. 체크박스·×는 클릭이 행으로 올라가지 않게 막는다.
+  const open = `window.openTaskDetail&&openTaskDetail('${escAttr(t.id)}')`;
+  return `<div class="taskrow${t.done ? ' done' : ''}" ${homeClick(open).replace("if(event.key==='Enter'){", "if(event.key==='Enter'&&event.target===this){")}><input type="checkbox" ${t.done ? 'checked' : ''} onclick="event.stopPropagation()" onchange="toggleTask('${t.id}')" />${owner}<span class="t-title">${esc(t.title)}</span><span class="t-meta">${ownerM}${taskSrcHtml(t.source)}</span><button class="iconbtn" title="삭제" onclick="event.stopPropagation();deleteTask('${t.id}')">×</button></div>`;
 }
 // 할 일 출처 표시: 내부 식별자(`workflow:<id>` 등 "종류:영숫자 id" 꼴)는 그대로 보여주지 않는다.
 // 워크플로우는 이름을 알아내면 이름으로 바꾸고(taskSrcResolve), 모르면 출처를 숨긴 채 둔다. 사람이 쓴 출처(문서 제목 등)는 그대로다.
@@ -1412,15 +1414,30 @@ async function taskSrcResolve(box) {
   }
 }
 let homeSeq = 0, homeCounts = null, homeEm = null;
+// 홈 → 라이브러리 항목 열기 (문서: 요약 화면, 성찰: 전체 화면 상세). switchTab('library')가 시작한 refreshLib를 기다린 뒤 id로 항목을 찾는다.
+let libRefreshP = null;
+async function homeOpenLib(kind, id) {
+  switchTab('library');
+  try { await libRefreshP; } catch {}
+  if (kind === 'doc') { libOpenDoc(id); return; }
+  const i = libRefls.findIndex(r => r.id === id);
+  if (i < 0) return;
+  setLibTab('reflections');
+  openLibDetail('refl', i);
+}
+// 클릭 가능한 홈 요소 공통 속성 (키보드: Enter).
+function homeClick(js) {
+  return `style="cursor:pointer" tabindex="0" role="button" onclick="${js}" onkeydown="if(event.key==='Enter'){${js}}"`;
+}
 function renderHomeStats() {
   if (!homeCounts) return;
   const c = homeCounts, em = homeEm;
-  // 홈 통계도 메뉴 순서에 맞춘다: 안 읽은 메일 → 해야 할 일 → 문서 → 성찰.
+  // 홈 통계도 메뉴 순서에 맞춘다: 안 읽은 메일 → 해야 할 일 → 문서 → 성찰. 카드를 누르면 해당 메뉴로 이동.
   $('homeStats').innerHTML =
-    `<div class="stat"><b>${em && em.ok ? em.unread : '—'}</b><span>안 읽은 메일</span></div>` +
-    `<div class="stat"><b>${c.openTasks}</b><span>해야 할 일</span></div>` +
-    `<div class="stat"><b>${c.documents}</b><span>문서</span></div>` +
-    `<div class="stat"><b>${c.reflections}</b><span>성찰</span></div>`;
+    `<div class="stat" ${homeClick("switchTab('email')")}><b>${em && em.ok ? em.unread : '—'}</b><span>안 읽은 메일</span></div>` +
+    `<div class="stat" ${homeClick("switchTab('tasks')")}><b>${c.openTasks}</b><span>해야 할 일</span></div>` +
+    `<div class="stat" ${homeClick("switchTab('library')")}><b>${c.documents}</b><span>문서</span></div>` +
+    `<div class="stat" ${homeClick("switchTab('coaching')")}><b>${c.reflections}</b><span>성찰</span></div>`;
 }
 // 메일함 카드 (최근 5건, 안 읽은 것부터 — 클릭하면 해당 메일 상세로).
 function renderHomeEmail(em) {
@@ -1455,7 +1472,7 @@ async function loadHome() {
   void emP;
   const adminHome = isAdminUser();
   $('homeDocs').innerHTML = j.recentDocuments.length
-    ? j.recentDocuments.map(d => `<div class="taskrow"><span class="t-title">${esc(d.title)}</span><span class="t-meta"><span class="badge">${esc(d.kind)}</span>${adminHome ? `<span class="badge" title="소유자">${esc(d.owner_name || '공용')}</span>` : ''}<span class="t-src">${fmtDate(d.created_at)}</span></span></div>`).join('')
+    ? j.recentDocuments.map(d => `<div class="taskrow" ${homeClick(`homeOpenLib('doc','${escAttr(d.id)}')`)}><span class="t-title">${esc(d.title)}</span><span class="t-meta"><span class="badge">${esc(d.kind)}</span>${adminHome ? `<span class="badge" title="소유자">${esc(d.owner_name || '공용')}</span>` : ''}<span class="t-src">${fmtDate(d.created_at)}</span></span></div>`).join('')
     : '<p class="empty">아직 문서가 없습니다.</p>';
   // 0021: 사용자별 집계 (hr_admin 전용 — 서버가 byUser를 hr_admin에게만 준다).
   $('homeByUserCard').style.display = j.byUser ? '' : 'none';
@@ -1475,7 +1492,7 @@ async function loadHome() {
         let pats = [];
         try { pats = JSON.parse(r.patterns || '[]'); } catch { pats = []; }
         const who = adminHome ? `<span class="badge" title="코치 → 코칭 대상">${esc(r.coach_name || '미지정')} → ${esc(r.coachee_name || '미지정')}</span>` : '';
-        return `<div class="taskrow"><span class="t-title">${esc(pats[0] || '성찰')}</span><span class="t-meta">${who}<span class="t-src">${fmtDate(r.created_at)}</span></span></div>`;
+        return `<div class="taskrow" ${homeClick(`homeOpenLib('refl','${escAttr(r.id)}')`)}><span class="t-title">${esc(pats[0] || '성찰')}</span><span class="t-meta">${who}<span class="t-src">${fmtDate(r.created_at)}</span></span></div>`;
       }).join('')
     : '<p class="empty">아직 성찰이 없습니다.</p>';
   lmsHomeCard();
