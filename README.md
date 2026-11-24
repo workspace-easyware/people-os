@@ -125,6 +125,32 @@
 
 판단 모델은 고르기만 하고 글을 쓰지 않습니다. 쓰는 모델은 판단 모델이 통과시킨 근거만 받습니다. AI 판단 단계가 실패하면 그 단계를 건너뜁니다(fail-open).
 
+## 오픈소스·외부 코드 출처
+
+이 프로젝트는 아래 오픈소스·외부 코드를 사용하거나 참고했습니다. 의존성으로 직접 쓴 것, 패턴·개념만 참고한 것, 검토만 하고 채택하지 않은 것을 구분했습니다. 설계 근거는 [ARCHITECTURE.md §11](ARCHITECTURE.md#11-참고한-것)에 있습니다.
+
+| 프로젝트 | 용도 | 사용 형태 | 라이선스 | 링크 |
+|---|---|---|---|---|
+| `@cloudflare/think` 0.23.0 (+ `agents` 0.33.0 · `ai` 7.0.177 · `zod` 4.6.7 · `@cloudflare/computer` 0.8.0 · `@modelcontextprotocol/client` 2.4.0 · `just-bash` 3.6.1) | 에이전트 런타임 (워크플로우 `agent` 노드·어시스턴트) | 의존성으로 사용 | MIT | https://github.com/cloudflare/agents |
+| `ooxml-core` 2.0.0 | PPTX·Word 기존 파일 편집 (문서 편집 전용 Worker) | 의존성으로 사용 | Apache-2.0 | https://github.com/ChristopherVR/ooxml |
+| `xlvane` 1.3.4 | XLSX 편집 | 의존성으로 사용 | MIT | https://xlvane.github.io |
+| `docx` 9.16.0 | Word 생성 | 의존성으로 사용 | MIT | https://github.com/dolanmiu/docx |
+| `pptxgenjs` 4.0.1 | PPTX 생성 | 의존성으로 사용 | MIT | https://github.com/gitbrent/PptxGenJS |
+| `hono` 4.6.0 | 웹 프레임워크 | 의존성으로 사용 | MIT | https://github.com/honojs/hono |
+| `fflate` 0.8.3 | ZIP 해제 (HWPX) | 의존성으로 사용 | MIT | https://github.com/101arrowz/fflate |
+| `FullCalendar` 6.1.22 | 캘린더 UI (벤더 파일 동봉, `LICENSE.md` 포함) | 직접 사용 | MIT | https://github.com/fullcalendar/fullcalendar |
+| Cloudflare OS | 에이전트 승인 큐·화면 구성 개념 | 패턴만 참고 (설치·포크 안 함) | Apache 2.0 | https://github.com/cloudflare/cloudflare-os |
+| Cloudflare Agentic Inbox | 메일 수신 패턴 (원문 선저장·스레딩·초안만 작성) | 패턴만 참고 | Apache 2.0 | https://github.com/cloudflare/agentic-inbox |
+| Cloudflare Meet | 화상회의 구조 | 패턴만 참고 (실제 구현은 아래 RealtimeKit) | Apache 2.0 | https://github.com/cloudflare/meet |
+| Cloudflare workflows-starter | Cloudflare Workflows 개념·구조 | 패턴만 참고 | Apache 2.0 | https://github.com/cloudflare/workflows-starter |
+| RealtimeKit (`@cloudflare/realtimekit`) | 화상회의 실제 구현 (jsDelivr CDN으로 SDK 로드) | 상용 서비스 (오픈소스 아님) | — | https://www.npmjs.com/package/@cloudflare/realtimekit |
+| Dify | 워크플로우 빌더 검토 | 검토만 (미채택 — 계속 켜져 있는 서버가 필요해 Workers-only와 안 맞음) | Dify Open Source License | https://github.com/langgenius/dify |
+| Flowise | 워크플로우 빌더 검토 | 검토만 (미채택 — 2026-11-17 확인 시 저장소 아카이브됨) | Apache 2.0 | https://github.com/FlowiseAI/Flowise |
+| Langflow | 워크플로우 빌더 검토 | 검토만 (미채택 — Python 서버 필요) | MIT | https://github.com/langflow-ai/langflow |
+| n8n | 워크플로우 빌더 검토 | 검토만 (미채택 — 계속 켜져 있는 서버 + DB 필요) | Sustainable Use License | https://github.com/n8n-io/n8n |
+| Sim Studio | 워크플로우 빌더 검토 | 검토만 (미채택 — 외부 실행 서비스 의존) | Apache 2.0 | https://github.com/simstudioai/sim |
+| 자체 자산 (people-insight · oss-agent-lab · easy-slides · FlowDesk · Plaud Transcribe Studio) | 디자인 토큰·RAG·라우터 아이디어·PPTX 생성 패턴·전사 입력 형태 | 참고 | 자체 자산 / 참고 서비스 | — |
+
 ## 직접 실행
 
 ### 로컬
