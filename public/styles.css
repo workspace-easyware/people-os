@@ -309,6 +309,11 @@ li.decisive-src{border-left:3px solid var(--color-ok-line)}
   #tab-home.active{grid-template-columns:minmax(0,1fr)}
   .about-hero{padding:28px 20px}.about-hero h2{font-size:var(--text-3xl)}
   .card{padding:var(--space-4)}
+  .taskrow{row-gap:2px;padding:10px 8px;min-height:48px}
+  .taskrow .t-title{display:-webkit-box;-webkit-line-clamp:2;line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;font-size:var(--text-base);line-height:1.45}
+  #homeEmail .taskrow .t-title{flex:1 1 100%;display:-webkit-box;-webkit-line-clamp:1;line-clamp:1;-webkit-box-orient:vertical;overflow:hidden;font-size:var(--text-base);line-height:1.45}
+  #homeEmail .taskrow .badge{max-width:60%;overflow:hidden;text-overflow:ellipsis}
+  #homeEmail .taskrow .t-src{margin-left:auto;flex-shrink:0}
 }
 
 /* 페이지 내 확인 대화상자·토스트 (public/ui-dialog.js, 2026-11-21 — 네이티브 confirm 대체) */
