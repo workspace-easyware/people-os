@@ -31,6 +31,8 @@ export type EmailRouteEnv = {
 export type EmailHooks = {
   draftReply?: (env: EmailRouteEnv, email: EmailRow) => Promise<string>;
   indexToPersonalRag?: (env: EmailRouteEnv, email: EmailRow) => Promise<{ docId: string; chunks: number; indexError?: string }>;
+  /** 완전 삭제 시 색인된 개인 RAG 문서를 지운다 (벡터·청크·doc_nodes·R2·documents 행). */
+  purgeIndexedDoc?: (env: EmailRouteEnv, docId: string, errors: string[]) => Promise<void>;
 };
 let hooks: EmailHooks = {};
 export function setEmailHooks(h: EmailHooks) { hooks = h; }
@@ -43,8 +45,39 @@ export type EmailRow = {
   subject: string; body_text: string | null; body_html: string | null; received_at: string; message_id: string | null;
   thread_id: string | null; is_read: number; is_starred: number; labels: string | null; raw_r2_key: string | null;
   raw_size: number | null; parse_error: string | null; ai_draft: string | null; ai_draft_at: string | null;
-  indexed_doc_id: string | null;
+  indexed_doc_id: string | null; deleted_at: string | null;
 };
+
+export const TRASH_DAYS = 7;
+
+/** 완전 삭제: 첨부 R2·행 → 원문 R2 → 색인된 개인 RAG 문서 → emails 행. 없는 객체는 무시(멱등). 단계 실패는 errors에 모으고 계속한다. */
+export async function purgeEmail(env: EmailRouteEnv, row: { id: string; raw_r2_key: string | null; indexed_doc_id: string | null }): Promise<string[]> {
+  const errors: string[] = [];
+  const atts = await env.DB.prepare("SELECT r2_key FROM email_attachments WHERE email_id = ?").bind(row.id).all<{ r2_key: string }>();
+  for (const a of atts.results || []) {
+    try { await env.FILES.delete(a.r2_key); } catch (e) { errors.push(`att: ${e instanceof Error ? e.message : String(e)}`); }
+  }
+  await env.DB.prepare("DELETE FROM email_attachments WHERE email_id = ?").bind(row.id).run();
+  if (row.raw_r2_key) {
+    try { await env.FILES.delete(row.raw_r2_key); } catch (e) { errors.push(`raw: ${e instanceof Error ? e.message : String(e)}`); }
+  }
+  if (row.indexed_doc_id && hooks.purgeIndexedDoc) {
+    try { await hooks.purgeIndexedDoc(env, row.indexed_doc_id, errors); } catch (e) { errors.push(`doc: ${e instanceof Error ? e.message : String(e)}`); }
+  }
+  await env.DB.prepare("DELETE FROM emails WHERE id = ?").bind(row.id).run();
+  return errors;
+}
+
+/** 7일 지난 휴지통 메일 자동 완전 삭제 (15분 틱). 한 번에 최대 50통. */
+export async function sweepEmailTrash(env: EmailRouteEnv): Promise<number> {
+  const cutoff = new Date(Date.now() - TRASH_DAYS * 86400_000).toISOString();
+  const rows = await env.DB.prepare(
+    "SELECT id, raw_r2_key, indexed_doc_id FROM emails WHERE deleted_at IS NOT NULL AND deleted_at < ? LIMIT 50",
+  ).bind(cutoff).all<{ id: string; raw_r2_key: string | null; indexed_doc_id: string | null }>();
+  let n = 0;
+  for (const r of rows.results || []) { await purgeEmail(env, r); n++; }
+  return n;
+}
 
 function fail(c: C, status: number, error: string) {
   return c.json({ ok: false, error }, status as 400);
@@ -77,7 +110,7 @@ function paging(c: C): { limit: number; offset: number; page: number } {
 }
 
 const LIST_COLS = `e.id, e.owner_id, e.direction, e.from_addr, e.to_addr, e.subject, substr(COALESCE(e.body_text, ''), 1, 160) AS snippet,
-  e.received_at, e.is_read, e.is_starred, e.thread_id, e.parse_error IS NOT NULL AS has_parse_error,
+  e.received_at, e.deleted_at, e.is_read, e.is_starred, e.thread_id, e.parse_error IS NOT NULL AS has_parse_error,
   (SELECT COUNT(*) FROM email_attachments a WHERE a.email_id = e.id) AS attachments,
   u.name AS owner_name, u.email AS owner_email`;
 
@@ -94,13 +127,14 @@ async function listQuery(c: C, v: SessionUser, extraSql: string, extraBinds: unk
   const { limit, offset, page } = paging(c);
   const sc = scopeClause(v, c.req.query("scope"));
   const where = `${sc.sql}${extraSql ? " AND " + extraSql : ""}`;
+  const trash = extraSql.includes("e.deleted_at IS NOT NULL");
   const rows = await c.env.DB.prepare(
     `SELECT ${LIST_COLS} FROM emails e LEFT JOIN users u ON u.id = e.owner_id WHERE ${where}
-     ORDER BY e.received_at DESC, e.id DESC LIMIT ? OFFSET ?`,
+     ORDER BY ${trash ? "e.deleted_at" : "e.received_at"} DESC, e.id DESC LIMIT ? OFFSET ?`,
   ).bind(...sc.binds, ...extraBinds, limit + 1, offset).all<Record<string, unknown>>();
   const list = rows.results || [];
   const unread = await c.env.DB.prepare(
-    `SELECT COUNT(*) AS n FROM emails e WHERE ${sc.sql} AND e.direction = 'in' AND e.is_read = 0`,
+    `SELECT COUNT(*) AS n FROM emails e WHERE ${sc.sql} AND e.direction = 'in' AND e.is_read = 0 AND e.deleted_at IS NULL`,
   ).bind(...sc.binds).first<{ n: number }>();
   return {
     ok: true, page, limit, hasMore: list.length > limit,
@@ -114,7 +148,8 @@ emailApp.get("/inbox", async (c) => {
   const v = await viewerOf(c);
   if (!v) return fail(c, 401, "로그인이 필요합니다.");
   const folder = c.req.query("folder") || "in";
-  const extra = folder === "out" ? "e.direction = 'out'" : folder === "starred" ? "e.is_starred = 1" : "e.direction = 'in'";
+  const extra = folder === "trash" ? "e.deleted_at IS NOT NULL"
+    : "e.deleted_at IS NULL AND " + (folder === "out" ? "e.direction = 'out'" : folder === "starred" ? "e.is_starred = 1" : "e.direction = 'in'");
   try {
     return c.json(await listQuery(c, v, extra, []));
   } catch (e) {
@@ -131,7 +166,7 @@ emailApp.get("/search", async (c) => {
   const like = "%" + q.replace(/[\\%_]/g, (m) => "\\" + m) + "%";
   try {
     const out = await listQuery(c, v,
-      "(e.subject LIKE ? ESCAPE '\\' OR e.body_text LIKE ? ESCAPE '\\' OR e.from_addr LIKE ? ESCAPE '\\' OR e.to_addr LIKE ? ESCAPE '\\')",
+      "e.deleted_at IS NULL AND (e.subject LIKE ? ESCAPE '\\' OR e.body_text LIKE ? ESCAPE '\\' OR e.from_addr LIKE ? ESCAPE '\\' OR e.to_addr LIKE ? ESCAPE '\\')",
       [like, like, like, like]);
     return c.json({ ...out, q });
   } catch (e) {
@@ -364,4 +399,46 @@ emailApp.post("/:id/index", async (c) => {
   const r = await hooks.indexToPersonalRag(c.env, row);
   await c.env.DB.prepare("UPDATE emails SET indexed_doc_id = ? WHERE id = ?").bind(r.docId, row.id).run();
   return c.json({ ok: true, ...r });
+});
+
+// ---- 휴지통 (2026-11-26, migration 0047): 소프트 삭제 → 복원 / 완전 삭제 / 비우기. 7일 뒤 자동 완전 삭제는 15분 크론 틱 (index.ts). ----
+emailApp.post("/trash/empty", async (c) => {
+  const v = await viewerOf(c);
+  if (!v) return fail(c, 401, "로그인이 필요합니다.");
+  const sc = scopeClause(v, c.req.query("scope"));
+  const rows = await c.env.DB.prepare(
+    `SELECT e.id, e.raw_r2_key, e.indexed_doc_id FROM emails e WHERE ${sc.sql} AND e.deleted_at IS NOT NULL LIMIT 200`,
+  ).bind(...sc.binds).all<{ id: string; raw_r2_key: string | null; indexed_doc_id: string | null }>();
+  const errors: string[] = [];
+  let purged = 0;
+  for (const r of rows.results || []) { errors.push(...(await purgeEmail(c.env, r))); purged++; }
+  return c.json({ ok: true, purged, errors });
+});
+
+emailApp.post("/:id/delete", async (c) => {
+  const v = await viewerOf(c);
+  if (!v) return fail(c, 401, "로그인이 필요합니다.");
+  const row = await loadVisible(c, v, c.req.param("id"));
+  if (!row) return fail(c, 404, "메일을 찾을 수 없습니다.");
+  if (!row.deleted_at) await c.env.DB.prepare("UPDATE emails SET deleted_at = ? WHERE id = ?").bind(new Date().toISOString(), row.id).run();
+  return c.json({ ok: true });
+});
+
+emailApp.post("/:id/restore", async (c) => {
+  const v = await viewerOf(c);
+  if (!v) return fail(c, 401, "로그인이 필요합니다.");
+  const row = await loadVisible(c, v, c.req.param("id"));
+  if (!row) return fail(c, 404, "메일을 찾을 수 없습니다.");
+  if (!row.deleted_at) return fail(c, 400, "휴지통에 있는 메일이 아닙니다.");
+  await c.env.DB.prepare("UPDATE emails SET deleted_at = NULL WHERE id = ?").bind(row.id).run();
+  return c.json({ ok: true, folder: row.direction === "out" ? "out" : "in" });
+});
+
+emailApp.post("/:id/purge", async (c) => {
+  const v = await viewerOf(c);
+  if (!v) return fail(c, 401, "로그인이 필요합니다.");
+  const row = await loadVisible(c, v, c.req.param("id"));
+  if (!row) return fail(c, 404, "메일을 찾을 수 없습니다.");
+  if (!row.deleted_at) return fail(c, 400, "휴지통에 있는 메일만 완전 삭제할 수 있습니다.");
+  return c.json({ ok: true, errors: await purgeEmail(c.env, row) });
 });

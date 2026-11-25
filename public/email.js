@@ -29,7 +29,7 @@ function emailOpen() {
 }
 function emailSetFolder(f) {
   emailFolder = f; emailQuery = ''; $('emailSearch').value = '';
-  ['in', 'starred', 'out'].forEach(x => $('emailFolder-' + x).setAttribute('aria-selected', x === f ? 'true' : 'false'));
+  ['in', 'starred', 'out', 'trash'].forEach(x => $('emailFolder-' + x).setAttribute('aria-selected', x === f ? 'true' : 'false'));
   emailShow('list');
   emailLoad(1);
 }
@@ -51,9 +51,11 @@ async function emailLoad(page) {
   $('emailMyAddr').textContent = j.address || '—';
   $('emailFromAddr').textContent = j.address || '—';
   emailBadge(j.unread);
-  const head = emailQuery ? `<p class="small">“${esc(emailQuery)}” 검색 결과</p>` : '';
+  const inTrash = emailFolder === 'trash' && !emailQuery;
+  const head = emailQuery ? `<p class="small">“${esc(emailQuery)}” 검색 결과</p>`
+    : inTrash && j.emails.length ? `<div class="btnrow"><span class="small">휴지통의 메일은 7일 뒤 완전히 삭제됩니다.</span><button class="secondary" type="button" onclick="emailEmptyTrash()">휴지통 비우기</button></div>` : '';
   if (!j.emails.length) {
-    $('emailList').innerHTML = head + `<p class="small">${emailQuery ? '검색 결과가 없습니다.' : emailFolder === 'out' ? '보낸 메일이 없습니다.' : '메일이 없습니다. ' + esc(j.address || '') + '로 받은 메일이 여기에 쌓입니다.'}</p>`;
+    $('emailList').innerHTML = head + `<p class="small">${emailQuery ? '검색 결과가 없습니다.' : inTrash ? '휴지통이 비어 있습니다.' : emailFolder === 'out' ? '보낸 메일이 없습니다.' : '메일이 없습니다. ' + esc(j.address || '') + '로 받은 메일이 여기에 쌓입니다.'}</p>`;
   } else {
     $('emailList').innerHTML = head + '<div class="email-list">' + j.emails.map(m => {
       const who = m.direction === 'out' ? '받는 사람: ' + emailName(m.to_addr) : emailName(m.from_addr);
@@ -62,13 +64,43 @@ async function emailLoad(page) {
         <button type="button" class="email-star${m.is_starred ? ' on' : ''}" title="별표" aria-label="별표" aria-pressed="${m.is_starred ? 'true' : 'false'}" onclick="event.stopPropagation();emailStar('${escAttr(m.id)}', this)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden="true"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg></button>
         <div class="email-from">${unread ? '<span class="email-dot" aria-label="안 읽음"></span>' : ''}${esc(who)}</div>
         <div class="email-subj"><b>${esc(m.subject || '(제목 없음)')}</b> <span class="small">${esc(m.snippet || '')}</span></div>
-        <div class="email-meta">${m.attachments ? '<svg class="email-clip" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" role="img" aria-label="첨부 있음"><path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg>' : ''}${m.owner !== undefined ? `<span class="badge">${esc(m.owner || '공용·미지정')}</span> ` : ''}${esc(emailFmt(m.received_at))}</div>
+        <div class="email-meta">${m.attachments ? '<svg class="email-clip" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" role="img" aria-label="첨부 있음"><path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg>' : ''}${m.owner !== undefined ? `<span class="badge">${esc(m.owner || '공용·미지정')}</span> ` : ''}${m.deleted_at ? esc(emailFmt(m.deleted_at)) + ' 삭제 · ' + emailTrashLeft(m.deleted_at) + '일 후 완전 삭제' : esc(emailFmt(m.received_at))}</div>
       </div>`;
     }).join('') + '</div>';
   }
   $('emailPager').innerHTML =
     (emailPage > 1 ? `<button class="secondary" type="button" onclick="emailLoad(${emailPage - 1})">← 이전</button>` : '') +
     (j.hasMore ? `<button class="secondary" type="button" onclick="emailLoad(${emailPage + 1})">다음 →</button>` : '');
+}
+function emailTrashLeft(deletedAt) {
+  const left = 7 - Math.floor((Date.now() - new Date(deletedAt).getTime()) / 86400000);
+  return Math.max(0, Math.min(7, left));
+}
+function emailAfterChange() {
+  emailShow('list');
+  emailLoad(emailPage);
+  if (typeof loadHome === 'function') loadHome();
+}
+async function emailTrashAction(path, confirmMsg, opts, okMsg) {
+  if (confirmMsg && !(await uiConfirm(confirmMsg, opts))) return;
+  let j;
+  try { j = await api(path, { method: 'POST', body: '{}' }); } catch { j = { ok: false, error: '네트워크 오류' }; }
+  if (!j.ok) return uiToast(j.error || '실패했습니다.', true);
+  uiToast(okMsg);
+  emailAfterChange();
+}
+function emailDelete(id) {
+  return emailTrashAction(`/api/email/${encodeURIComponent(id)}/delete`, '휴지통으로 이동합니다. 계속할까요?', { title: '메일 삭제', okText: '삭제' }, '휴지통으로 이동했습니다.');
+}
+function emailRestore(id) {
+  return emailTrashAction(`/api/email/${encodeURIComponent(id)}/restore`, null, null, '메일을 복원했습니다.');
+}
+function emailPurge(id) {
+  return emailTrashAction(`/api/email/${encodeURIComponent(id)}/purge`, '완전히 삭제합니다. 복구할 수 없습니다. 계속할까요?', { title: '완전 삭제', okText: '완전 삭제', danger: true }, '완전히 삭제했습니다.');
+}
+function emailEmptyTrash() {
+  const scope = $('emailScope').style.display === 'none' ? '' : '?scope=' + encodeURIComponent($('emailScope').value);
+  return emailTrashAction('/api/email/trash/empty' + scope, '휴지통을 모두 비웁니다. 복구할 수 없습니다. 계속할까요?', { title: '휴지통 비우기', okText: '비우기', danger: true }, '휴지통을 비웠습니다.');
 }
 function emailBadge(n) {
   const b = $('emailUnreadBadge');
@@ -90,13 +122,15 @@ async function emailView(id) {
   if (!j.ok) { card.innerHTML = `<p class="small">${esc(j.error || '불러오지 못했습니다.')}</p><button class="secondary" onclick="emailShow('list')">← 목록</button>`; return; }
   const m = j.email;
   emailCurrent = m;
-  if (m.direction === 'in' && !m.is_read) api(`/api/email/${encodeURIComponent(id)}/read`, { method: 'POST', body: '{}' }).catch(() => {});
+  if (m.direction === 'in' && !m.is_read && !m.deleted_at) api(`/api/email/${encodeURIComponent(id)}/read`, { method: 'POST', body: '{}' }).catch(() => {});
   const atts = (j.attachments || []).map(a =>
     `<li><a href="/api/email/${encodeURIComponent(id)}/attachment/${encodeURIComponent(a.id)}">${esc(a.filename)}</a> <span class="small">${esc(a.content_type || '')} · ${emailSize(a.size)}</span></li>`).join('');
   const thread = (j.thread || []).length > 1 ? `<h3>스레드 (${j.thread.length})</h3><ul class="email-thread">` + j.thread.map(t =>
     `<li${t.id === id ? ' class="cur"' : ''}><a href="#" onclick="event.preventDefault();emailView('${escAttr(t.id)}')">${esc(t.direction === 'out' ? '나 → ' : emailName(t.from_addr) + ' · ')}${esc(t.subject || '(제목 없음)')}</a> <span class="small">${esc(emailFmt(t.received_at))}</span></li>`).join('') + '</ul>' : '';
   card.innerHTML = `
     <div class="btnrow"><button class="secondary" type="button" onclick="emailShow('list');emailLoad(emailPage)">← 목록</button>
+      ${m.deleted_at ? `<button class="secondary" type="button" onclick="emailRestore('${escAttr(id)}')">복원</button>
+      <button class="secondary" type="button" onclick="emailPurge('${escAttr(id)}')">완전 삭제</button>` : `<button class="secondary" type="button" onclick="emailDelete('${escAttr(id)}')">삭제</button>`}
       ${m.direction === 'in' ? `<button class="secondary" type="button" onclick="emailReply()">답장</button>
       <button class="secondary" type="button" id="emailDraftBtn" onclick="emailDraft()">AI 답장 초안</button>` : ''}
       ${m.has_owner ? `<button class="secondary" type="button" id="emailIndexBtn" onclick="emailIndex()"${m.indexed_doc_id ? ' disabled' : ''}>${m.indexed_doc_id ? '개인 업무 검색에 색인됨' : '개인 업무 검색에 넣기'}</button>` : ''}

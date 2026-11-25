@@ -34,7 +34,7 @@ import { authApp } from "./auth-routes";
 import { adminAllowed, getSessionUser, isAdminRequest, secretMatches } from "./auth";
 import { logEvent } from "./obs/log"; // Workers Logs 구조화 로그 (전체 점검 2026-11-18)
 // 메일함 (2026-11-17): Email Routing 수신(email() 핸들러) + Resend 발송 + /api/email/*.
-import { emailApp, setEmailHooks, type EmailRow } from "./email/routes";
+import { emailApp, setEmailHooks, sweepEmailTrash, type EmailRow } from "./email/routes";
 import { handleInboundEmail } from "./email/inbound";
 import { lmsApp } from "./lms/routes";
 import { approvalApp } from "./approval/routes";
@@ -2806,6 +2806,12 @@ app.route("/api/obs", evalsApp);
 setEmailHooks({
   draftReply: async (env, email) => draftEmailReply(env as unknown as Env, email),
   indexToPersonalRag: async (env, email) => indexEmailToPersonalRag(env as unknown as Env, email),
+  // 메일 완전 삭제 (2026-11-26): 색인된 개인 RAG 문서를 기존 purgeDocument로 지운다 (벡터·R2·chunks·doc_nodes·documents).
+  purgeIndexedDoc: async (env, docId, errors) => {
+    const doc = await env.DB.prepare("SELECT r2_key, source_r2_key FROM documents WHERE id = ?").bind(docId)
+      .first<{ r2_key: string | null; source_r2_key: string | null }>();
+    if (doc) await purgeDocument(env as unknown as Env, docId, doc, errors);
+  },
 });
 app.route("/api/email", emailApp);
 app.route("/api/lms", lmsApp); // 강의실 (2026-11-17)
@@ -3033,6 +3039,8 @@ export default {
       // 캘린더 C5·C6 (2026-11-22): 일정 알림 + 구글 연결 일정 대조. 새 크론을 더하지 않고 이 15분 틱에 얹는다
       // (그래서 다이제스트로 떨어질 일이 없고, 계정의 Cron Trigger 수도 그대로다). 실패는 로그만 — 다른 작업을 막지 않는다.
       ctx.waitUntil(runCalendarTick(env as never, new Date(event.scheduledTime)).catch((e) => console.error("[calendar] tick failed", e instanceof Error ? e.message : String(e))));
+      // 메일 휴지통 (2026-11-26): 7일 지난 휴지통 메일 자동 완전 삭제. 새 크론 없이 이 틱에 얹는다 (인덱스 탄 SELECT 1회, 멱등).
+      ctx.waitUntil(sweepEmailTrash(env as never).catch((e) => console.error("[email] trash sweep failed", e instanceof Error ? e.message : String(e))));
       return;
     }
     ctx.waitUntil(generateDigest(env, new Date(event.scheduledTime)));
