@@ -1570,7 +1570,7 @@ app.post("/api/coaching/reflect", async (c) => {
   if (!(await loggedInOrAdmin(c))) return c.json({ ok: false, error: "로그인이 필요합니다." }, 401);
   const body = await c.req.json().catch(() => ({})) as { transcript?: string; sessionId?: string; counterpartId?: unknown };
   if (body.transcript !== undefined && typeof body.transcript !== "string") return c.json({ ok: false, error: "transcript must be a string" }, 400);
-  if (body.sessionId !== undefined && (typeof body.sessionId !== "string" || body.sessionId.length > 200)) return c.json({ ok: false, error: "sessionId is invalid" }, 400);
+  if (body.sessionId !== undefined && body.sessionId !== null && (typeof body.sessionId !== "string" || body.sessionId.length > 200)) return c.json({ ok: false, error: "sessionId is invalid" }, 400);
   const transcript = body.transcript || coachingTranscript();
   if (transcript.trim().length < 10) return c.json({ ok: false, error: "transcript is required" }, 400);
   // 전사본 전체가 reflections 행에 저장된다 (LLM에는 앞 4000자만). D1 행 한도를 넘지 않게 500,000자로 막는다.
